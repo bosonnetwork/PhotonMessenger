@@ -35,6 +35,10 @@ object MessagingStoreFactory {
     fun create(context: Context, vertx: Vertx): MessagingStore =
         RoomMessagingStore(vertx, PhotonDatabase.create(context))
 
+    /** Named persistent backend (isolated on-disk store), used by the restart/persistence harness. */
+    fun create(context: Context, vertx: Vertx, dbName: String): MessagingStore =
+        RoomMessagingStore(vertx, PhotonDatabase.create(context, dbName))
+
     /** In-memory backend for tests/integration harnesses. */
     fun createInMemory(context: Context, vertx: Vertx): MessagingStore =
         RoomMessagingStore(vertx, PhotonDatabase.createInMemory(context))

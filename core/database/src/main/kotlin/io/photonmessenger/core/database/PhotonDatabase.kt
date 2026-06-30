@@ -53,8 +53,14 @@ abstract class PhotonDatabase : RoomDatabase() {
         private const val DB_NAME = "photonmessaging-room.db"
 
         /** Builds the Room database; keeps Room construction inside this module. */
-        fun create(context: Context): PhotonDatabase =
-            Room.databaseBuilder(context.applicationContext, PhotonDatabase::class.java, DB_NAME).build()
+        fun create(context: Context): PhotonDatabase = create(context, DB_NAME)
+
+        /**
+         * Builds a named, persistent Room database. Lets a caller (e.g. an integration harness that
+         * restarts a client, or a future multi-account split) keep isolated stores on disk.
+         */
+        fun create(context: Context, dbName: String): PhotonDatabase =
+            Room.databaseBuilder(context.applicationContext, PhotonDatabase::class.java, dbName).build()
 
         /** In-memory database for tests/integration harnesses (no persistence across process death). */
         fun createInMemory(context: Context): PhotonDatabase =
