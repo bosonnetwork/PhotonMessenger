@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # The Boson messaging-client / ion-store-client are resolved from the local Maven repo.
+      # CI must publish them to ~/.m2 first (clone + `mvn install` of the Boson client modules),
+      # or restore a cached ~/.m2/repository/io/bosonnetwork snapshot. Wire this in M0/X-O1.
+      - name: Restore Boson artifacts (mavenLocal)
+        run: echo "TODO: install boson-messaging-client / boson-ion-store-client into ~/.m2"
+
+      - name: Assemble debug
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --no-daemon
+
+      - name: Lint
+        run: ./gradlew lintDebug --no-daemon

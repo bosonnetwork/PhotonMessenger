@@ -1,0 +1,23 @@
+# Detekt configuration for PhotonMessenger (X-* static analysis track).
+# Run with: ./gradlew detekt  (after applying the detekt plugin per module in M0/CI hardening)
+build:
+  maxIssues: 0
+
+complexity:
+  LongMethod:
+    threshold: 80
+  LongParameterList:
+    functionThreshold: 8
+    constructorThreshold: 10
+
+style:
+  MaxLineLength:
+    maxLineLength: 120
+  MagicNumber:
+    active: false
+
+naming:
+  active: true
+
+comments:
+  active: false

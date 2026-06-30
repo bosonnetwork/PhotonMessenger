@@ -1,0 +1,141 @@
+/*
+ * Copyright (c) 2023 -      bosonnetwork.io
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+package io.photonmessenger.core.boson
+
+import io.photonmessenger.core.model.ConnectionState
+import io.photonmessenger.core.model.ServiceCoords
+import io.bosonnetwork.ionstore.IonStore
+import io.bosonnetwork.photonmessaging.ConnectionListener
+import io.bosonnetwork.photonmessaging.MessagingClient
+import io.bosonnetwork.photonmessaging.MessagingStore
+import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+
+/**
+ * Owns the live MessagingClient + IonStore for the signed-in session (spec 1.7, 4.4, M1-14/15/16).
+ * Built lazily once keys + discovered coordinates exist; created with node == null (no embedded DHT).
+ * Exposes connection state and a simple reconnect-with-backoff loop (M1-19).
+ *
+ * NOTE: runtime depends on the persistence backend (D-5); against the current `jdbc:sqlite:` config
+ * `start()` will fail on-device until that is resolved. The construction/lifecycle wiring is complete.
+ */
+class BosonSessionManager(
+    private val factory: BosonClientFactory,
+    private val keyManager: KeyManager,
+    private val store: MessagingStore,
+    private val filesDir: File,
+) {
+    private val scope = CoroutineScope(SupervisorJob())
+
+    private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
+    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+
+    @Volatile
+    var messagingClient: MessagingClient? = null
+        private set
+
+    @Volatile
+    var ionStore: IonStore? = null
+        private set
+
+    @Volatile
+    private var shouldStayConnected = false
+
+    private val connectionListener = object : ConnectionListener {
+        override fun onConnecting() { _connectionState.value = ConnectionState.CONNECTING }
+        override fun onConnected() { _connectionState.value = ConnectionState.CONNECTED }
+        override fun onReady() { _connectionState.value = ConnectionState.READY }
+        override fun onDisconnected() {
+            _connectionState.value = ConnectionState.DISCONNECTED
+            if (shouldStayConnected) scheduleReconnect()
+        }
+    }
+
+    /** Builds the clients from discovered coordinates and starts the messaging connection. */
+    suspend fun connect(coords: ServiceCoords) {
+        val userKey = requireNotNull(keyManager.userKeyPair()) {
+            "User key missing; identity binding must complete before connecting"
+        }
+        val deviceKey = keyManager.ensureDeviceKey()
+        val deviceKey64 = BosonCrypto.privateKeyBytes64(deviceKey)
+
+        val dataDir = File(filesDir, "boson").apply { mkdirs() }.toPath()
+
+        val config = factory.buildConfiguration(
+            coords = coords,
+            userKey64 = BosonCrypto.privateKeyBytes64(userKey),
+            deviceKey64 = deviceKey64,
+            dataDir = dataDir,
+            store = store,
+        )
+
+        val client = factory.createMessagingClient(config).also { messagingClient = it }
+        ionStore = factory.buildIonStore(
+            coords = coords,
+            userId = BosonCrypto.idOf(userKey).toString(),
+            deviceKey64 = deviceKey64,
+        )
+
+        client.addConnectionListener(connectionListener)
+        shouldStayConnected = true
+        _connectionState.value = ConnectionState.CONNECTING
+        client.start().awaitResult()
+    }
+
+    suspend fun disconnect() {
+        shouldStayConnected = false
+        messagingClient?.let { client ->
+            client.removeConnectionListener(connectionListener)
+            runCatching { client.stop().awaitResult() }
+        }
+        messagingClient = null
+        ionStore = null
+        _connectionState.value = ConnectionState.DISCONNECTED
+    }
+
+    private fun scheduleReconnect() {
+        scope.launch {
+            var attempt = 0
+            while (shouldStayConnected && messagingClient?.isConnected != true) {
+                val backoff = minOf(MAX_BACKOFF_MS, BASE_BACKOFF_MS shl attempt.coerceAtMost(MAX_SHIFT))
+                delay(backoff)
+                if (!shouldStayConnected) return@launch
+                val ok = runCatching { messagingClient?.start()?.awaitResult() }.isSuccess
+                if (ok) return@launch
+                attempt++
+            }
+        }
+    }
+
+    private companion object {
+        const val BASE_BACKOFF_MS = 1_000L
+        const val MAX_BACKOFF_MS = 60_000L
+        const val MAX_SHIFT = 6
+    }
+}

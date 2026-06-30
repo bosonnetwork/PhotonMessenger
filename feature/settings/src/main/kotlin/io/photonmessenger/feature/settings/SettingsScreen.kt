@@ -1,0 +1,418 @@
+/*
+ * Copyright (c) 2023 -      bosonnetwork.io
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+package io.photonmessenger.feature.settings
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
+import io.photonmessenger.core.model.NotificationPreferences
+import io.photonmessenger.core.model.ThemeMode
+import io.photonmessenger.feature.settings.model.UiProfile
+
+/** Settings hub: profile, appearance, devices, account (design spec screen 6, 2.6, M6). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsScreen(
+    onOpenDevices: () -> Unit,
+    onSignedOut: () -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val theme by viewModel.theme.collectAsStateWithLifecycle()
+    val notifications by viewModel.notifications.collectAsStateWithLifecycle()
+    val snackbar = remember { SnackbarHostState() }
+
+    LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
+    LaunchedEffect(Unit) { viewModel.signedOut.collect { onSignedOut() } }
+
+    var editing by rememberSaveable { mutableStateOf(false) }
+
+    val pickAvatar = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) viewModel.updateAvatar(uri.toString())
+    }
+
+    Scaffold(
+        topBar = { TopAppBar(title = { Text("Settings") }) },
+        snackbarHost = { SnackbarHost(snackbar) },
+    ) { padding ->
+        Box(Modifier.padding(padding).fillMaxSize()) {
+            when {
+                state.loading && state.profile == null ->
+                    CircularProgressIndicator(Modifier.align(Alignment.Center))
+
+                else -> Column(
+                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                ) {
+                    ProfileHeader(
+                        profile = state.profile,
+                        onChangePhoto = { pickAvatar.launch("image/*") },
+                        onRemovePhoto = { viewModel.removeAvatar() },
+                        onEdit = { editing = true },
+                    )
+                    HorizontalDivider()
+
+                    SectionTitle("Appearance")
+                    ThemeModeRow(theme.mode, viewModel::setThemeMode)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        ListItem(
+                            headlineContent = { Text("Dynamic color") },
+                            supportingContent = { Text("Use colors from your wallpaper") },
+                            trailingContent = {
+                                Switch(
+                                    checked = theme.dynamicColor,
+                                    onCheckedChange = viewModel::setDynamicColor,
+                                    modifier = Modifier.semantics { contentDescription = "Dynamic color" },
+                                )
+                            },
+                        )
+                    }
+                    HorizontalDivider()
+
+                    SectionTitle("Notifications")
+                    NotificationSettings(
+                        prefs = notifications,
+                        onEnabledChange = viewModel::setNotificationsEnabled,
+                        onPreviewChange = viewModel::setNotificationPreview,
+                    )
+                    HorizontalDivider()
+
+                    ListItem(
+                        headlineContent = { Text("Devices & sessions") },
+                        supportingContent = { Text("Manage where you're signed in") },
+                        modifier = Modifier.clickable(onClick = onOpenDevices),
+                    )
+                    HorizontalDivider()
+
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { viewModel.signOut() },
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    ) { Text("Sign out") }
+                }
+            }
+        }
+    }
+
+    if (editing) {
+        EditProfileDialog(
+            profile = state.profile,
+            saving = state.savingProfile,
+            onDismiss = { editing = false },
+            onSave = { name, bio, email ->
+                viewModel.saveProfile(name, bio, email)
+                editing = false
+            },
+        )
+    }
+}
+
+@Composable
+private fun ProfileHeader(
+    profile: UiProfile?,
+    onChangePhoto: () -> Unit,
+    onRemovePhoto: () -> Unit,
+    onEdit: () -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth().padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier
+                .size(96.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onChangePhoto)
+                .semantics { contentDescription = "Change profile photo" },
+            contentAlignment = Alignment.Center,
+        ) {
+            val url = profile?.avatarUrl
+            if (url != null) {
+                AsyncImage(
+                    model = url,
+                    contentDescription = "Profile photo",
+                    modifier = Modifier.size(96.dp).clip(CircleShape),
+                )
+            } else {
+                Icon(
+                    Icons.Filled.Person,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = profile?.name?.takeIf { it.isNotBlank() } ?: "No name set",
+            style = MaterialTheme.typography.titleLarge,
+        )
+        profile?.email?.takeIf { it.isNotBlank() }?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        profile?.bio?.takeIf { it.isNotBlank() }?.let {
+            Spacer(Modifier.height(4.dp))
+            Text(it, style = MaterialTheme.typography.bodyMedium)
+        }
+        profile?.plan?.takeIf { it.isNotBlank() }?.let {
+            Spacer(Modifier.height(4.dp))
+            Text("Plan: $it", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onEdit) { Text("Edit profile") }
+            if (profile?.avatarUrl != null) {
+                TextButton(onClick = onRemovePhoto) { Text("Remove photo") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NotificationSettings(
+    prefs: NotificationPreferences,
+    onEnabledChange: (Boolean) -> Unit,
+    onPreviewChange: (Boolean) -> Unit,
+) {
+    val context = LocalContext.current
+
+    // Re-read OS-level grant/exemption state whenever we return to this screen.
+    var refreshKey by remember { mutableIntStateOf(0) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { refreshKey++ }
+
+    val notificationsAllowed = remember(refreshKey) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+    }
+    val batteryUnrestricted = remember(refreshKey) {
+        val pm = context.getSystemService(PowerManager::class.java)
+        pm?.isIgnoringBatteryOptimizations(context.packageName) ?: true
+    }
+
+    val requestPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { refreshKey++ }
+
+    ListItem(
+        headlineContent = { Text("Message notifications") },
+        supportingContent = { Text("Notify me about new messages") },
+        trailingContent = {
+            Switch(
+                checked = prefs.enabled,
+                onCheckedChange = onEnabledChange,
+                modifier = Modifier.semantics { contentDescription = "Message notifications" },
+            )
+        },
+    )
+    if (prefs.enabled) {
+        ListItem(
+            headlineContent = { Text("Show preview") },
+            supportingContent = { Text("Show sender and message text") },
+            trailingContent = {
+                Switch(
+                    checked = prefs.showPreview,
+                    onCheckedChange = onPreviewChange,
+                    modifier = Modifier.semantics { contentDescription = "Show preview" },
+                )
+            },
+        )
+        if (!notificationsAllowed) {
+            GuidanceCard(
+                title = "Notifications are turned off",
+                body = "Allow notifications so PhotonMessenger can alert you to new messages.",
+                action = "Allow",
+                onClick = { requestPermission.launch(Manifest.permission.POST_NOTIFICATIONS) },
+            )
+        }
+        if (!batteryUnrestricted) {
+            GuidanceCard(
+                title = "Allow background activity",
+                body = "Exempt PhotonMessenger from battery optimization so it stays connected and " +
+                    "delivers messages reliably.",
+                action = "Open settings",
+                onClick = {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+                        )
+                    }
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun GuidanceCard(title: String, body: String, action: String, onClick: () -> Unit) {
+    Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Column(Modifier.padding(16.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(4.dp))
+            Text(body, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = onClick) { Text(action) }
+        }
+    }
+}
+
+@Composable
+private fun ThemeModeRow(current: ThemeMode, onSelect: (ThemeMode) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ThemeMode.entries.forEach { mode ->
+            FilterChip(
+                selected = current == mode,
+                onClick = { onSelect(mode) },
+                label = { Text(mode.label()) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
+    )
+}
+
+@Composable
+private fun EditProfileDialog(
+    profile: UiProfile?,
+    saving: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (name: String, bio: String, email: String) -> Unit,
+) {
+    var name by rememberSaveable { mutableStateOf(profile?.name.orEmpty()) }
+    var bio by rememberSaveable { mutableStateOf(profile?.bio.orEmpty()) }
+    var email by rememberSaveable { mutableStateOf(profile?.email.orEmpty()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit profile") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = { Text("Email") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = bio,
+                    onValueChange = { bio = it },
+                    label = { Text("Bio") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(name.trim(), bio.trim(), email.trim()) },
+                enabled = !saving,
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+private fun ThemeMode.label(): String = when (this) {
+    ThemeMode.SYSTEM -> "System"
+    ThemeMode.LIGHT -> "Light"
+    ThemeMode.DARK -> "Dark"
+}
