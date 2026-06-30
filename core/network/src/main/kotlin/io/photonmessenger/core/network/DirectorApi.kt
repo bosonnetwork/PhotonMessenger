@@ -25,6 +25,7 @@ package io.photonmessenger.core.network
 import io.photonmessenger.core.network.model.AvatarUriDto
 import io.photonmessenger.core.network.model.BindIdentityRequest
 import io.photonmessenger.core.network.model.BindIdentityResponse
+import io.photonmessenger.core.network.model.ClientAuthRequest
 import io.photonmessenger.core.network.model.DeviceDto
 import io.photonmessenger.core.network.model.FinishRegistrationRequest
 import io.photonmessenger.core.network.model.FinishRegistrationResponse
@@ -83,6 +84,10 @@ interface DirectorApi {
     /** Self-contained (non-OAuth) registration of a user + initial device (spec 2.5). Auth-less. */
     @POST("client/usersAndInitialDevice")
     suspend fun register(@Body body: SelfRegisterRequest): TokenDto
+
+    /** Device sign-in: a paired device exchanges a device-key signature for a CWT (spec 2.4). Auth-less. */
+    @POST("client/auth")
+    suspend fun clientAuth(@Body body: ClientAuthRequest): TokenDto
 
     /** Authenticated service discovery (spec 1.7). */
     @GET("client/node")

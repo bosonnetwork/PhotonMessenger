@@ -34,4 +34,8 @@ abstract class SettingsModule {
     @Binds
     @Singleton
     abstract fun bindSettingsRepository(impl: SettingsRepositoryImpl): SettingsRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindDevicePairingRepository(impl: DevicePairingRepositoryImpl): DevicePairingRepository
 }

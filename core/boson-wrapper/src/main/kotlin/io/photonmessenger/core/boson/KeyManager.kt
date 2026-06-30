@@ -51,6 +51,13 @@ class KeyManager(
     fun generateUserKey(): Signature.KeyPair =
         BosonCrypto.generateKeyPair().also { secrets.putBytes(KEY_USER, BosonCrypto.privateKeyBytes64(it)) }
 
+    /**
+     * Persists a user keypair received from another device during multi-device pairing (spec 2.4,
+     * M6-4). [privateKey64] is the libsodium 64-byte (seed || publicKey) form. Overwrites any existing.
+     */
+    fun storeUserKey(privateKey64: ByteArray): Signature.KeyPair =
+        BosonCrypto.keyPairFromPrivate64(privateKey64).also { secrets.putBytes(KEY_USER, privateKey64) }
+
     /** Returns the device keypair, generating and persisting one on first use. */
     fun ensureDeviceKey(): Signature.KeyPair =
         deviceKeyPair() ?: BosonCrypto.generateKeyPair()

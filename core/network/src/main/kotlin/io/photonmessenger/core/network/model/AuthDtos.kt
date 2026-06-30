@@ -76,6 +76,20 @@ data class TokenDto(
 )
 
 /**
+ * POST /api/v1/client/auth device sign-in (Director ClientService.clientAuth). A paired device proves
+ * possession of its device key over a fresh `nonce` to obtain a CWT, without OAuth. `userId`/`deviceId`
+ * are Base58 Boson ids; `nonce`/`deviceSig` are Base64URL-no-pad (the Director's Jackson byte[] codec).
+ * See spec 2.4, M6-4. -> {token}.
+ */
+@Serializable
+data class ClientAuthRequest(
+    val userId: String,
+    val deviceId: String,
+    val nonce: String,
+    val deviceSig: String,
+)
+
+/**
  * POST /api/v1/client/usersAndInitialDevice (self-contained, non-OAuth registration; spec 2.5).
  * `userId`/`deviceId` are Base58 Boson ids; `nonce`/`userSig`/`deviceSig` are Base64 (Jackson decodes
  * a JSON string into byte[] via Base64 on the Director). Used by the headless integration harness.
