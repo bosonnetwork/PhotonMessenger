@@ -19,6 +19,25 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Release signing material is supplied out-of-band (CI secrets or ~/.gradle properties), never
+    // committed. When absent, assembleRelease still builds an unsigned APK so the pipeline is testable.
+    val releaseStoreFile = (project.findProperty("PHOTON_KEYSTORE_FILE") as String?)
+        ?: System.getenv("PHOTON_KEYSTORE_FILE")
+
+    signingConfigs {
+        create("release") {
+            if (releaseStoreFile != null) {
+                storeFile = file(releaseStoreFile)
+                storePassword = (project.findProperty("PHOTON_KEYSTORE_PASSWORD") as String?)
+                    ?: System.getenv("PHOTON_KEYSTORE_PASSWORD")
+                keyAlias = (project.findProperty("PHOTON_KEY_ALIAS") as String?)
+                    ?: System.getenv("PHOTON_KEY_ALIAS")
+                keyPassword = (project.findProperty("PHOTON_KEY_PASSWORD") as String?)
+                    ?: System.getenv("PHOTON_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
@@ -30,6 +49,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            signingConfig = if (releaseStoreFile != null) signingConfigs.getByName("release") else null
         }
     }
 
