@@ -22,8 +22,12 @@
 
 package io.photonmessenger.feature.settings
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -32,6 +36,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -64,6 +69,8 @@ import java.util.Date
 @Composable
 fun DevicesScreen(
     onBack: () -> Unit,
+    onAddDevice: () -> Unit,
+    onApproveDevice: () -> Unit,
     viewModel: DevicesViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -84,21 +91,40 @@ fun DevicesScreen(
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        Box(Modifier.padding(padding).fillMaxSize()) {
-            when {
-                state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                state.error != null -> Text(
-                    state.error ?: "Error",
-                    Modifier.align(Alignment.Center).padding(16.dp),
-                )
-                state.devices.isEmpty() -> Text("No devices", Modifier.align(Alignment.Center))
-                else -> LazyColumn(Modifier.fillMaxSize()) {
-                    items(state.devices, key = { it.deviceId }) { device ->
-                        DeviceRow(device, viewModel)
-                        HorizontalDivider()
+        Column(Modifier.padding(padding).fillMaxSize()) {
+            PairingActions(onAddDevice = onAddDevice, onApproveDevice = onApproveDevice)
+            HorizontalDivider()
+            Box(Modifier.fillMaxSize()) {
+                when {
+                    state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                    state.error != null -> Text(
+                        state.error ?: "Error",
+                        Modifier.align(Alignment.Center).padding(16.dp),
+                    )
+                    state.devices.isEmpty() -> Text("No devices", Modifier.align(Alignment.Center))
+                    else -> LazyColumn(Modifier.fillMaxSize()) {
+                        items(state.devices, key = { it.deviceId }) { device ->
+                            DeviceRow(device, viewModel)
+                            HorizontalDivider()
+                        }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun PairingActions(onAddDevice: () -> Unit, onApproveDevice: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        OutlinedButton(onClick = onAddDevice, modifier = Modifier.weight(1f)) {
+            Text("Add this device")
+        }
+        OutlinedButton(onClick = onApproveDevice, modifier = Modifier.weight(1f)) {
+            Text("Approve a device")
         }
     }
 }

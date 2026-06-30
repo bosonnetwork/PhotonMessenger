@@ -44,4 +44,6 @@ object Routes {
     const val ONBOARDING = "onboarding"
     const val CREATE_CHANNEL = "createChannel"
     const val DEVICES = "devices"
+    const val ADD_DEVICE = "addDevice"
+    const val APPROVE_DEVICE = "approveDevice"
 }

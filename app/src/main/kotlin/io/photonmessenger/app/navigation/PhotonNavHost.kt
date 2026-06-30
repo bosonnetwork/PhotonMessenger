@@ -46,7 +46,9 @@ import io.photonmessenger.feature.contacts.ChannelDetailScreen
 import io.photonmessenger.feature.contacts.ContactsScreen
 import io.photonmessenger.feature.contacts.CreateChannelScreen
 import io.photonmessenger.feature.onboarding.OnboardingScreen
+import io.photonmessenger.feature.settings.ApproveDeviceScreen
 import io.photonmessenger.feature.settings.DevicesScreen
+import io.photonmessenger.feature.settings.PairNewDeviceScreen
 import io.photonmessenger.feature.settings.SettingsScreen
 
 /**
@@ -129,7 +131,23 @@ fun PhotonNavHost(
                 )
             }
             composable(Routes.DEVICES) {
-                DevicesScreen(onBack = { navController.popBackStack() })
+                DevicesScreen(
+                    onBack = { navController.popBackStack() },
+                    onAddDevice = { navController.navigate(Routes.ADD_DEVICE) },
+                    onApproveDevice = { navController.navigate(Routes.APPROVE_DEVICE) },
+                )
+            }
+            composable(Routes.ADD_DEVICE) {
+                PairNewDeviceScreen(
+                    onBack = { navController.popBackStack() },
+                    onPaired = { navController.popBackStack() },
+                )
+            }
+            composable(Routes.APPROVE_DEVICE) {
+                ApproveDeviceScreen(
+                    onBack = { navController.popBackStack() },
+                    onFinished = { navController.popBackStack() },
+                )
             }
             composable(
                 route = "chat/{conversationId}",
