@@ -60,6 +60,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -177,7 +178,11 @@ private fun ContactList(
         items(contacts, key = { it.id }) { contact ->
             var menuOpen by remember(contact.id) { mutableStateOf(false) }
             ListItem(
-                modifier = if (onClick != null) Modifier.clickable { onClick(contact.id) } else Modifier,
+                modifier = if (onClick != null) {
+                    Modifier.clickable(role = Role.Button) { onClick(contact.id) }
+                } else {
+                    Modifier
+                },
                 headlineContent = { Text(contact.displayName) },
                 supportingContent = {
                     val flags = buildList {

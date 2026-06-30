@@ -38,6 +38,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -63,7 +64,7 @@ fun ConversationsScreen(
                 else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(state.conversations, key = { it.id }) { convo ->
                         ListItem(
-                            modifier = Modifier.clickable { onOpenConversation(convo.id) },
+                            modifier = Modifier.clickable(role = Role.Button) { onOpenConversation(convo.id) },
                             headlineContent = { Text(convo.title) },
                             supportingContent = { if (convo.preview.isNotBlank()) Text(convo.preview) },
                         )

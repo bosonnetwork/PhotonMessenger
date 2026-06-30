@@ -58,6 +58,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -139,10 +140,13 @@ private fun DeviceRow(device: UiDevice, viewModel: DevicesViewModel) {
         },
         supportingContent = { Text(device.subtitle()) },
         leadingContent = {
+            // Decorative: the online/offline state is already in the row subtitle, and a disabled
+            // chip would otherwise be announced as "disabled" by TalkBack (X-A1).
             AssistChip(
                 onClick = {},
                 enabled = false,
                 label = { Text(if (device.online) "Online" else "Offline") },
+                modifier = Modifier.clearAndSetSemantics {},
             )
         },
         trailingContent = {

@@ -42,6 +42,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -76,6 +77,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -133,16 +135,11 @@ fun SettingsScreen(
                     SectionTitle("Appearance")
                     ThemeModeRow(theme.mode, viewModel::setThemeMode)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        ListItem(
-                            headlineContent = { Text("Dynamic color") },
-                            supportingContent = { Text("Use colors from your wallpaper") },
-                            trailingContent = {
-                                Switch(
-                                    checked = theme.dynamicColor,
-                                    onCheckedChange = viewModel::setDynamicColor,
-                                    modifier = Modifier.semantics { contentDescription = "Dynamic color" },
-                                )
-                            },
+                        SwitchRow(
+                            title = "Dynamic color",
+                            subtitle = "Use colors from your wallpaper",
+                            checked = theme.dynamicColor,
+                            onCheckedChange = viewModel::setDynamicColor,
                         )
                     }
                     HorizontalDivider()
@@ -158,7 +155,7 @@ fun SettingsScreen(
                     ListItem(
                         headlineContent = { Text("Devices & sessions") },
                         supportingContent = { Text("Manage where you're signed in") },
-                        modifier = Modifier.clickable(onClick = onOpenDevices),
+                        modifier = Modifier.clickable(role = Role.Button, onClick = onOpenDevices),
                     )
                     HorizontalDivider()
 
@@ -275,28 +272,18 @@ private fun NotificationSettings(
         ActivityResultContracts.RequestPermission(),
     ) { refreshKey++ }
 
-    ListItem(
-        headlineContent = { Text("Message notifications") },
-        supportingContent = { Text("Notify me about new messages") },
-        trailingContent = {
-            Switch(
-                checked = prefs.enabled,
-                onCheckedChange = onEnabledChange,
-                modifier = Modifier.semantics { contentDescription = "Message notifications" },
-            )
-        },
+    SwitchRow(
+        title = "Message notifications",
+        subtitle = "Notify me about new messages",
+        checked = prefs.enabled,
+        onCheckedChange = onEnabledChange,
     )
     if (prefs.enabled) {
-        ListItem(
-            headlineContent = { Text("Show preview") },
-            supportingContent = { Text("Show sender and message text") },
-            trailingContent = {
-                Switch(
-                    checked = prefs.showPreview,
-                    onCheckedChange = onPreviewChange,
-                    modifier = Modifier.semantics { contentDescription = "Show preview" },
-                )
-            },
+        SwitchRow(
+            title = "Show preview",
+            subtitle = "Show sender and message text",
+            checked = prefs.showPreview,
+            onCheckedChange = onPreviewChange,
         )
         if (!notificationsAllowed) {
             GuidanceCard(
@@ -360,6 +347,30 @@ private fun SectionTitle(text: String) {
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
+    )
+}
+
+/**
+ * A settings toggle whose entire row is the touch target with `Role.Switch` semantics, so TalkBack
+ * announces the label plus on/off state and the 48dp+ row (not just the switch thumb) is actionable
+ * (X-A1). The [Switch] is presentational (`onCheckedChange = null`); the row drives the change.
+ */
+@Composable
+private fun SwitchRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    ListItem(
+        modifier = Modifier.toggleable(
+            value = checked,
+            onValueChange = onCheckedChange,
+            role = Role.Switch,
+        ),
+        headlineContent = { Text(title) },
+        supportingContent = { Text(subtitle) },
+        trailingContent = { Switch(checked = checked, onCheckedChange = null) },
     )
 }
 
