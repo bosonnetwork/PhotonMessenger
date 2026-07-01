@@ -97,7 +97,8 @@ data class ClientAuthRequest(
 @Serializable
 data class SelfRegisterRequest(
     val userId: String,
-    val passphrase: String,
+    /** Optional at signup; when set the account becomes passphrase-protected (Director change). */
+    val passphrase: String? = null,
     val userName: String? = null,
     val email: String? = null,
     val bio: String? = null,

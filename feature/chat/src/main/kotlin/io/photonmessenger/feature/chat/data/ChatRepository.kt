@@ -27,16 +27,19 @@ import io.photonmessenger.core.boson.awaitResult
 import io.photonmessenger.core.model.AppError
 import io.photonmessenger.feature.chat.model.AttachmentCarrier
 import io.photonmessenger.feature.chat.model.AttachmentSource
+import io.photonmessenger.feature.chat.model.ChatHeader
 import io.photonmessenger.feature.chat.model.UiAttachment
 import io.photonmessenger.feature.chat.model.UiConversation
 import io.photonmessenger.feature.chat.model.UiMessage
 import io.photonmessenger.feature.chat.model.chooseCarrier
 import io.photonmessenger.feature.chat.model.kindOf
 import io.photonmessenger.feature.chat.model.remoteAttachmentToMap
+import io.photonmessenger.feature.chat.model.shortId
 import io.photonmessenger.feature.chat.model.toUi
 import io.bosonnetwork.Id
 import io.bosonnetwork.ionstore.IonStore
 import io.bosonnetwork.ionstore.PutOptions
+import io.bosonnetwork.photonmessaging.Channel
 import io.bosonnetwork.photonmessaging.ContentDisposition
 import io.bosonnetwork.photonmessaging.Message
 import io.bosonnetwork.photonmessaging.MessageListener
@@ -55,6 +58,9 @@ import kotlinx.coroutines.launch
  */
 interface ChatRepository {
     fun conversations(): Flow<List<UiConversation>>
+
+    /** Resolves the chat header (title + channel member count) for a conversation (M4-3). */
+    suspend fun header(conversationId: String): Result<ChatHeader>
 
     /** Live message stream for a conversation: an initial page plus appended live messages. */
     fun messages(conversationId: String): Flow<List<UiMessage>>
@@ -117,6 +123,26 @@ class ChatRepositoryImpl @Inject constructor(
         }
         client.addMessageListener(listener)
         awaitClose { client.removeMessageListener(listener) }
+    }
+
+    override suspend fun header(conversationId: String): Result<ChatHeader> = runCatching {
+        val client = client()
+        val id = parseId(conversationId)
+        val contact = client.getContact(id).awaitResult().orElse(null)
+        if (contact is Channel) {
+            contact.loadMembers().awaitResult()
+            ChatHeader(
+                title = contact.name.orElse(null)?.takeIf { it.isNotBlank() } ?: shortId(conversationId),
+                subtitle = memberCountLabel(contact.members.size),
+                isChannel = true,
+            )
+        } else {
+            val convoTitle = client.getConversation(id).awaitResult().orElse(null)?.title?.takeIf { it.isNotBlank() }
+            val title = convoTitle
+                ?: contact?.name?.orElse(null)?.takeIf { it.isNotBlank() }
+                ?: shortId(conversationId)
+            ChatHeader(title = title, isChannel = false)
+        }
     }
 
     override fun messages(conversationId: String): Flow<List<UiMessage>> = callbackFlow {
@@ -252,6 +278,9 @@ class ChatRepositoryImpl @Inject constructor(
         } catch (e: Exception) {
             throw AppError.InvalidInput("Invalid conversation ID", e)
         }
+
+    private fun memberCountLabel(count: Int): String =
+        if (count == 1) "1 member" else "$count members"
 
     /** Splits an `ions://<peerId>/<refId>` URI into (peerId, refId). */
     private fun parseIonUri(uri: String): Pair<Id, Id> {

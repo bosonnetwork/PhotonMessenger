@@ -33,6 +33,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.AddLink
 import androidx.compose.material.icons.outlined.GroupAdd
 import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material3.AlertDialog
@@ -82,9 +83,13 @@ fun ContactsScreen(
     val snackbar = remember { SnackbarHostState() }
     var selectedTab by remember { mutableIntStateOf(0) }
     var showAddDialog by remember { mutableStateOf(false) }
+    var showJoinDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.messages.collect { snackbar.showSnackbar(it) }
+    }
+    LaunchedEffect(Unit) {
+        viewModel.joinedChannel.collect(onOpenChannel)
     }
 
     Scaffold(
@@ -93,6 +98,9 @@ fun ContactsScreen(
             TopAppBar(
                 title = { Text("Contacts") },
                 actions = {
+                    IconButton(onClick = { showJoinDialog = true }) {
+                        Icon(Icons.Outlined.AddLink, contentDescription = "Join channel with a ticket")
+                    }
                     IconButton(onClick = onCreateChannel) {
                         Icon(Icons.Outlined.GroupAdd, contentDescription = "New channel")
                     }
@@ -156,6 +164,16 @@ fun ContactsScreen(
             onSubmit = { id, hello ->
                 viewModel.addFriend(id, hello)
                 showAddDialog = false
+            },
+        )
+    }
+
+    if (showJoinDialog) {
+        JoinChannelDialog(
+            onDismiss = { showJoinDialog = false },
+            onSubmit = { ticket ->
+                viewModel.joinChannel(ticket)
+                showJoinDialog = false
             },
         )
     }
@@ -272,6 +290,33 @@ private fun AddFriendDialog(
         },
         confirmButton = {
             TextButton(onClick = { onSubmit(id, hello) }, enabled = id.isNotBlank()) { Text("Send") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun JoinChannelDialog(
+    onDismiss: () -> Unit,
+    onSubmit: (String) -> Unit,
+) {
+    var ticket by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Join channel") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Paste the invite ticket you were given.")
+                OutlinedTextField(
+                    value = ticket,
+                    onValueChange = { ticket = it },
+                    label = { Text("Invite ticket") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSubmit(ticket) }, enabled = ticket.isNotBlank()) { Text("Join") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

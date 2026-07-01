@@ -23,7 +23,12 @@
 package io.photonmessenger.feature.contacts
 
 import app.cash.turbine.test
+import io.photonmessenger.feature.contacts.data.ChannelRepository
 import io.photonmessenger.feature.contacts.data.ContactRepository
+import io.photonmessenger.feature.contacts.model.UiChannel
+import io.photonmessenger.feature.contacts.model.UiChannelDetail
+import io.photonmessenger.feature.contacts.model.UiChannelPermission
+import io.photonmessenger.feature.contacts.model.UiChannelRole
 import io.photonmessenger.feature.contacts.model.UiContact
 import io.photonmessenger.feature.contacts.model.UiFriendRequest
 import kotlinx.coroutines.Dispatchers
@@ -59,6 +64,30 @@ class ContactsViewModelTest {
         override suspend fun removeContact(contactId: String) = Result.success(Unit)
     }
 
+    private class FakeChannelRepo(
+        var joinResult: Result<String> = Result.success("CHAN1"),
+    ) : ChannelRepository {
+        override fun channels(): Flow<List<UiChannel>> = MutableStateFlow(emptyList())
+        override fun channelDetail(channelId: String): Flow<UiChannelDetail> = MutableStateFlow(sampleDetail())
+        override suspend fun createChannel(
+            name: String,
+            notice: String?,
+            permission: UiChannelPermission,
+            announce: Boolean,
+        ): Result<String> = Result.success("CHAN1")
+        override suspend fun invite(channelId: String, inviteeId: String?): Result<String> = Result.success("ticket")
+        override suspend fun joinChannel(ticket: String): Result<String> = joinResult
+        override suspend fun leave(channelId: String): Result<Unit> = Result.success(Unit)
+        override suspend fun remove(channelId: String): Result<Unit> = Result.success(Unit)
+        override suspend fun setRole(channelId: String, memberId: String, role: UiChannelRole): Result<Unit> = Result.success(Unit)
+        override suspend fun ban(channelId: String, memberId: String): Result<Unit> = Result.success(Unit)
+        override suspend fun unban(channelId: String, memberId: String): Result<Unit> = Result.success(Unit)
+        override suspend fun kick(channelId: String, memberId: String): Result<Unit> = Result.success(Unit)
+        override suspend fun transferOwnership(channelId: String, newOwnerId: String): Result<Unit> = Result.success(Unit)
+        override suspend fun updateInfo(channelId: String, name: String?, notice: String?): Result<Unit> = Result.success(Unit)
+        override suspend fun rotateSessionKey(channelId: String): Result<Unit> = Result.success(Unit)
+    }
+
     @Before
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
@@ -76,7 +105,7 @@ class ContactsViewModelTest {
             UiContact("c", "Team", isChannel = true, muted = false, blocked = false),
         )
         requestsFlow.value = listOf(UiFriendRequest("r", "hi"))
-        val vm = ContactsViewModel(FakeRepo(contactsFlow, requestsFlow))
+        val vm = ContactsViewModel(FakeRepo(contactsFlow, requestsFlow), FakeChannelRepo())
 
         vm.uiState.test {
             // skip initial loading state, take the first loaded state
@@ -93,7 +122,7 @@ class ContactsViewModelTest {
     @Test
     fun `failed add emits a message`() = runTest {
         val repo = FakeRepo(contactsFlow, requestsFlow, sendResult = Result.failure(IllegalStateException("boom")))
-        val vm = ContactsViewModel(repo)
+        val vm = ContactsViewModel(repo, FakeChannelRepo())
 
         vm.messages.test {
             vm.addFriend("bad-id", "hi")
@@ -101,5 +130,46 @@ class ContactsViewModelTest {
             assert(msg.contains("boom"))
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `join success emits the joined channel id`() = runTest {
+        val vm = ContactsViewModel(
+            FakeRepo(contactsFlow, requestsFlow),
+            FakeChannelRepo(joinResult = Result.success("CHAN9")),
+        )
+        vm.joinedChannel.test {
+            vm.joinChannel(" ticket-json ")
+            assertEquals("CHAN9", awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `join failure emits a message`() = runTest {
+        val vm = ContactsViewModel(
+            FakeRepo(contactsFlow, requestsFlow),
+            FakeChannelRepo(joinResult = Result.failure(IllegalStateException("bad ticket"))),
+        )
+        vm.messages.test {
+            vm.joinChannel("nope")
+            assert(awaitItem().contains("bad ticket"))
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    private companion object {
+        fun sampleDetail() = UiChannelDetail(
+            channel = UiChannel(
+                id = "CHAN1",
+                name = "Team",
+                notice = null,
+                permission = UiChannelPermission.OWNER_INVITE,
+                myRole = UiChannelRole.OWNER,
+                memberCount = 1,
+                muted = false,
+            ),
+            members = emptyList(),
+        )
     }
 }

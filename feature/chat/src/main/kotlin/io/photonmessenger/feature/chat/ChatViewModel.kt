@@ -27,8 +27,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.photonmessenger.feature.chat.data.ChatRepository
 import io.photonmessenger.feature.chat.model.AttachmentSource
+import io.photonmessenger.feature.chat.model.ChatHeader
 import io.photonmessenger.feature.chat.model.UiAttachment
 import io.photonmessenger.feature.chat.model.UiMessage
+import io.photonmessenger.feature.chat.model.shortId
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.File
 import javax.inject.Inject
@@ -65,6 +67,15 @@ class ChatViewModel @Inject constructor(
 
     val conversationId: String = checkNotNull(savedStateHandle["conversationId"]) {
         "conversationId is required"
+    }
+
+    private val _header = MutableStateFlow(ChatHeader(title = shortId(conversationId)))
+    val header: StateFlow<ChatHeader> = _header.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            repository.header(conversationId).onSuccess { _header.value = it }
+        }
     }
 
     val uiState: StateFlow<ChatUiState> =

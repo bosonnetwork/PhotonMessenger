@@ -25,6 +25,7 @@ package io.photonmessenger.feature.chat
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import io.photonmessenger.feature.chat.data.ChatRepository
+import io.photonmessenger.feature.chat.model.ChatHeader
 import io.photonmessenger.feature.chat.model.UiConversation
 import io.photonmessenger.feature.chat.model.UiMessage
 import kotlinx.coroutines.Dispatchers
@@ -50,8 +51,10 @@ class ChatViewModelsTest {
         private val convos: Flow<List<UiConversation>>,
         private val msgs: Flow<List<UiMessage>>,
         var sendResult: Result<Unit> = Result.success(Unit),
+        var headerResult: Result<ChatHeader> = Result.success(ChatHeader(title = "Header")),
     ) : ChatRepository {
         override fun conversations() = convos
+        override suspend fun header(conversationId: String) = headerResult
         override fun messages(conversationId: String) = msgs
         override suspend fun sendText(recipientId: String, text: String) = sendResult
         override suspend fun sendAttachment(recipientId: String, uriString: String) = sendResult
@@ -98,6 +101,25 @@ class ChatViewModelsTest {
             while (state.loading) state = awaitItem()
             assertEquals(1, state.messages.size)
             assertEquals("hello", state.messages.first().text)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `channel header is resolved and exposed`() = runTest {
+        val repo = FakeChatRepo(
+            convosFlow,
+            msgsFlow,
+            headerResult = Result.success(ChatHeader(title = "Devs", subtitle = "3 members", isChannel = true)),
+        )
+        val vm = ChatViewModel(repo, SavedStateHandle(mapOf("conversationId" to "chan1")))
+
+        vm.header.test {
+            var header = awaitItem()
+            while (!header.isChannel) header = awaitItem()
+            assertEquals("Devs", header.title)
+            assertEquals("3 members", header.subtitle)
+            assertTrue(header.isChannel)
             cancelAndIgnoreRemainingEvents()
         }
     }

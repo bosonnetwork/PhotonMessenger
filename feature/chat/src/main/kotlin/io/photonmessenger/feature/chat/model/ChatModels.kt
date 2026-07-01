@@ -37,6 +37,21 @@ data class UiConversation(
     val updatedAt: Long,
 )
 
+/**
+ * Header shown at the top of a chat (M4-3). For a channel [isChannel] is true and [subtitle] carries
+ * the member count so the same chat screen serves DMs and channels; the title links to the channel
+ * detail/roster only when [isChannel].
+ */
+data class ChatHeader(
+    val title: String,
+    val subtitle: String? = null,
+    val isChannel: Boolean = false,
+)
+
+/** Compact form of a long Boson id for display (e.g. an untitled conversation). */
+fun shortId(id: String): String =
+    if (id.length <= 14) id else id.take(8) + "..." + id.takeLast(4)
+
 /** UI projection of a single message bubble. */
 data class UiMessage(
     val id: String,

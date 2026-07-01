@@ -28,6 +28,9 @@ import androidx.lifecycle.viewModelScope
 import io.photonmessenger.feature.contacts.data.ChannelRepository
 import io.photonmessenger.feature.contacts.model.UiChannelDetail
 import io.photonmessenger.feature.contacts.model.UiChannelRole
+import io.bosonnetwork.photonmessaging.exceptions.ChannelNotExistsException
+import io.bosonnetwork.photonmessaging.exceptions.InsufficientPermissionException
+import io.bosonnetwork.photonmessaging.exceptions.NotChannelMemberException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -51,7 +54,7 @@ class ChannelDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
-    private val channelId: String = checkNotNull(savedStateHandle["channelId"]) { "channelId arg missing" }
+    val channelId: String = checkNotNull(savedStateHandle["channelId"]) { "channelId arg missing" }
 
     val uiState: StateFlow<ChannelDetailUiState> =
         repository.channelDetail(channelId)
@@ -82,6 +85,9 @@ class ChannelDetailViewModel @Inject constructor(
     fun updateInfo(name: String?, notice: String?) =
         run("Couldn't update channel") { repository.updateInfo(channelId, name, notice) }
 
+    fun rotateSessionKey() =
+        run("Couldn't rotate session key") { repository.rotateSessionKey(channelId) }
+
     /** Invites a specific user; surfaces the resulting ticket text via [messages]. */
     fun invite(inviteeId: String?) {
         viewModelScope.launch {
@@ -93,9 +99,15 @@ class ChannelDetailViewModel @Inject constructor(
 
     private fun run(failurePrefix: String, action: suspend () -> Result<Unit>) {
         viewModelScope.launch {
-            action().onFailure { e ->
-                _messages.tryEmit("$failurePrefix: ${e.message ?: "unknown error"}")
-            }
+            action().onFailure { e -> _messages.tryEmit(e.toUserMessage(failurePrefix)) }
         }
+    }
+
+    /** Maps known channel moderation failures to specific, user-facing messages (M4-7). */
+    private fun Throwable.toUserMessage(failurePrefix: String): String = when (this) {
+        is InsufficientPermissionException -> "You don't have permission to do that"
+        is NotChannelMemberException -> "You're not a member of this channel"
+        is ChannelNotExistsException -> "This channel no longer exists"
+        else -> "$failurePrefix: ${message ?: "unknown error"}"
     }
 }

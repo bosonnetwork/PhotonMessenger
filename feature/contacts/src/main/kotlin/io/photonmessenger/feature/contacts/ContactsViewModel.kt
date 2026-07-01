@@ -24,6 +24,7 @@ package io.photonmessenger.feature.contacts
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.photonmessenger.feature.contacts.data.ChannelRepository
 import io.photonmessenger.feature.contacts.data.ContactRepository
 import io.photonmessenger.feature.contacts.model.UiContact
 import io.photonmessenger.feature.contacts.model.UiFriendRequest
@@ -49,6 +50,7 @@ data class ContactsUiState(
 @HiltViewModel
 class ContactsViewModel @Inject constructor(
     private val repository: ContactRepository,
+    private val channelRepository: ChannelRepository,
 ) : ViewModel() {
 
     val uiState: StateFlow<ContactsUiState> =
@@ -71,6 +73,10 @@ class ContactsViewModel @Inject constructor(
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val messages = _messages.asSharedFlow()
 
+    /** Emits the id of a channel just joined via an invite ticket, so the screen can open it. */
+    private val _joinedChannel = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val joinedChannel = _joinedChannel.asSharedFlow()
+
     fun addFriend(idText: String, hello: String) = run("Couldn't send friend request") {
         repository.sendFriendRequest(idText, hello)
     }
@@ -88,6 +94,15 @@ class ContactsViewModel @Inject constructor(
     }
 
     fun remove(contactId: String) = run("Couldn't remove contact") { repository.removeContact(contactId) }
+
+    /** Joins a channel from a shared invite-ticket string; opens it on success via [joinedChannel]. */
+    fun joinChannel(ticket: String) {
+        viewModelScope.launch {
+            channelRepository.joinChannel(ticket.trim())
+                .onSuccess { _joinedChannel.tryEmit(it) }
+                .onFailure { _messages.tryEmit("Couldn't join channel: ${it.message ?: "unknown error"}") }
+        }
+    }
 
     private fun run(failurePrefix: String, action: suspend () -> Result<Unit>) {
         viewModelScope.launch {

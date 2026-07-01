@@ -31,6 +31,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -40,6 +42,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import io.photonmessenger.app.AppViewModel
 import io.photonmessenger.feature.chat.ChatScreen
 import io.photonmessenger.feature.chat.ConversationsScreen
 import io.photonmessenger.feature.contacts.ChannelDetailScreen
@@ -59,7 +62,9 @@ import io.photonmessenger.feature.settings.SettingsScreen
 @Composable
 fun PhotonNavHost(
     navController: NavHostController = rememberNavController(),
+    appViewModel: AppViewModel = hiltViewModel(),
 ) {
+    val sessionStatus by appViewModel.sessionStatus.collectAsStateWithLifecycle()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
     val topLevel = TopLevelDestination.entries
@@ -67,6 +72,12 @@ fun PhotonNavHost(
     val showBottomBar = topLevel.any { it.route == currentRoute }
 
     Scaffold(
+        topBar = {
+            ConnectionBanner(
+                status = sessionStatus,
+                onRetry = appViewModel::retryConnection,
+            )
+        },
         bottomBar = {
             if (showBottomBar) {
                 NavigationBar {
@@ -95,12 +106,13 @@ fun PhotonNavHost(
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = TopLevelDestination.HOME.route,
+            startDestination = appViewModel.startDestination,
             modifier = Modifier.padding(innerPadding),
         ) {
             composable(Routes.ONBOARDING) {
                 OnboardingScreen(
                     onAuthenticated = {
+                        appViewModel.onSignedIn()
                         navController.navigate(TopLevelDestination.HOME.route) {
                             popUpTo(Routes.ONBOARDING) { inclusive = true }
                             launchSingleTop = true
@@ -115,7 +127,7 @@ fun PhotonNavHost(
             }
             composable(TopLevelDestination.CONTACTS.route) {
                 ContactsScreen(
-                    onOpenChannel = { id -> navController.navigate("channel/$id") },
+                    onOpenChannel = { id -> navController.navigate("chat/$id") },
                     onCreateChannel = { navController.navigate(Routes.CREATE_CHANNEL) },
                 )
             }
@@ -123,6 +135,7 @@ fun PhotonNavHost(
                 SettingsScreen(
                     onOpenDevices = { navController.navigate(Routes.DEVICES) },
                     onSignedOut = {
+                        appViewModel.onSignedOut()
                         navController.navigate(Routes.ONBOARDING) {
                             popUpTo(navController.graph.findStartDestination().id) { inclusive = true }
                             launchSingleTop = true
@@ -153,7 +166,10 @@ fun PhotonNavHost(
                 route = "chat/{conversationId}",
                 arguments = listOf(navArgument("conversationId") { type = NavType.StringType }),
             ) {
-                ChatScreen(onBack = { navController.popBackStack() })
+                ChatScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenChannelDetail = { id -> navController.navigate("channel/$id") },
+                )
             }
             composable(Routes.CREATE_CHANNEL) {
                 CreateChannelScreen(
@@ -168,7 +184,15 @@ fun PhotonNavHost(
                 route = "channel/{channelId}",
                 arguments = listOf(navArgument("channelId") { type = NavType.StringType }),
             ) {
-                ChannelDetailScreen(onBack = { navController.popBackStack() })
+                ChannelDetailScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenChat = { id ->
+                        navController.navigate("chat/$id") {
+                            popUpTo("channel/{channelId}") { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
+                )
             }
         }
     }

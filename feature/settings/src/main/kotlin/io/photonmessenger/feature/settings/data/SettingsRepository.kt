@@ -36,7 +36,11 @@ import io.photonmessenger.core.network.DirectorConfig
 import io.photonmessenger.core.network.DirectorConfigStore
 import io.photonmessenger.core.network.NotificationPreferencesStore
 import io.photonmessenger.core.network.ThemePreferencesStore
+import io.photonmessenger.core.network.model.ClearPassphraseRequest
+import io.photonmessenger.core.network.model.RemoveDeviceRequest
+import io.photonmessenger.core.network.model.SetPassphraseRequest
 import io.photonmessenger.core.network.model.UpdateProfileRequest
+import io.photonmessenger.core.network.toDirectorError
 import io.photonmessenger.feature.settings.model.UiDevice
 import io.photonmessenger.feature.settings.model.UiProfile
 import io.bosonnetwork.Id
@@ -58,13 +62,26 @@ interface SettingsRepository {
     val notificationPreferences: Flow<NotificationPreferences>
 
     suspend fun loadProfile(): Result<UiProfile>
-    suspend fun updateProfile(name: String?, bio: String?, email: String?): Result<Unit>
+
+    /**
+     * Updates any subset of {name, bio, email}. [passphrase] is required only when the account has a
+     * passphrase configured; a wrong/missing one fails with [AppError.Forbidden]/[AppError.PassphraseRequired].
+     */
+    suspend fun updateProfile(name: String?, bio: String?, email: String?, passphrase: String?): Result<Unit>
     suspend fun updateAvatar(uriString: String): Result<Unit>
     suspend fun removeAvatar(): Result<Unit>
 
+    /** Sets the first passphrase or changes an existing one; pass [currentPassphrase] when one is set. */
+    suspend fun setPassphrase(newPassphrase: String, currentPassphrase: String?): Result<Unit>
+
+    /** Removes the account passphrase; [currentPassphrase] must match the configured one. */
+    suspend fun clearPassphrase(currentPassphrase: String): Result<Unit>
+
     suspend fun loadDevices(): Result<List<UiDevice>>
     suspend fun revokeSession(deviceId: String): Result<Unit>
-    suspend fun removeDevice(deviceId: String): Result<Unit>
+
+    /** Deregisters a device. [passphrase] is required only when the account has one configured. */
+    suspend fun removeDevice(deviceId: String, passphrase: String?): Result<Unit>
 
     suspend fun setThemeMode(mode: ThemeMode): Result<Unit>
     suspend fun setDynamicColor(enabled: Boolean): Result<Unit>
@@ -117,12 +134,26 @@ class SettingsRepositoryImpl @Inject constructor(
             email = dto.email.orEmpty(),
             avatarUrl = avatarUrl,
             plan = dto.planName,
+            passphraseProtected = dto.passphraseProtected,
         )
     }
 
-    override suspend fun updateProfile(name: String?, bio: String?, email: String?): Result<Unit> = runCatching {
-        api().updateProfile(UpdateProfileRequest(name = name, bio = bio, email = email))
-    }
+    override suspend fun updateProfile(
+        name: String?,
+        bio: String?,
+        email: String?,
+        passphrase: String?,
+    ): Result<Unit> = runCatching {
+        api().updateProfile(UpdateProfileRequest(name = name, bio = bio, email = email, passphrase = passphrase))
+    }.mapDirectorError()
+
+    override suspend fun setPassphrase(newPassphrase: String, currentPassphrase: String?): Result<Unit> = runCatching {
+        api().setPassphrase(SetPassphraseRequest(passphrase = newPassphrase, currentPassphrase = currentPassphrase))
+    }.mapDirectorError()
+
+    override suspend fun clearPassphrase(currentPassphrase: String): Result<Unit> = runCatching {
+        api().clearPassphrase(ClearPassphraseRequest(passphrase = currentPassphrase))
+    }.mapDirectorError()
 
     override suspend fun updateAvatar(uriString: String): Result<Unit> = runCatching {
         val prepared = avatarPreparer.prepare(uriString)
@@ -164,9 +195,9 @@ class SettingsRepositoryImpl @Inject constructor(
         Unit
     }
 
-    override suspend fun removeDevice(deviceId: String): Result<Unit> = runCatching {
-        api().removeDevice(deviceId)
-    }
+    override suspend fun removeDevice(deviceId: String, passphrase: String?): Result<Unit> = runCatching {
+        api().removeDevice(deviceId, RemoveDeviceRequest(passphrase = passphrase))
+    }.mapDirectorError()
 
     override suspend fun setThemeMode(mode: ThemeMode): Result<Unit> = runCatching {
         themeStore.setMode(mode)
@@ -198,4 +229,8 @@ class SettingsRepositoryImpl @Inject constructor(
         } catch (e: Exception) {
             throw AppError.InvalidInput("Invalid device ID", e)
         }
+
+    /** Re-wraps a Director HTTP failure as an [AppError] so the UI can tell 428/403 apart (M6 passphrase). */
+    private fun <T> Result<T>.mapDirectorError(): Result<T> =
+        recoverCatching { throw it.toDirectorError() }
 }

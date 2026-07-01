@@ -46,7 +46,9 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -80,6 +82,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -107,6 +110,15 @@ fun SettingsScreen(
     LaunchedEffect(Unit) { viewModel.signedOut.collect { onSignedOut() } }
 
     var editing by rememberSaveable { mutableStateOf(false) }
+    var showSetPassphrase by rememberSaveable { mutableStateOf(false) }
+    var showRemovePassphrase by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        viewModel.passphraseUpdated.collect {
+            showSetPassphrase = false
+            showRemovePassphrase = false
+        }
+    }
 
     val pickAvatar = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) viewModel.updateAvatar(uri.toString())
@@ -152,6 +164,14 @@ fun SettingsScreen(
                     )
                     HorizontalDivider()
 
+                    SectionTitle("Security")
+                    PassphraseSection(
+                        protected = state.profile?.passphraseProtected == true,
+                        onSet = { showSetPassphrase = true },
+                        onRemove = { showRemovePassphrase = true },
+                    )
+                    HorizontalDivider()
+
                     ListItem(
                         headlineContent = { Text("Devices & sessions") },
                         supportingContent = { Text("Manage where you're signed in") },
@@ -173,13 +193,143 @@ fun SettingsScreen(
         EditProfileDialog(
             profile = state.profile,
             saving = state.savingProfile,
+            requirePassphrase = state.profile?.passphraseProtected == true,
             onDismiss = { editing = false },
-            onSave = { name, bio, email ->
-                viewModel.saveProfile(name, bio, email)
+            onSave = { name, bio, email, passphrase ->
+                viewModel.saveProfile(name, bio, email, passphrase)
                 editing = false
             },
         )
     }
+
+    if (showSetPassphrase) {
+        SetPassphraseDialog(
+            protected = state.profile?.passphraseProtected == true,
+            onDismiss = { showSetPassphrase = false },
+            onSubmit = { current, new -> viewModel.setPassphrase(new, current) },
+        )
+    }
+
+    if (showRemovePassphrase) {
+        RemovePassphraseDialog(
+            onDismiss = { showRemovePassphrase = false },
+            onSubmit = { current -> viewModel.clearPassphrase(current) },
+        )
+    }
+}
+
+/**
+ * Account security section (Director Passphrase Management). Shows a warning when no passphrase is
+ * configured (prompting the user to add one) and a success indicator when one is set, with change/
+ * remove actions. Mirrors the User Portal indicator behavior.
+ */
+@Composable
+private fun PassphraseSection(
+    protected: Boolean,
+    onSet: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val icon = if (protected) Icons.Filled.CheckCircle else Icons.Filled.Warning
+    val tint = if (protected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+    ListItem(
+        leadingContent = { Icon(icon, contentDescription = null, tint = tint) },
+        headlineContent = {
+            Text(if (protected) "Protected by a passphrase" else "No passphrase set")
+        },
+        supportingContent = {
+            Text(
+                if (protected) {
+                    "A passphrase is required to change sensitive account settings."
+                } else {
+                    "Add a passphrase to protect sensitive account changes even if your key is exposed."
+                },
+            )
+        },
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        OutlinedButton(onClick = onSet) { Text(if (protected) "Change passphrase" else "Set passphrase") }
+        if (protected) {
+            TextButton(onClick = onRemove) { Text("Remove") }
+        }
+    }
+}
+
+@Composable
+private fun SetPassphraseDialog(
+    protected: Boolean,
+    onDismiss: () -> Unit,
+    onSubmit: (current: String?, new: String) -> Unit,
+) {
+    var current by remember { mutableStateOf("") }
+    var new by remember { mutableStateOf("") }
+    var confirm by remember { mutableStateOf("") }
+    val matches = new.isNotBlank() && new == confirm
+    val currentOk = !protected || current.isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (protected) "Change passphrase" else "Set passphrase") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (protected) {
+                    PassphraseField(current, { current = it }, "Current passphrase")
+                }
+                PassphraseField(new, { new = it }, "New passphrase")
+                PassphraseField(confirm, { confirm = it }, "Confirm new passphrase")
+                if (confirm.isNotBlank() && !matches) {
+                    Text(
+                        "Passphrases don't match",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSubmit(current.takeIf { protected }, new) },
+                enabled = matches && currentOk,
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun RemovePassphraseDialog(
+    onDismiss: () -> Unit,
+    onSubmit: (current: String) -> Unit,
+) {
+    var current by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Remove passphrase") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Enter your current passphrase to remove it. Sensitive changes will no longer be protected.")
+                PassphraseField(current, { current = it }, "Current passphrase")
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSubmit(current) }, enabled = current.isNotBlank()) { Text("Remove") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun PassphraseField(value: String, onValueChange: (String) -> Unit, label: String) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable
@@ -378,12 +528,15 @@ private fun SwitchRow(
 private fun EditProfileDialog(
     profile: UiProfile?,
     saving: Boolean,
+    requirePassphrase: Boolean,
     onDismiss: () -> Unit,
-    onSave: (name: String, bio: String, email: String) -> Unit,
+    onSave: (name: String, bio: String, email: String, passphrase: String?) -> Unit,
 ) {
     var name by rememberSaveable { mutableStateOf(profile?.name.orEmpty()) }
     var bio by rememberSaveable { mutableStateOf(profile?.bio.orEmpty()) }
     var email by rememberSaveable { mutableStateOf(profile?.email.orEmpty()) }
+    var passphrase by rememberSaveable { mutableStateOf("") }
+    val passphraseOk = !requirePassphrase || passphrase.isNotBlank()
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -410,12 +563,15 @@ private fun EditProfileDialog(
                     label = { Text("Bio") },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (requirePassphrase) {
+                    PassphraseField(passphrase, { passphrase = it }, "Passphrase")
+                }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(name.trim(), bio.trim(), email.trim()) },
-                enabled = !saving,
+                onClick = { onSave(name.trim(), bio.trim(), email.trim(), passphrase.takeIf { requirePassphrase }) },
+                enabled = !saving && passphraseOk,
             ) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

@@ -24,6 +24,7 @@ package io.photonmessenger.feature.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.photonmessenger.core.model.AppError
 import io.photonmessenger.feature.settings.data.SettingsRepository
 import io.photonmessenger.feature.settings.model.UiDevice
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -33,11 +34,20 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class DevicesUiState(
     val loading: Boolean = true,
     val devices: List<UiDevice> = emptyList(),
+    val error: String? = null,
+    /** Non-null while a passphrase-protected removal is waiting for the user's passphrase (M6). */
+    val passphrasePrompt: PassphrasePrompt? = null,
+)
+
+/** A pending device removal that the server gated on the account passphrase. */
+data class PassphrasePrompt(
+    val deviceId: String,
     val error: String? = null,
 )
 
@@ -72,9 +82,44 @@ class DevicesViewModel @Inject constructor(
         repository.revokeSession(deviceId)
     }
 
-    /** Deregisters the device entirely (M6-3). */
-    fun removeDevice(deviceId: String) = run("Couldn't remove device") {
-        repository.removeDevice(deviceId)
+    /**
+     * Deregisters the device entirely (M6-3). If the account is passphrase-protected the server gates
+     * this with 428; we then surface a passphrase prompt and retry via [confirmRemoveWithPassphrase].
+     */
+    fun removeDevice(deviceId: String) {
+        viewModelScope.launch {
+            repository.removeDevice(deviceId, passphrase = null)
+                .onSuccess { refresh() }
+                .onFailure { handleRemoveFailure(deviceId, it) }
+        }
+    }
+
+    /** Retries a gated removal with the passphrase the user supplied in the prompt. */
+    fun confirmRemoveWithPassphrase(passphrase: String) {
+        val deviceId = _uiState.value.passphrasePrompt?.deviceId ?: return
+        viewModelScope.launch {
+            repository.removeDevice(deviceId, passphrase = passphrase)
+                .onSuccess {
+                    _uiState.update { it.copy(passphrasePrompt = null) }
+                    refresh()
+                }
+                .onFailure { handleRemoveFailure(deviceId, it) }
+        }
+    }
+
+    fun dismissPassphrasePrompt() {
+        _uiState.update { it.copy(passphrasePrompt = null) }
+    }
+
+    private fun handleRemoveFailure(deviceId: String, error: Throwable) {
+        when (error) {
+            is AppError.PassphraseRequired ->
+                _uiState.update { it.copy(passphrasePrompt = PassphrasePrompt(deviceId)) }
+            is AppError.Forbidden ->
+                _uiState.update { it.copy(passphrasePrompt = PassphrasePrompt(deviceId, "Wrong passphrase")) }
+            else ->
+                _messages.tryEmit("Couldn't remove device: ${error.message ?: "unknown error"}")
+        }
     }
 
     private fun run(failurePrefix: String, action: suspend () -> Result<Unit>) {

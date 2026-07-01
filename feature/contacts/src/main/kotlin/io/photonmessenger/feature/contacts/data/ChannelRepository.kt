@@ -37,6 +37,7 @@ import io.bosonnetwork.photonmessaging.Channel
 import io.bosonnetwork.photonmessaging.ChannelListener
 import io.bosonnetwork.photonmessaging.Contact
 import io.bosonnetwork.photonmessaging.ContactListener
+import io.bosonnetwork.photonmessaging.InviteTicket
 import io.bosonnetwork.photonmessaging.MessagingClient
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -49,9 +50,9 @@ import kotlinx.coroutines.launch
  * Channel creation, membership and moderation over the Boson [MessagingClient] (spec 1.2, screen 5
  * Channels tab, M4). Returns UI models so the ViewModel stays decoupled from the client types.
  *
- * Open invite-ticket sharing (a copy/paste or QR string) is not yet wired: the public [InviteTicket]
- * has no stable string codec, so [invite] currently supports targeted invites and returns the ticket's
- * debug representation. Shareable tickets / QR pairing are tracked for a later pass (see M4-2 / M6).
+ * Open invite-ticket sharing uses [InviteTicket]'s stable string codec ([InviteTicket.toString] /
+ * [InviteTicket.fromString]): [invite] returns a shareable ticket string (bearer when no invitee is
+ * given) and [joinChannel] consumes one, so a channel can be joined across two clients (M4-2).
  */
 interface ChannelRepository {
     /** Live list of channels the user belongs to (filtered from contacts, kept current by listeners). */
@@ -67,8 +68,11 @@ interface ChannelRepository {
         announce: Boolean,
     ): Result<String>
 
-    /** Invites [inviteeId] (when non-null) and returns the resulting ticket's string form. */
+    /** Invites [inviteeId] (when non-null) and returns the resulting shareable ticket string. */
     suspend fun invite(channelId: String, inviteeId: String?): Result<String>
+
+    /** Joins a channel from a shareable invite-ticket string; returns the joined channel id. */
+    suspend fun joinChannel(ticket: String): Result<String>
     suspend fun leave(channelId: String): Result<Unit>
     suspend fun remove(channelId: String): Result<Unit>
     suspend fun setRole(channelId: String, memberId: String, role: UiChannelRole): Result<Unit>
@@ -77,6 +81,9 @@ interface ChannelRepository {
     suspend fun kick(channelId: String, memberId: String): Result<Unit>
     suspend fun transferOwnership(channelId: String, newOwnerId: String): Result<Unit>
     suspend fun updateInfo(channelId: String, name: String?, notice: String?): Result<Unit>
+
+    /** Rotates the channel's session key (owner-only; M4-5). */
+    suspend fun rotateSessionKey(channelId: String): Result<Unit>
 }
 
 @Singleton
@@ -160,6 +167,15 @@ class ChannelRepositoryImpl @Inject constructor(
         client().createInviteTicket(parseId(channelId), invitee).awaitResult().toString()
     }
 
+    override suspend fun joinChannel(ticket: String): Result<String> = runCatching {
+        val parsed = try {
+            InviteTicket.fromString(ticket.trim())
+        } catch (e: Exception) {
+            throw AppError.InvalidInput("Invalid invite ticket", e)
+        }
+        client().joinChannel(parsed).awaitResult().id.toString()
+    }
+
     override suspend fun leave(channelId: String): Result<Unit> = runCatching {
         client().leaveChannel(parseId(channelId)).awaitResult()
         Unit
@@ -203,6 +219,11 @@ class ChannelRepositoryImpl @Inject constructor(
         if (name != null) editor = editor.setName(name)
         if (notice != null) editor = editor.setNotice(notice)
         client.updateChannelInfo(editor.build()).awaitResult()
+        Unit
+    }
+
+    override suspend fun rotateSessionKey(channelId: String): Result<Unit> = runCatching {
+        client().rotateChannelSessionKey(parseId(channelId)).awaitResult()
         Unit
     }
 

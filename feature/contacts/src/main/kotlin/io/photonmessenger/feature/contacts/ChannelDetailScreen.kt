@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -64,6 +65,7 @@ import io.photonmessenger.feature.contacts.model.UiChannelRole
 @Composable
 fun ChannelDetailScreen(
     onBack: () -> Unit,
+    onOpenChat: (String) -> Unit = {},
     viewModel: ChannelDetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -83,6 +85,9 @@ fun ChannelDetailScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { onOpenChat(viewModel.channelId) }) {
+                        Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Open chat")
+                    }
                     state.detail?.channel?.let { ChannelOverflow(it, viewModel, onBack) }
                 },
             )
@@ -201,6 +206,10 @@ private fun ChannelOverflow(channel: UiChannel, viewModel: ChannelDetailViewMode
                 onClick = { menu = false; viewModel.invite(null) },
             )
             if (channel.isOwner) {
+                DropdownMenuItem(
+                    text = { Text("Rotate session key") },
+                    onClick = { menu = false; viewModel.rotateSessionKey() },
+                )
                 DropdownMenuItem(
                     text = { Text("Delete channel") },
                     onClick = { menu = false; viewModel.remove(); onBack() },

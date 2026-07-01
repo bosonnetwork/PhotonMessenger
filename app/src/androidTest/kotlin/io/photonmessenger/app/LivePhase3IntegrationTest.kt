@@ -45,7 +45,9 @@ import io.photonmessenger.core.network.model.ReplyRegistrationRequest
 import io.bosonnetwork.Id
 import io.bosonnetwork.ionstore.PutOptions
 import io.bosonnetwork.photonmessaging.Channel
+import io.bosonnetwork.photonmessaging.ChannelListener
 import io.bosonnetwork.photonmessaging.FriendRequestListener
+import io.bosonnetwork.photonmessaging.InviteTicket
 import io.bosonnetwork.photonmessaging.Message
 import io.bosonnetwork.photonmessaging.MessageListener
 import io.bosonnetwork.photonmessaging.MessagingClient
@@ -205,30 +207,64 @@ class LivePhase3IntegrationTest {
     }
 
     /**
-     * M4: owner creates a channel, mints an invite ticket, and sees itself as the sole member.
-     * (Open-ticket join by a second client is deferred until InviteTicket has a stable string codec.)
+     * M4 DoD: owner (Alice) creates a channel and mints a bearer invite ticket; the ticket is passed
+     * as a shareable string (InviteTicket.toString -> fromString) to a second client (Bob), who joins
+     * the channel. Both clients then see Bob as a member. Exercises the InviteTicket string codec
+     * end-to-end across two clients (M4-2).
      */
     @Test
-    fun channelCreateAndInvite() {
+    fun channelCreateAndJoinAcrossTwoClients() {
         BosonTls.install()
         val vertx = Vertx.vertx()
         val harness = LiveTestHarness(context, vertx)
         try {
             val alice = harness.register("AliceChannel")
-            val client = harness.connect(alice)
+            val bob = harness.register("BobChannel")
+            val aliceClient = harness.connect(alice)
+            val bobClient = harness.connect(bob)
 
-            val channel = client.createChannel(Channel.Permission.PUBLIC, "Live Test Channel", "notice", false)
+            val channel = aliceClient.createChannel(Channel.Permission.PUBLIC, "Live Test Channel", "notice", false)
                 .get(TIMEOUT, TimeUnit.SECONDS)
             assertTrue("channel id must be assigned", channel.id.toString().isNotBlank())
 
             channel.loadMembers().get(TIMEOUT, TimeUnit.SECONDS)
-            assertTrue(
-                "owner must be a member",
-                channel.members.any { it.id == alice.userId },
-            )
+            assertTrue("owner must be a member", channel.members.any { it.id == alice.userId })
 
-            val ticket = client.createInviteTicket(channel.id, null).get(TIMEOUT, TimeUnit.SECONDS)
-            assertTrue("an invite ticket must be issued", ticket != null)
+            // Mint a bearer ticket and round-trip it through the string codec, as sharing would.
+            val ticket = aliceClient.createInviteTicket(channel.id, null).get(TIMEOUT, TimeUnit.SECONDS)
+            val shared = ticket.toString()
+            assertTrue("ticket string must be non-empty", shared.isNotBlank())
+            val parsed = InviteTicket.fromString(shared)
+            assertEquals("codec must preserve the channel id", ticket.channelId, parsed.channelId)
+            assertTrue("round-tripped ticket must be genuine", parsed.isGenuine())
+
+            // Alice observes Bob joining.
+            val bobJoined = CountDownLatch(1)
+            aliceClient.addChannelListener(object : ChannelListener {
+                override fun onChannelMemberJoined(ch: Channel, member: Channel.Member) {
+                    if (ch.id == channel.id && member.id == bob.userId) bobJoined.countDown()
+                }
+                override fun onChannelCreated(channel: Channel) {}
+                override fun onChannelDeleted(channel: Channel) {}
+                override fun onJoinedChannel(channel: Channel) {}
+                override fun onLeftChannel(channel: Channel) {}
+                override fun onChannelOwnershipTransferred(channel: Channel, oldOwner: Id, newOwner: Id) {}
+                override fun onChannelSessionKeyRotated(channel: Channel) {}
+                override fun onChannelUpdated(channel: Channel) {}
+                override fun onChannelMemberLeft(channel: Channel, member: Channel.Member) {}
+                override fun onChannelMembersRemoved(channel: Channel, members: List<Channel.Member>) {}
+                override fun onChannelMembersBanned(channel: Channel, banned: List<Channel.Member>) {}
+                override fun onChannelMembersUnbanned(channel: Channel, unbanned: List<Channel.Member>) {}
+                override fun onChannelMembersRoleChanged(channel: Channel, changed: List<Channel.Member>, role: Channel.Role) {}
+            })
+
+            // Bob joins from the shared ticket string.
+            val joined = bobClient.joinChannel(parsed).get(TIMEOUT, TimeUnit.SECONDS)
+            assertEquals("Bob must join the same channel", channel.id, joined.id)
+
+            joined.loadMembers().get(TIMEOUT, TimeUnit.SECONDS)
+            assertTrue("Bob must see himself as a member", joined.members.any { it.id == bob.userId })
+            assertTrue("Alice must observe Bob's join", bobJoined.await(TIMEOUT, TimeUnit.SECONDS))
         } finally {
             harness.close()
             vertx.close()

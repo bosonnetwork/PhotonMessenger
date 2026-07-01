@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -40,6 +41,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -52,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -118,23 +121,44 @@ fun ApproveDeviceScreen(
                 is ApproveDeviceUiState.Approving ->
                     CircularProgressIndicator(Modifier.align(Alignment.Center))
 
-                is ApproveDeviceUiState.Confirm ->
+                is ApproveDeviceUiState.Confirm -> {
+                    var passphrase by remember { mutableStateOf("") }
                     AlertDialog(
                         onDismissRequest = viewModel::rescan,
                         title = { Text("Authorize this device?") },
                         text = {
-                            Text(
-                                "\"${s.info.deviceName}\" (${s.info.appName}) wants to sign in to your " +
-                                    "account. Approving shares your encrypted identity key with it.",
-                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    "\"${s.info.deviceName}\" (${s.info.appName}) wants to sign in to your " +
+                                        "account. Approving shares your encrypted identity key with it.",
+                                )
+                                if (s.needsPassphrase) {
+                                    OutlinedTextField(
+                                        value = passphrase,
+                                        onValueChange = { passphrase = it },
+                                        label = { Text("Passphrase") },
+                                        singleLine = true,
+                                        isError = s.passphraseError != null,
+                                        visualTransformation = PasswordVisualTransformation(),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                    if (s.passphraseError != null) {
+                                        Text(s.passphraseError, color = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            }
                         },
                         confirmButton = {
-                            Button(onClick = viewModel::approve) { Text("Approve") }
+                            Button(
+                                onClick = { viewModel.approve(passphrase.takeIf { s.needsPassphrase }) },
+                                enabled = !s.needsPassphrase || passphrase.isNotBlank(),
+                            ) { Text("Approve") }
                         },
                         dismissButton = {
                             TextButton(onClick = viewModel::deny) { Text("Deny") }
                         },
                     )
+                }
 
                 is ApproveDeviceUiState.Done ->
                     CenteredAction(

@@ -49,6 +49,7 @@ class ChannelViewModelsTest {
         private val detailFlow: Flow<UiChannelDetail> = MutableStateFlow(sampleDetail()),
         var createResult: Result<String> = Result.success("CHAN1"),
         var actionResult: Result<Unit> = Result.success(Unit),
+        var joinResult: Result<String> = Result.success("CHAN1"),
     ) : ChannelRepository {
         override fun channels(): Flow<List<UiChannel>> = MutableStateFlow(emptyList())
         override fun channelDetail(channelId: String): Flow<UiChannelDetail> = detailFlow
@@ -59,6 +60,7 @@ class ChannelViewModelsTest {
             announce: Boolean,
         ): Result<String> = createResult
         override suspend fun invite(channelId: String, inviteeId: String?): Result<String> = Result.success("ticket")
+        override suspend fun joinChannel(ticket: String): Result<String> = joinResult
         override suspend fun leave(channelId: String): Result<Unit> = actionResult
         override suspend fun remove(channelId: String): Result<Unit> = actionResult
         override suspend fun setRole(channelId: String, memberId: String, role: UiChannelRole): Result<Unit> = actionResult
@@ -67,6 +69,7 @@ class ChannelViewModelsTest {
         override suspend fun kick(channelId: String, memberId: String): Result<Unit> = actionResult
         override suspend fun transferOwnership(channelId: String, newOwnerId: String): Result<Unit> = actionResult
         override suspend fun updateInfo(channelId: String, name: String?, notice: String?): Result<Unit> = actionResult
+        override suspend fun rotateSessionKey(channelId: String): Result<Unit> = actionResult
     }
 
     @Before

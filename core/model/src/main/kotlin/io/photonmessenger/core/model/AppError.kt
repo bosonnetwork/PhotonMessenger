@@ -41,6 +41,12 @@ sealed class AppError(message: String?, cause: Throwable? = null) : Exception(me
     /** Caller authenticated but not permitted (HTTP 403, InsufficientPermissionException). */
     class Forbidden(message: String? = null, cause: Throwable? = null) : AppError(message, cause)
 
+    /**
+     * The account has a passphrase configured but none was supplied for a passphrase-gated
+     * operation (HTTP 428 Precondition Required). The UI should prompt for the passphrase and retry.
+     */
+    class PassphraseRequired(message: String? = null, cause: Throwable? = null) : AppError(message, cause)
+
     /** Target resource not found (HTTP 404). */
     class NotFound(message: String? = null, cause: Throwable? = null) : AppError(message, cause)
 

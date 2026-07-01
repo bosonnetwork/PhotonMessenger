@@ -94,7 +94,8 @@ class LiveConnectIntegrationTest {
 
         val request = SelfRegisterRequest(
             userId = userId.toString(),
-            passphrase = "it-pass-${System.nanoTime()}",
+            // No passphrase: the app onboards OAuth-style, so gated ops stay passphrase-free (M6).
+            passphrase = null,
             userName = name,
             deviceId = BosonCrypto.idOf(deviceKp).toString(),
             deviceName = "emulator",

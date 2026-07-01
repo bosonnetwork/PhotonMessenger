@@ -73,6 +73,10 @@ class SettingsViewModel @Inject constructor(
     private val _signedOut = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val signedOut = _signedOut.asSharedFlow()
 
+    /** Emitted when a passphrase set/change/clear succeeds, so the UI can close its dialog. */
+    private val _passphraseUpdated = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val passphraseUpdated = _passphraseUpdated.asSharedFlow()
+
     init {
         refresh()
     }
@@ -88,13 +92,39 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun saveProfile(name: String, bio: String, email: String) {
+    fun saveProfile(name: String, bio: String, email: String, passphrase: String? = null) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(savingProfile = true)
-            repository.updateProfile(name = name, bio = bio, email = email)
+            repository.updateProfile(name = name, bio = bio, email = email, passphrase = passphrase)
                 .onFailure { _messages.tryEmit("Couldn't save profile: ${it.reason()}") }
             _uiState.value = _uiState.value.copy(savingProfile = false)
             refresh()
+        }
+    }
+
+    /** Sets the first passphrase or changes an existing one (pass [currentPassphrase] when one is set). */
+    fun setPassphrase(newPassphrase: String, currentPassphrase: String?) {
+        viewModelScope.launch {
+            repository.setPassphrase(newPassphrase, currentPassphrase)
+                .onSuccess {
+                    _passphraseUpdated.tryEmit(Unit)
+                    _messages.tryEmit("Passphrase saved")
+                    refresh()
+                }
+                .onFailure { _messages.tryEmit("Couldn't set passphrase: ${it.reason()}") }
+        }
+    }
+
+    /** Removes the account passphrase; [currentPassphrase] must match the configured one. */
+    fun clearPassphrase(currentPassphrase: String) {
+        viewModelScope.launch {
+            repository.clearPassphrase(currentPassphrase)
+                .onSuccess {
+                    _passphraseUpdated.tryEmit(Unit)
+                    _messages.tryEmit("Passphrase removed")
+                    refresh()
+                }
+                .onFailure { _messages.tryEmit("Couldn't remove passphrase: ${it.reason()}") }
         }
     }
 

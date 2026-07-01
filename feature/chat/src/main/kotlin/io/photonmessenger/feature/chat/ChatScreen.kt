@@ -44,6 +44,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -80,9 +81,11 @@ import io.photonmessenger.feature.chat.model.UiMessage
 fun ChatScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenChannelDetail: (String) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val header by viewModel.header.collectAsStateWithLifecycle()
     val downloads by viewModel.downloads.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
@@ -101,11 +104,32 @@ fun ChatScreen(
     Scaffold(
         modifier = modifier,
         topBar = {
+            val openDetail = { onOpenChannelDetail(viewModel.conversationId) }
             TopAppBar(
-                title = { Text(shortId(viewModel.conversationId), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = {
+                    val titleModifier = if (header.isChannel) Modifier.clickable(onClick = openDetail) else Modifier
+                    Column(modifier = titleModifier) {
+                        Text(header.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        header.subtitle?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    if (header.isChannel) {
+                        IconButton(onClick = openDetail) {
+                            Icon(Icons.Filled.Groups, contentDescription = "Channel members")
+                        }
                     }
                 },
             )
@@ -287,5 +311,3 @@ private fun MessageInput(
         }
     }
 }
-
-private fun shortId(id: String): String = if (id.length <= 14) id else id.take(8) + "…" + id.takeLast(4)

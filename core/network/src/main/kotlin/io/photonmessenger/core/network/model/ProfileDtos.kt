@@ -40,17 +40,24 @@ data class ProfileDto(
     val createdAt: Long = 0,
     val updatedAt: Long = 0,
     val planName: String? = null,
+    /**
+     * Whether the account currently has a passphrase configured (Director computed field; the hash
+     * itself is never returned). When true, passphrase-gated operations require the passphrase.
+     */
+    val passphraseProtected: Boolean = false,
 )
 
 /**
  * PUT /api/v1/client/profile body: any subset of {name, bio, email}. Null fields are omitted by the
  * converter (explicitNulls = false), so only provided keys are updated (Director updateProfile).
+ * [passphrase] is required only when the account has a passphrase configured, otherwise ignored.
  */
 @Serializable
 data class UpdateProfileRequest(
     val name: String? = null,
     val bio: String? = null,
     val email: String? = null,
+    val passphrase: String? = null,
 )
 
 /**

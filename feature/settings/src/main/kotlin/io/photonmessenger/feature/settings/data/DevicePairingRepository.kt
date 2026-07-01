@@ -36,6 +36,7 @@ import io.photonmessenger.core.network.model.ClientAuthRequest
 import io.photonmessenger.core.network.model.FinishRegistrationRequest
 import io.photonmessenger.core.network.model.RegisterDeviceRequest
 import io.photonmessenger.core.network.model.ReplyRegistrationRequest
+import io.photonmessenger.core.network.toDirectorError
 import io.bosonnetwork.crypto.CryptoBox
 import io.bosonnetwork.crypto.Signature
 import java.security.SecureRandom
@@ -79,7 +80,13 @@ interface DevicePairingRepository {
     suspend fun awaitApproval(): Result<String>
 
     suspend fun readRequest(qrText: String): Result<PairingRequestInfo>
-    suspend fun approve(qrText: String): Result<Unit>
+
+    /**
+     * Approves a pending request, sealing the user key to the new device. [passphrase] is required only
+     * when the approving account has a passphrase configured; a wrong/missing one fails with
+     * [AppError.Forbidden]/[AppError.PassphraseRequired].
+     */
+    suspend fun approve(qrText: String, passphrase: String?): Result<Unit>
     suspend fun deny(qrText: String): Result<Unit>
 }
 
@@ -181,7 +188,7 @@ class DevicePairingRepositoryImpl @Inject constructor(
         )
     }
 
-    override suspend fun approve(qrText: String): Result<Unit> = runCatching {
+    override suspend fun approve(qrText: String, passphrase: String?): Result<Unit> = runCatching {
         withContext(Dispatchers.IO) {
             val payload = decodePayload(qrText)
             val userKey = keyManager.userKeyPair()
@@ -190,11 +197,15 @@ class DevicePairingRepositoryImpl @Inject constructor(
             val sealed = DevicePairing.sealUserKey(userKey64, payload.ephemeralPublicKey)
             api().replyRegistration(
                 payload.registrationId,
-                ReplyRegistrationRequest(approved = true, userPrivateKey = b64(sealed)),
+                ReplyRegistrationRequest(
+                    approved = true,
+                    passphrase = passphrase,
+                    userPrivateKey = b64(sealed),
+                ),
             )
             Unit
         }
-    }
+    }.mapDirectorError()
 
     override suspend fun deny(qrText: String): Result<Unit> = runCatching {
         val payload = decodePayload(qrText)
@@ -209,6 +220,10 @@ class DevicePairingRepositoryImpl @Inject constructor(
     private fun b64(bytes: ByteArray): String = B64URL.encodeToString(bytes)
 
     private fun b64Decode(text: String): ByteArray = B64URL_DEC.decode(text)
+
+    /** Re-wraps a Director HTTP failure as an [AppError] so the UI can tell 428/403 apart (M6 passphrase). */
+    private fun <T> Result<T>.mapDirectorError(): Result<T> =
+        recoverCatching { throw it.toDirectorError() }
 
     private companion object {
         const val APP_NAME = "PhotonMessenger"

@@ -22,6 +22,7 @@
 
 package io.photonmessenger.feature.settings
 
+import io.photonmessenger.core.model.AppError
 import io.photonmessenger.feature.settings.data.DevicePairingRepository
 import io.photonmessenger.feature.settings.data.PairingInvite
 import io.photonmessenger.feature.settings.data.PairingRequestInfo
@@ -47,12 +48,14 @@ class PairingViewModelsTest {
         var denyResult: Result<Unit> = Result.success(Unit),
     ) : DevicePairingRepository {
         var approvedQr: String? = null
+        var approvedPassphrase: String? = null
         var deniedQr: String? = null
 
         override suspend fun createInvite(deviceName: String) = invite
         override suspend fun awaitApproval() = approval
         override suspend fun readRequest(qrText: String) = request
-        override suspend fun approve(qrText: String) = approveResult.also { approvedQr = qrText }
+        override suspend fun approve(qrText: String, passphrase: String?) =
+            approveResult.also { approvedQr = qrText; approvedPassphrase = passphrase }
         override suspend fun deny(qrText: String) = denyResult.also { deniedQr = qrText }
     }
 
@@ -111,6 +114,38 @@ class PairingViewModelsTest {
         assertTrue(state is ApproveDeviceUiState.Done)
         assertTrue((state as ApproveDeviceUiState.Done).approved)
         assertEquals("pmpair:1:reg1:AAAA", repo.approvedQr)
+    }
+
+    @Test
+    fun `approver is prompted for a passphrase when the account is protected`() {
+        val repo = FakePairingRepo(approveResult = Result.failure(AppError.PassphraseRequired("Passphrase required")))
+        val vm = ApproveDeviceViewModel(repo)
+        vm.onScanned("pmpair:1:reg1:AAAA")
+        vm.approve()
+        val state = vm.uiState.value
+        assertTrue(state is ApproveDeviceUiState.Confirm)
+        assertTrue((state as ApproveDeviceUiState.Confirm).needsPassphrase)
+    }
+
+    @Test
+    fun `approver retries approval with the supplied passphrase`() {
+        val repo = FakePairingRepo()
+        val vm = ApproveDeviceViewModel(repo)
+        vm.onScanned("pmpair:1:reg1:AAAA")
+        vm.approve("secret")
+        assertTrue(vm.uiState.value is ApproveDeviceUiState.Done)
+        assertEquals("secret", repo.approvedPassphrase)
+    }
+
+    @Test
+    fun `wrong passphrase keeps the approver on the confirm step with an error`() {
+        val repo = FakePairingRepo(approveResult = Result.failure(AppError.Forbidden("Wrong passphrase")))
+        val vm = ApproveDeviceViewModel(repo)
+        vm.onScanned("pmpair:1:reg1:AAAA")
+        vm.approve("wrong")
+        val state = vm.uiState.value
+        assertTrue(state is ApproveDeviceUiState.Confirm)
+        assertEquals("Wrong passphrase", (state as ApproveDeviceUiState.Confirm).passphraseError)
     }
 
     @Test

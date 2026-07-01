@@ -96,7 +96,8 @@ class LiveTestHarness(
         val nonce = newNonce()
         val request = SelfRegisterRequest(
             userId = BosonCrypto.idOf(userKp).toString(),
-            passphrase = "it-pass-${System.nanoTime()}",
+            // No passphrase: the app onboards OAuth-style, so gated ops stay passphrase-free (M6).
+            passphrase = null,
             userName = name,
             deviceId = BosonCrypto.idOf(deviceKp).toString(),
             deviceName = "emulator",

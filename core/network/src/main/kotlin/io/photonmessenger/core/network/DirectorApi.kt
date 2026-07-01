@@ -31,14 +31,17 @@ import io.photonmessenger.core.network.model.FinishRegistrationRequest
 import io.photonmessenger.core.network.model.FinishRegistrationResponse
 import io.photonmessenger.core.network.model.MeDto
 import io.photonmessenger.core.network.model.NodeStatusDto
+import io.photonmessenger.core.network.model.ClearPassphraseRequest
 import io.photonmessenger.core.network.model.NonceDto
 import io.photonmessenger.core.network.model.ProfileDto
 import io.photonmessenger.core.network.model.ProviderDto
 import io.photonmessenger.core.network.model.RegisterDeviceRequest
 import io.photonmessenger.core.network.model.RegistrationIdDto
 import io.photonmessenger.core.network.model.RegistrationInfoDto
+import io.photonmessenger.core.network.model.RemoveDeviceRequest
 import io.photonmessenger.core.network.model.ReplyRegistrationRequest
 import io.photonmessenger.core.network.model.SelfRegisterRequest
+import io.photonmessenger.core.network.model.SetPassphraseRequest
 import io.photonmessenger.core.network.model.TokenDto
 import io.photonmessenger.core.network.model.UpdateProfileRequest
 import okhttp3.RequestBody
@@ -103,6 +106,18 @@ interface DirectorApi {
     suspend fun updateProfile(@Body body: UpdateProfileRequest)
 
     /**
+     * Sets the account's first passphrase or changes an existing one (204 on success). Send
+     * `currentPassphrase` only when one is already configured. 428 if configured and omitted, 403 if
+     * wrong (Director Passphrase Management).
+     */
+    @PUT("client/passphrase")
+    suspend fun setPassphrase(@Body body: SetPassphraseRequest)
+
+    /** Removes the account's passphrase (204). Body carries the current passphrase; 428/403 on mismatch. */
+    @POST("client/passphrase/clear")
+    suspend fun clearPassphrase(@Body body: ClearPassphraseRequest)
+
+    /**
      * Uploads the avatar as a raw (streaming) body; the [body]'s media type sets the avatar
      * Content-Type. The Director stores it and returns the new `bnr://` URI.
      */
@@ -117,9 +132,16 @@ interface DirectorApi {
     @GET("client/devices")
     suspend fun getDevices(): List<DeviceDto>
 
-    /** Deregisters a device from the account (204 on success, 404 if not owned/found). */
-    @DELETE("client/devices/{deviceId}")
-    suspend fun removeDevice(@Path("deviceId") deviceId: String)
+    /**
+     * Deregisters a device from the account (204 on success, 404 if not owned/found). Modeled as a
+     * POST action (not DELETE) because it may carry a passphrase body; the passphrase is required only
+     * when the account has one configured (428/403 otherwise).
+     */
+    @POST("client/devices/{deviceId}/remove")
+    suspend fun removeDevice(
+        @Path("deviceId") deviceId: String,
+        @Body body: RemoveDeviceRequest,
+    )
 
     // --- Multi-device registration (spec 2.4, M6-4) ---
 

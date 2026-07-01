@@ -24,6 +24,7 @@ package io.photonmessenger.feature.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.photonmessenger.core.model.AppError
 import io.photonmessenger.feature.settings.data.DevicePairingRepository
 import io.photonmessenger.feature.settings.data.PairingRequestInfo
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -44,8 +45,16 @@ sealed interface ApproveDeviceUiState {
     /** Reading the scanned request from the Director. */
     data object Loading : ApproveDeviceUiState
 
-    /** Showing what would be authorized; the user approves or denies. */
-    data class Confirm(val info: PairingRequestInfo) : ApproveDeviceUiState
+    /**
+     * Showing what would be authorized; the user approves or denies. [needsPassphrase] is set once the
+     * server has gated approval on the account passphrase (428); [passphraseError] carries a wrong-
+     * passphrase message (403) on a retry.
+     */
+    data class Confirm(
+        val info: PairingRequestInfo,
+        val needsPassphrase: Boolean = false,
+        val passphraseError: String? = null,
+    ) : ApproveDeviceUiState
 
     /** Sealing and uploading the user key. */
     data object Approving : ApproveDeviceUiState
@@ -67,6 +76,9 @@ class ApproveDeviceViewModel @Inject constructor(
     @Volatile
     private var scannedQr: String? = null
 
+    @Volatile
+    private var pendingInfo: PairingRequestInfo? = null
+
     /** Called by the scanner; ignored unless we are still waiting for a code. */
     fun onScanned(qrText: String) {
         if (_uiState.value != ApproveDeviceUiState.Scanning) return
@@ -74,18 +86,22 @@ class ApproveDeviceViewModel @Inject constructor(
         _uiState.value = ApproveDeviceUiState.Loading
         viewModelScope.launch {
             repository.readRequest(qrText)
-                .onSuccess { _uiState.value = ApproveDeviceUiState.Confirm(it) }
+                .onSuccess {
+                    pendingInfo = it
+                    _uiState.value = ApproveDeviceUiState.Confirm(it)
+                }
                 .onFailure { _uiState.value = ApproveDeviceUiState.Failed(it.userMessage()) }
         }
     }
 
-    fun approve() {
+    fun approve(passphrase: String? = null) {
         val qr = scannedQr ?: return
+        val info = pendingInfo ?: return
         _uiState.value = ApproveDeviceUiState.Approving
         viewModelScope.launch {
-            repository.approve(qr)
+            repository.approve(qr, passphrase)
                 .onSuccess { _uiState.value = ApproveDeviceUiState.Done(approved = true) }
-                .onFailure { _uiState.value = ApproveDeviceUiState.Failed(it.userMessage()) }
+                .onFailure { _uiState.value = it.toApproveState(info) }
         }
     }
 
@@ -101,8 +117,20 @@ class ApproveDeviceViewModel @Inject constructor(
     /** Return to scanning after an error or a non-matching scan. */
     fun rescan() {
         scannedQr = null
+        pendingInfo = null
         _uiState.value = ApproveDeviceUiState.Scanning
     }
 
     private fun Throwable.userMessage(): String = message ?: "Pairing failed"
+
+    /**
+     * A passphrase-protected account gates approval: 428 asks for the passphrase, 403 reports a wrong
+     * one. Both keep the user on the confirmation step (with a passphrase field); anything else fails.
+     */
+    private fun Throwable.toApproveState(info: PairingRequestInfo): ApproveDeviceUiState = when (this) {
+        is AppError.PassphraseRequired -> ApproveDeviceUiState.Confirm(info, needsPassphrase = true)
+        is AppError.Forbidden ->
+            ApproveDeviceUiState.Confirm(info, needsPassphrase = true, passphraseError = "Wrong passphrase")
+        else -> ApproveDeviceUiState.Failed(userMessage())
+    }
 }

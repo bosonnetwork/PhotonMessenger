@@ -20,32 +20,22 @@
  * SOFTWARE.
  */
 
-package io.photonmessenger.feature.settings.model
-
-/** The signed-in user's profile (spec 2.6). [avatarUrl] is a fetchable HTTPS URL, null when unset. */
-data class UiProfile(
-    val id: String,
-    val name: String,
-    val bio: String,
-    val email: String,
-    val avatarUrl: String?,
-    val plan: String?,
-    /** Whether the account is protected by a passphrase (second factor); drives the security UI (M6). */
-    val passphraseProtected: Boolean = false,
-)
+package io.photonmessenger.app.session
 
 /**
- * A registered device joined with its live messaging session (spec screen 6, M6-2). The name/app come
- * from the Director device registry; online/lastActive/lastAddress come from the live session (if any).
+ * Pure presentation logic for the connection banner (F1 / M1-16), separated from the composable so
+ * it can be unit-tested. The banner is hidden when the session is idle (signed out) or fully READY.
  */
-data class UiDevice(
-    val deviceId: String,
-    val name: String,
-    val app: String?,
-    val online: Boolean,
-    val lastActive: Long,
-    val lastAddress: String?,
-    val registeredAt: Long,
-    /** This is the device the app is currently running on; its session cannot be revoked from here. */
-    val isCurrent: Boolean,
-)
+
+/** True when the banner should be shown (any transient/failed state). */
+fun SessionStatus.isBannerVisible(): Boolean =
+    phase != SessionPhase.IDLE && phase != SessionPhase.READY
+
+/** User-facing banner text for the current phase; empty for the hidden states. */
+fun SessionStatus.bannerLabel(): String = when (phase) {
+    SessionPhase.DISCOVERING, SessionPhase.CONNECTING -> "Connecting..."
+    SessionPhase.CONNECTED -> "Securing connection..."
+    SessionPhase.DISCONNECTED -> "Reconnecting..."
+    SessionPhase.FAILED -> message ?: "Couldn't connect"
+    SessionPhase.IDLE, SessionPhase.READY -> ""
+}
