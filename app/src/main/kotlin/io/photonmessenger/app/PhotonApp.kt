@@ -22,7 +22,9 @@
 
 package io.photonmessenger.app
 
+import android.app.Activity
 import android.app.Application
+import android.os.Bundle
 import io.photonmessenger.app.notification.NotificationSettings
 import io.photonmessenger.core.boson.BosonTls
 import io.photonmessenger.core.network.NotificationPreferencesStore
@@ -43,6 +45,9 @@ class PhotonApp : Application() {
     @Inject
     lateinit var notificationSettings: NotificationSettings
 
+    @Inject
+    lateinit var foregroundState: AppForegroundState
+
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
@@ -55,5 +60,17 @@ class PhotonApp : Application() {
         notificationPreferencesStore.preferences
             .onEach { notificationSettings.update(it) }
             .launchIn(appScope)
+
+        // Track foreground state so the message notifier can suppress notifications while the app is
+        // visible (F3): the in-app UI already shows incoming messages live.
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityStarted(activity: Activity) = foregroundState.activityStarted()
+            override fun onActivityStopped(activity: Activity) = foregroundState.activityStopped()
+            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+            override fun onActivityResumed(activity: Activity) = Unit
+            override fun onActivityPaused(activity: Activity) = Unit
+            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+            override fun onActivityDestroyed(activity: Activity) = Unit
+        })
     }
 }

@@ -23,6 +23,7 @@
 package io.photonmessenger.app.session
 
 import android.content.Context
+import io.photonmessenger.app.notification.MessageNotifier
 import io.photonmessenger.app.service.MessagingForegroundService
 import io.photonmessenger.core.boson.BosonSessionManager
 import io.photonmessenger.core.model.ConnectionState
@@ -66,6 +67,7 @@ class SessionController @Inject constructor(
     private val apiFactory: DirectorApiFactory,
     private val configStore: DirectorConfigStore,
     private val sessionManager: BosonSessionManager,
+    private val messageNotifier: MessageNotifier,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mutex = Mutex()
@@ -100,6 +102,7 @@ class SessionController @Inject constructor(
                 val coords = ServiceDiscovery.toServiceCoords(api().getNodeStatus())
                 sessionManager.connect(coords)
             }.onSuccess {
+                sessionManager.messagingClient?.let { messageNotifier.attach(it) }
                 active.value = true
             }.onFailure { e ->
                 active.value = false
@@ -121,6 +124,7 @@ class SessionController @Inject constructor(
             active.value = false
             own.value = SessionStatus(SessionPhase.IDLE)
             cachedApi = null
+            messageNotifier.detach()
             runCatching { sessionManager.disconnect() }
             MessagingForegroundService.stop(context)
         }
