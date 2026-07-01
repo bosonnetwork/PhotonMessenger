@@ -52,6 +52,7 @@ class ChatViewModelsTest {
         private val msgs: Flow<List<UiMessage>>,
         var sendResult: Result<Unit> = Result.success(Unit),
         var headerResult: Result<ChatHeader> = Result.success(ChatHeader(title = "Header")),
+        var olderResult: Result<List<UiMessage>> = Result.success(emptyList()),
     ) : ChatRepository {
         override fun conversations() = convos
         override suspend fun header(conversationId: String) = headerResult
@@ -60,8 +61,7 @@ class ChatViewModelsTest {
         override suspend fun sendAttachment(recipientId: String, uriString: String) = sendResult
         override suspend fun downloadAttachment(attachment: io.photonmessenger.feature.chat.model.UiAttachment) =
             Result.failure<java.io.File>(UnsupportedOperationException("not used"))
-        override suspend fun loadOlder(conversationId: String, before: Long, limit: Int) =
-            Result.success(emptyList<UiMessage>())
+        override suspend fun loadOlder(conversationId: String, before: Long, limit: Int) = olderResult
         override suspend fun removeConversation(conversationId: String) = Result.success(Unit)
     }
 
@@ -125,13 +125,37 @@ class ChatViewModelsTest {
     }
 
     @Test
-    fun `failed send emits an error`() = runTest {
+    fun `failed send is retriable with the original text`() = runTest {
         val repo = FakeChatRepo(convosFlow, msgsFlow, sendResult = Result.failure(IllegalStateException("nope")))
         val vm = ChatViewModel(repo, SavedStateHandle(mapOf("conversationId" to "abc")))
 
-        vm.errors.test {
+        vm.sendFailures.test {
             vm.send("hi")
-            assertTrue(awaitItem().contains("nope"))
+            val failure = awaitItem()
+            assertTrue(failure.message.contains("nope"))
+            assertEquals("hi", failure.text)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `loadOlder prepends an older page`() = runTest {
+        msgsFlow.value = listOf(UiMessage("m1", "hi", fromMe = false, createdAt = 5))
+        val repo = FakeChatRepo(
+            convosFlow,
+            msgsFlow,
+            olderResult = Result.success(listOf(UiMessage("m0", "earlier", fromMe = false, createdAt = 1))),
+        )
+        val vm = ChatViewModel(repo, SavedStateHandle(mapOf("conversationId" to "abc")))
+
+        vm.uiState.test {
+            var state = awaitItem()
+            while (state.loading) state = awaitItem()
+            assertEquals(listOf("m1"), state.messages.map { it.id })
+
+            vm.loadOlder()
+            val paged = awaitItem()
+            assertEquals(listOf("m0", "m1"), paged.messages.map { it.id })
             cancelAndIgnoreRemainingEvents()
         }
     }

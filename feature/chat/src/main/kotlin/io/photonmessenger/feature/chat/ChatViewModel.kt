@@ -31,6 +31,7 @@ import io.photonmessenger.feature.chat.model.ChatHeader
 import io.photonmessenger.feature.chat.model.UiAttachment
 import io.photonmessenger.feature.chat.model.UiMessage
 import io.photonmessenger.feature.chat.model.shortId
+import io.bosonnetwork.photonmessaging.exceptions.MessageTimeoutException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.File
 import javax.inject.Inject
@@ -41,6 +42,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -51,6 +53,9 @@ data class ChatUiState(
     val messages: List<UiMessage> = emptyList(),
     val error: String? = null,
 )
+
+/** A failed text send that can be retried with the same [text] (M3-8). */
+data class SendFailure(val message: String, val text: String)
 
 /** Per-attachment download state, keyed by content id. */
 sealed interface AttachmentDownload {
@@ -72,6 +77,14 @@ class ChatViewModel @Inject constructor(
     private val _header = MutableStateFlow(ChatHeader(title = shortId(conversationId)))
     val header: StateFlow<ChatHeader> = _header.asStateFlow()
 
+    /** Older pages loaded via pagination, merged with the live stream (M3-5). */
+    private val olderMessages = MutableStateFlow<List<UiMessage>>(emptyList())
+    private val _loadingOlder = MutableStateFlow(false)
+    val loadingOlder: StateFlow<Boolean> = _loadingOlder.asStateFlow()
+
+    @Volatile
+    private var reachedStart = false
+
     init {
         viewModelScope.launch {
             repository.header(conversationId).onSuccess { _header.value = it }
@@ -79,8 +92,11 @@ class ChatViewModel @Inject constructor(
     }
 
     val uiState: StateFlow<ChatUiState> =
-        repository.messages(conversationId)
-            .map { ChatUiState(loading = false, messages = it) }
+        combine(repository.messages(conversationId), olderMessages) { live, older ->
+            // De-duplicate the pagination boundary by id, then order oldest -> newest.
+            val merged = (older + live).associateBy { it.id }.values.sortedBy { it.createdAt }
+            ChatUiState(loading = false, messages = merged)
+        }
             .catch { emit(ChatUiState(loading = false, error = it.message)) }
             .stateIn(
                 scope = viewModelScope,
@@ -91,6 +107,27 @@ class ChatViewModel @Inject constructor(
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val errors = _messages.asSharedFlow()
 
+    private val _sendFailures = MutableSharedFlow<SendFailure>(extraBufferCapacity = 1)
+    val sendFailures = _sendFailures.asSharedFlow()
+
+    /** Loads an older page when the user scrolls to the top (M3-5). Idempotent + stops at the start. */
+    fun loadOlder() {
+        if (_loadingOlder.value || reachedStart) return
+        val oldest = uiState.value.messages.firstOrNull()?.createdAt ?: return
+        _loadingOlder.value = true
+        viewModelScope.launch {
+            repository.loadOlder(conversationId, oldest, ChatRepository.PAGE_SIZE)
+                .onSuccess { page ->
+                    // getMessagesBefore is inclusive of the boundary, so a page that adds nothing new
+                    // (only the already-known oldest) means we've reached the start.
+                    if (page.size < ChatRepository.PAGE_SIZE) reachedStart = true
+                    olderMessages.update { it + page }
+                }
+                .onFailure { e -> _messages.tryEmit("Couldn't load older messages: ${e.message ?: "unknown error"}") }
+            _loadingOlder.value = false
+        }
+    }
+
     private val _downloads = MutableStateFlow<Map<String, AttachmentDownload>>(emptyMap())
     val downloads: StateFlow<Map<String, AttachmentDownload>> = _downloads.asStateFlow()
 
@@ -99,9 +136,14 @@ class ChatViewModel @Inject constructor(
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
             repository.sendText(conversationId, trimmed).onFailure { e ->
-                _messages.tryEmit("Couldn't send: ${e.message ?: "unknown error"}")
+                _sendFailures.tryEmit(SendFailure(sendErrorMessage(e), trimmed))
             }
         }
+    }
+
+    private fun sendErrorMessage(e: Throwable): String = when (e) {
+        is MessageTimeoutException -> "Message timed out"
+        else -> "Couldn't send: ${e.message ?: "unknown error"}"
     }
 
     fun sendAttachment(uri: String) {

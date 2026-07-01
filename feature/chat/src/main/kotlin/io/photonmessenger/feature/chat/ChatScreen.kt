@@ -54,6 +54,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -63,6 +64,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -87,6 +89,7 @@ fun ChatScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val header by viewModel.header.collectAsStateWithLifecycle()
     val downloads by viewModel.downloads.collectAsStateWithLifecycle()
+    val loadingOlder by viewModel.loadingOlder.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
     var draft by remember { mutableStateOf("") }
@@ -97,8 +100,28 @@ fun ChatScreen(
 
     LaunchedEffect(Unit) { viewModel.errors.collect { snackbar.showSnackbar(it) } }
 
-    LaunchedEffect(state.messages.size) {
-        if (state.messages.isNotEmpty()) listState.animateScrollToItem(state.messages.lastIndex)
+    // Failed text sends offer an inline retry (M3-8).
+    LaunchedEffect(Unit) {
+        viewModel.sendFailures.collect { failure ->
+            val result = snackbar.showSnackbar(
+                message = failure.message,
+                actionLabel = "Retry",
+                withDismissAction = true,
+            )
+            if (result == SnackbarResult.ActionPerformed) viewModel.send(failure.text)
+        }
+    }
+
+    // Load older history when the user scrolls to the top (M3-5).
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .collect { index -> if (index == 0) viewModel.loadOlder() }
+    }
+
+    // Auto-scroll to the newest message only when one is appended (not when older pages prepend).
+    val newestId = state.messages.lastOrNull()?.id
+    LaunchedEffect(newestId) {
+        if (newestId != null) listState.animateScrollToItem(state.messages.lastIndex)
     }
 
     Scaffold(
@@ -153,6 +176,13 @@ fun ChatScreen(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            if (loadingOlder) {
+                item(key = "loading-older") {
+                    Box(modifier = Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
             items(state.messages, key = { it.id }) { msg ->
                 val download = msg.attachment?.let { att ->
                     (att.source as? AttachmentSource.Remote)?.let { downloads[it.contentId] }
