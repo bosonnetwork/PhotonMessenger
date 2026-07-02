@@ -23,7 +23,9 @@
 package io.photonmessenger.core.network
 
 import io.photonmessenger.core.model.AuthTokenStore
+import java.net.URI
 import kotlinx.serialization.json.Json
+import okhttp3.CertificatePinner
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
@@ -33,7 +35,8 @@ import retrofit2.create
 /**
  * Builds a [DirectorApi] bound to a specific Director base URL. The base URL is dynamic
  * (user-configurable, M1-1), so the API is rebuilt when it changes. The Bearer interceptor attaches
- * the CWT from [AuthTokenStore]. TLS pinning is layered on the OkHttpClient in M1-4.
+ * the CWT from [AuthTokenStore]. When the base URL is HTTPS and pins are configured (see
+ * [KnownDirectorPins]), an OkHttp [CertificatePinner] enforces SHA-256 SPKI pinning (X-S4 / M1-4).
  */
 class DirectorApiFactory(
     private val tokenStore: AuthTokenStore,
@@ -44,6 +47,7 @@ class DirectorApiFactory(
         val client = OkHttpClient.Builder()
             .addInterceptor(AuthInterceptor(tokenStore))
             .authenticator(TokenAuthenticator(tokenStore, "${config.authPrefix}/refresh", json))
+            .apply { certificatePinner(config)?.let { certificatePinner(it) } }
             .build()
 
         return Retrofit.Builder()
@@ -56,6 +60,22 @@ class DirectorApiFactory(
     }
 
     companion object {
+        /**
+         * A [CertificatePinner] pinning the config's host to its configured pins, or null when there
+         * is nothing to enforce (no pins, or a cleartext/non-HTTPS base URL). Pinning a cleartext
+         * host would be a silent no-op, so we require HTTPS to avoid a false sense of protection.
+         * Exposed for tests.
+         */
+        internal fun certificatePinner(config: DirectorConfig): CertificatePinner? {
+            if (config.certificatePins.isEmpty()) return null
+            val uri = runCatching { URI(config.baseUrl) }.getOrNull() ?: return null
+            if (!uri.scheme.equals("https", ignoreCase = true)) return null
+            val host = uri.host ?: return null
+            return CertificatePinner.Builder()
+                .apply { config.certificatePins.forEach { add(host, it) } }
+                .build()
+        }
+
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
         private val DEFAULT_JSON = Json {
             ignoreUnknownKeys = true

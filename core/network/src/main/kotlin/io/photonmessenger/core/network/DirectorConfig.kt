@@ -29,6 +29,12 @@ package io.photonmessenger.core.network
  */
 data class DirectorConfig(
     val baseUrl: String,
+    /**
+     * SHA-256 SPKI pins ("sha256/<base64>") for the Director host, applied by [DirectorApiFactory]
+     * when [baseUrl] is HTTPS. Empty means no pinning (the dev default, which is cleartext anyway).
+     * Populated from [KnownDirectorPins] when the config is built. X-S4 / M1-4.
+     */
+    val certificatePins: List<String> = emptyList(),
 ) {
     val apiPrefix: String get() = "$baseUrl/api/v1"
     val clientPrefix: String get() = "$apiPrefix/client"

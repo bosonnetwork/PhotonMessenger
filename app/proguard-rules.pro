@@ -19,3 +19,9 @@
 # ML Kit barcode model dependencies may reference optional classes.
 -dontwarn com.google.mlkit.**
 -dontwarn com.google.android.gms.**
+
+# BouncyCastle JSSE/JCE provider (X-S4): the mqtts + ion-store TLS handshake resolves ed25519 via
+# BCJSSE, and the providers load algorithm implementations reflectively by class name. Stripping or
+# renaming them would break the TLS handshake in release only, so keep the whole tree.
+-keep class org.bouncycastle.** { *; }
+-dontwarn org.bouncycastle.**
