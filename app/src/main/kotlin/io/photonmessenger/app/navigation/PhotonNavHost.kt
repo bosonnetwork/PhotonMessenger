@@ -123,6 +123,13 @@ fun PhotonNavHost(
             composable(TopLevelDestination.HOME.route) {
                 ConversationsScreen(
                     onOpenConversation = { id -> navController.navigate("chat/$id") },
+                    onNewChat = {
+                        navController.navigate(TopLevelDestination.CONTACTS.route) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                 )
             }
             composable(TopLevelDestination.CONTACTS.route) {

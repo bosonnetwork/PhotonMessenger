@@ -52,6 +52,9 @@ data class ChatHeader(
 fun shortId(id: String): String =
     if (id.length <= 14) id else id.take(8) + "..." + id.takeLast(4)
 
+/** Delivery state of an outgoing bubble. Incoming and confirmed messages are always [SENT]. */
+enum class MessageStatus { SENDING, SENT, FAILED }
+
 /** UI projection of a single message bubble. */
 data class UiMessage(
     val id: String,
@@ -59,6 +62,7 @@ data class UiMessage(
     val fromMe: Boolean,
     val createdAt: Long,
     val attachment: UiAttachment? = null,
+    val status: MessageStatus = MessageStatus.SENT,
 )
 
 fun Conversation.toUi(): UiConversation = UiConversation(

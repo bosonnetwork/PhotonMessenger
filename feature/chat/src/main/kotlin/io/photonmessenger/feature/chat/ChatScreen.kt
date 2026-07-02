@@ -67,14 +67,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import io.photonmessenger.core.designsystem.component.ResponsiveContent
 import io.photonmessenger.feature.chat.model.AttachmentKind
 import io.photonmessenger.feature.chat.model.AttachmentSource
+import io.photonmessenger.feature.chat.model.MessageStatus
 import io.photonmessenger.feature.chat.model.UiAttachment
 import io.photonmessenger.feature.chat.model.UiMessage
 
@@ -108,7 +111,7 @@ fun ChatScreen(
                 actionLabel = "Retry",
                 withDismissAction = true,
             )
-            if (result == SnackbarResult.ActionPerformed) viewModel.send(failure.text)
+            if (result == SnackbarResult.ActionPerformed) viewModel.retrySend(failure)
         }
     }
 
@@ -170,28 +173,32 @@ fun ChatScreen(
             )
         },
     ) { padding ->
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.padding(padding).fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            if (loadingOlder) {
-                item(key = "loading-older") {
-                    Box(modifier = Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
+        ResponsiveContent(modifier = Modifier.padding(padding)) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (loadingOlder) {
+                    item(key = "loading-older") {
+                        Box(modifier = Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                        }
                     }
                 }
-            }
-            items(state.messages, key = { it.id }) { msg ->
-                val download = msg.attachment?.let { att ->
-                    (att.source as? AttachmentSource.Remote)?.let { downloads[it.contentId] }
+                items(state.messages, key = { it.id }) { msg ->
+                    val download = msg.attachment?.let { att ->
+                        (att.source as? AttachmentSource.Remote)?.let { downloads[it.contentId] }
+                    }
+                    MessageBubble(
+                        message = msg,
+                        download = download,
+                        onDownload = { viewModel.download(it) },
+                        onRetry = { viewModel.retrySend(SendFailure("", it.text, it.id)) },
+                        modifier = Modifier.animateItem(),
+                    )
                 }
-                MessageBubble(
-                    message = msg,
-                    download = download,
-                    onDownload = { viewModel.download(it) },
-                )
             }
         }
     }
@@ -202,26 +209,65 @@ private fun MessageBubble(
     message: UiMessage,
     download: AttachmentDownload?,
     onDownload: (UiAttachment) -> Unit,
+    onRetry: (UiMessage) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val alignment = if (message.fromMe) Alignment.CenterEnd else Alignment.CenterStart
-    val color = if (message.fromMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-    val onColor = if (message.fromMe) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
-        Surface(
-            color = color,
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.widthIn(max = 280.dp),
-        ) {
-            if (message.attachment != null) {
-                AttachmentContent(message.attachment, download, onColor, onDownload)
-            } else {
-                Text(
-                    text = message.text,
-                    color = onColor,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                )
+    val alignment = if (message.fromMe) Alignment.End else Alignment.Start
+    val bubbleAlignment = if (message.fromMe) Alignment.CenterEnd else Alignment.CenterStart
+    val failed = message.status == MessageStatus.FAILED
+    val baseColor = if (message.fromMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+    val color = if (failed) MaterialTheme.colorScheme.errorContainer else baseColor
+    val onColor = when {
+        failed -> MaterialTheme.colorScheme.onErrorContainer
+        message.fromMe -> MaterialTheme.colorScheme.onPrimary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    // A sending bubble is slightly muted until it is confirmed on the live stream (M3-4).
+    val bubbleModifier = Modifier
+        .widthIn(max = 280.dp)
+        .then(if (message.status == MessageStatus.SENDING) Modifier.alpha(0.7f) else Modifier)
+    Column(modifier = modifier.fillMaxWidth(), horizontalAlignment = alignment) {
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = bubbleAlignment) {
+            Surface(
+                color = color,
+                shape = RoundedCornerShape(16.dp),
+                modifier = bubbleModifier,
+            ) {
+                if (message.attachment != null) {
+                    AttachmentContent(message.attachment, download, onColor, onDownload)
+                } else {
+                    Text(
+                        text = message.text,
+                        color = onColor,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
             }
         }
+        MessageStatusLabel(message, onRetry)
+    }
+}
+
+/** Shows delivery state under outgoing bubbles: a "Sending" hint, or a tap-to-retry failure (M3-4). */
+@Composable
+private fun MessageStatusLabel(message: UiMessage, onRetry: (UiMessage) -> Unit) {
+    if (!message.fromMe) return
+    when (message.status) {
+        MessageStatus.SENDING -> Text(
+            text = "Sending...",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+        )
+        MessageStatus.FAILED -> Text(
+            text = "Not delivered. Tap to retry",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier
+                .clickable { onRetry(message) }
+                .padding(horizontal = 12.dp, vertical = 2.dp),
+        )
+        MessageStatus.SENT -> Unit
     }
 }
 

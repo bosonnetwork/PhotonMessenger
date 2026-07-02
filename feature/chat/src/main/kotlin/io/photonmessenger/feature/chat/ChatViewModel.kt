@@ -28,6 +28,7 @@ import androidx.lifecycle.viewModelScope
 import io.photonmessenger.feature.chat.data.ChatRepository
 import io.photonmessenger.feature.chat.model.AttachmentSource
 import io.photonmessenger.feature.chat.model.ChatHeader
+import io.photonmessenger.feature.chat.model.MessageStatus
 import io.photonmessenger.feature.chat.model.UiAttachment
 import io.photonmessenger.feature.chat.model.UiMessage
 import io.photonmessenger.feature.chat.model.shortId
@@ -54,8 +55,9 @@ data class ChatUiState(
     val error: String? = null,
 )
 
-/** A failed text send that can be retried with the same [text] (M3-8). */
-data class SendFailure(val message: String, val text: String)
+/** A failed text send that can be retried with the same [text] (M3-8). [pendingId] identifies the
+ *  optimistic bubble (M3-4) so a retry replays it in place instead of stacking a new one. */
+data class SendFailure(val message: String, val text: String, val pendingId: String)
 
 /** Per-attachment download state, keyed by content id. */
 sealed interface AttachmentDownload {
@@ -85,6 +87,9 @@ class ChatViewModel @Inject constructor(
     @Volatile
     private var reachedStart = false
 
+    /** Optimistic outgoing bubbles shown immediately on send, dropped once confirmed (M3-4). */
+    private val pending = MutableStateFlow<List<UiMessage>>(emptyList())
+
     init {
         viewModelScope.launch {
             repository.header(conversationId).onSuccess { _header.value = it }
@@ -92,9 +97,10 @@ class ChatViewModel @Inject constructor(
     }
 
     val uiState: StateFlow<ChatUiState> =
-        combine(repository.messages(conversationId), olderMessages) { live, older ->
-            // De-duplicate the pagination boundary by id, then order oldest -> newest.
-            val merged = (older + live).associateBy { it.id }.values.sortedBy { it.createdAt }
+        combine(repository.messages(conversationId), olderMessages, pending) { live, older, sending ->
+            // De-duplicate the pagination boundary by id, then order oldest -> newest. Pending
+            // bubbles carry temp ids so they never collide with confirmed messages.
+            val merged = (older + live + sending).associateBy { it.id }.values.sortedBy { it.createdAt }
             ChatUiState(loading = false, messages = merged)
         }
             .catch { emit(ChatUiState(loading = false, error = it.message)) }
@@ -134,10 +140,38 @@ class ChatViewModel @Inject constructor(
     fun send(text: String) {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
+        val pendingId = "pending-${System.nanoTime()}"
+        pending.update {
+            it + UiMessage(
+                id = pendingId,
+                text = trimmed,
+                fromMe = true,
+                createdAt = System.currentTimeMillis(),
+                status = MessageStatus.SENDING,
+            )
+        }
+        launchSend(pendingId, trimmed)
+    }
+
+    /** Re-sends a failed optimistic bubble in place (M3-4/M3-8). */
+    fun retrySend(failure: SendFailure) {
+        pending.update { list ->
+            list.map { if (it.id == failure.pendingId) it.copy(status = MessageStatus.SENDING) else it }
+        }
+        launchSend(failure.pendingId, failure.text)
+    }
+
+    private fun launchSend(pendingId: String, text: String) {
         viewModelScope.launch {
-            repository.sendText(conversationId, trimmed).onFailure { e ->
-                _sendFailures.tryEmit(SendFailure(sendErrorMessage(e), trimmed))
-            }
+            repository.sendText(conversationId, text)
+                // The confirmed message arrives on the live stream, so drop the optimistic bubble.
+                .onSuccess { pending.update { list -> list.filterNot { it.id == pendingId } } }
+                .onFailure { e ->
+                    pending.update { list ->
+                        list.map { if (it.id == pendingId) it.copy(status = MessageStatus.FAILED) else it }
+                    }
+                    _sendFailures.tryEmit(SendFailure(sendErrorMessage(e), text, pendingId))
+                }
         }
     }
 

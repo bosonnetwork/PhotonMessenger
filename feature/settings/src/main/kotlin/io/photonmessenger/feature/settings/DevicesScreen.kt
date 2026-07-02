@@ -36,7 +36,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.DropdownMenu
@@ -59,13 +58,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.photonmessenger.core.designsystem.component.EmptyState
+import io.photonmessenger.core.designsystem.component.ErrorState
+import io.photonmessenger.core.designsystem.component.LoadingState
+import io.photonmessenger.core.designsystem.component.ResponsiveContent
 import io.photonmessenger.feature.settings.model.UiDevice
 import java.text.DateFormat
 import java.util.Date
@@ -96,17 +98,14 @@ fun DevicesScreen(
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize()) {
-            PairingActions(onAddDevice = onAddDevice, onApproveDevice = onApproveDevice)
-            HorizontalDivider()
-            Box(Modifier.fillMaxSize()) {
+        ResponsiveContent(modifier = Modifier.padding(padding)) {
+            Column(Modifier.fillMaxSize()) {
+                PairingActions(onAddDevice = onAddDevice, onApproveDevice = onApproveDevice)
+                HorizontalDivider()
                 when {
-                    state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                    state.error != null -> Text(
-                        state.error ?: "Error",
-                        Modifier.align(Alignment.Center).padding(16.dp),
-                    )
-                    state.devices.isEmpty() -> Text("No devices", Modifier.align(Alignment.Center))
+                    state.loading -> LoadingState()
+                    state.error != null -> ErrorState(state.error ?: "Error")
+                    state.devices.isEmpty() -> EmptyState("No devices")
                     else -> LazyColumn(Modifier.fillMaxSize()) {
                         items(state.devices, key = { it.deviceId }) { device ->
                             DeviceRow(device, viewModel)

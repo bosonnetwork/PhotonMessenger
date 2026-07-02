@@ -32,7 +32,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -52,11 +51,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.photonmessenger.core.designsystem.component.EmptyState
+import io.photonmessenger.core.designsystem.component.ErrorState
+import io.photonmessenger.core.designsystem.component.LoadingState
+import io.photonmessenger.core.designsystem.component.ResponsiveContent
 import io.photonmessenger.feature.contacts.model.UiChannel
 import io.photonmessenger.feature.contacts.model.UiChannelMember
 import io.photonmessenger.feature.contacts.model.UiChannelRole
@@ -94,19 +96,12 @@ fun ChannelDetailScreen(
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        Box(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize(),
-        ) {
+        ResponsiveContent(modifier = Modifier.padding(padding)) {
             val detail = state.detail
             when {
-                state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                state.error != null -> Text(
-                    state.error ?: "Error",
-                    modifier = Modifier.align(Alignment.Center).padding(16.dp),
-                )
-                detail == null -> Text("Channel not found", Modifier.align(Alignment.Center))
+                state.loading -> LoadingState()
+                state.error != null -> ErrorState(state.error ?: "Error")
+                detail == null -> EmptyState("Channel not found")
                 else -> LazyColumn(Modifier.fillMaxSize()) {
                     item { ChannelHeader(detail.channel) }
                     item { HorizontalDivider() }

@@ -32,7 +32,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,18 +39,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -77,7 +72,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -88,7 +82,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
+import io.photonmessenger.core.designsystem.component.LoadingState
+import io.photonmessenger.core.designsystem.component.PhotonAvatar
+import io.photonmessenger.core.designsystem.component.ResponsiveContent
 import io.photonmessenger.core.model.NotificationPreferences
 import io.photonmessenger.core.model.ThemeMode
 import io.photonmessenger.feature.settings.model.UiProfile
@@ -128,10 +124,9 @@ fun SettingsScreen(
         topBar = { TopAppBar(title = { Text("Settings") }) },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        Box(Modifier.padding(padding).fillMaxSize()) {
+        ResponsiveContent(modifier = Modifier.padding(padding)) {
             when {
-                state.loading && state.profile == null ->
-                    CircularProgressIndicator(Modifier.align(Alignment.Center))
+                state.loading && state.profile == null -> LoadingState()
 
                 else -> Column(
                     Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
@@ -343,30 +338,15 @@ private fun ProfileHeader(
         Modifier.fillMaxWidth().padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(
-            Modifier
-                .size(96.dp)
-                .clip(CircleShape)
+        PhotonAvatar(
+            model = profile?.avatarUrl,
+            name = profile?.name,
+            size = 96.dp,
+            contentDescription = "Change profile photo",
+            modifier = Modifier
                 .clickable(onClick = onChangePhoto)
                 .semantics { contentDescription = "Change profile photo" },
-            contentAlignment = Alignment.Center,
-        ) {
-            val url = profile?.avatarUrl
-            if (url != null) {
-                AsyncImage(
-                    model = url,
-                    contentDescription = "Profile photo",
-                    modifier = Modifier.size(96.dp).clip(CircleShape),
-                )
-            } else {
-                Icon(
-                    Icons.Filled.Person,
-                    contentDescription = null,
-                    modifier = Modifier.size(64.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
+        )
         Spacer(Modifier.height(8.dp))
         Text(
             text = profile?.name?.takeIf { it.isNotBlank() } ?: "No name set",

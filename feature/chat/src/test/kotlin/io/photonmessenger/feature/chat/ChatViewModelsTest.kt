@@ -26,6 +26,7 @@ import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import io.photonmessenger.feature.chat.data.ChatRepository
 import io.photonmessenger.feature.chat.model.ChatHeader
+import io.photonmessenger.feature.chat.model.MessageStatus
 import io.photonmessenger.feature.chat.model.UiConversation
 import io.photonmessenger.feature.chat.model.UiMessage
 import kotlinx.coroutines.Dispatchers
@@ -134,6 +135,72 @@ class ChatViewModelsTest {
             val failure = awaitItem()
             assertTrue(failure.message.contains("nope"))
             assertEquals("hi", failure.text)
+            assertTrue(failure.pendingId.startsWith("pending-"))
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `failed send leaves a failed optimistic bubble`() = runTest {
+        val repo = FakeChatRepo(convosFlow, msgsFlow, sendResult = Result.failure(IllegalStateException("nope")))
+        val vm = ChatViewModel(repo, SavedStateHandle(mapOf("conversationId" to "abc")))
+
+        vm.uiState.test {
+            var state = awaitItem()
+            while (state.loading) state = awaitItem()
+
+            vm.send("hi")
+            // The bubble is shown optimistically as SENDING, then settles to FAILED once the send fails.
+            var withBubble = awaitItem()
+            while (withBubble.messages.singleOrNull()?.status != MessageStatus.FAILED) withBubble = awaitItem()
+            val bubble = withBubble.messages.single()
+            assertEquals("hi", bubble.text)
+            assertTrue(bubble.fromMe)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `successful send leaves no optimistic bubble`() = runTest {
+        val repo = FakeChatRepo(convosFlow, msgsFlow)
+        val vm = ChatViewModel(repo, SavedStateHandle(mapOf("conversationId" to "abc")))
+
+        vm.uiState.test {
+            var state = awaitItem()
+            while (state.loading) state = awaitItem()
+            assertTrue(state.messages.isEmpty())
+
+            vm.send("hi")
+            // The confirmed message would arrive on the live stream; the optimistic bubble is dropped,
+            // so the settled state carries no lingering "sending" message.
+            cancelAndIgnoreRemainingEvents()
+            assertTrue(vm.uiState.value.messages.isEmpty())
+        }
+    }
+
+    @Test
+    fun `search filters conversations and reports a filtered-empty result`() = runTest {
+        convosFlow.value = listOf(
+            UiConversation("a", "Alice", "hi", false, 10),
+            UiConversation("b", "Bob", "yo", false, 9),
+        )
+        val vm = ConversationsViewModel(FakeChatRepo(convosFlow, msgsFlow))
+
+        vm.uiState.test {
+            var state = awaitItem()
+            while (state.loading) state = awaitItem()
+            assertEquals(2, state.conversations.size)
+
+            vm.onQueryChange("ali")
+            var filtered = awaitItem()
+            while (filtered.conversations.size != 1) filtered = awaitItem()
+            assertEquals(listOf("Alice"), filtered.conversations.map { it.title })
+            assertFalse(filtered.filteredEmpty)
+
+            vm.onQueryChange("zzz")
+            var empty = awaitItem()
+            while (empty.conversations.isNotEmpty()) empty = awaitItem()
+            assertTrue(empty.filteredEmpty)
             cancelAndIgnoreRemainingEvents()
         }
     }

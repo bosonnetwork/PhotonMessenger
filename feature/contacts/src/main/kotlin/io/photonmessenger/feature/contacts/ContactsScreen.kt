@@ -37,7 +37,6 @@ import androidx.compose.material.icons.outlined.AddLink
 import androidx.compose.material.icons.outlined.GroupAdd
 import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -59,13 +58,16 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.LaunchedEffect
+import io.photonmessenger.core.designsystem.component.EmptyState
+import io.photonmessenger.core.designsystem.component.ErrorState
+import io.photonmessenger.core.designsystem.component.LoadingState
+import io.photonmessenger.core.designsystem.component.ResponsiveContent
 import io.photonmessenger.feature.contacts.model.UiContact
 import io.photonmessenger.feature.contacts.model.UiFriendRequest
 
@@ -113,7 +115,8 @@ fun ContactsScreen(
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+        ResponsiveContent(modifier = Modifier.padding(padding)) {
+            Column(modifier = Modifier.fillMaxSize()) {
             val tabs = ContactsTab.entries
             TabRow(selectedTabIndex = selectedTab) {
                 tabs.forEachIndexed { index, tab ->
@@ -131,8 +134,8 @@ fun ContactsScreen(
             }
 
             when {
-                state.loading -> CenterBox { CircularProgressIndicator() }
-                state.error != null -> CenterBox { Text(state.error!!) }
+                state.loading -> LoadingState()
+                state.error != null -> ErrorState(state.error!!)
                 else -> when (tabs[selectedTab]) {
                     ContactsTab.FRIENDS -> ContactList(
                         contacts = state.friends,
@@ -157,6 +160,7 @@ fun ContactsScreen(
                         onClick = onOpenChannel,
                     )
                 }
+            }
             }
         }
     }
@@ -204,18 +208,22 @@ private fun ContactList(
     onClick: ((String) -> Unit)? = null,
 ) {
     if (contacts.isEmpty()) {
-        CenterBox { Text(emptyText) }
+        EmptyState(emptyText)
         return
     }
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         items(contacts, key = { it.id }) { contact ->
             var menuOpen by remember(contact.id) { mutableStateOf(false) }
             ListItem(
-                modifier = if (onClick != null) {
-                    Modifier.clickable(role = Role.Button) { onClick(contact.id) }
-                } else {
-                    Modifier
-                },
+                modifier = Modifier
+                    .animateItem()
+                    .then(
+                        if (onClick != null) {
+                            Modifier.clickable(role = Role.Button) { onClick(contact.id) }
+                        } else {
+                            Modifier
+                        },
+                    ),
                 headlineContent = { Text(contact.displayName) },
                 supportingContent = {
                     val flags = buildList {
@@ -263,12 +271,13 @@ private fun RequestList(
     onDecline: (String) -> Unit,
 ) {
     if (requests.isEmpty()) {
-        CenterBox { Text("No pending requests.") }
+        EmptyState("No pending requests.")
         return
     }
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         items(requests, key = { it.userId }) { request ->
             ListItem(
+                modifier = Modifier.animateItem(),
                 headlineContent = { Text(request.userId) },
                 supportingContent = { if (request.hello.isNotBlank()) Text(request.hello) },
                 trailingContent = {
@@ -370,7 +379,3 @@ private fun EditAliasDialog(
     )
 }
 
-@Composable
-private fun CenterBox(content: @Composable () -> Unit) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { content() }
-}

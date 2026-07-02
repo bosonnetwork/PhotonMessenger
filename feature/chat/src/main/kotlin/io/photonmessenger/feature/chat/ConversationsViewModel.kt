@@ -28,16 +28,20 @@ import io.photonmessenger.feature.chat.data.ChatRepository
 import io.photonmessenger.feature.chat.model.UiConversation
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 
 data class ConversationsUiState(
     val loading: Boolean = true,
     val conversations: List<UiConversation> = emptyList(),
     val error: String? = null,
+    /** True when a non-blank [query] filtered every conversation out (drives the empty-state copy). */
+    val filteredEmpty: Boolean = false,
 )
 
 @HiltViewModel
@@ -45,9 +49,23 @@ class ConversationsViewModel @Inject constructor(
     private val repository: ChatRepository,
 ) : ViewModel() {
 
+    private val _query = MutableStateFlow("")
+    val query: StateFlow<String> = _query.asStateFlow()
+
+    fun onQueryChange(value: String) { _query.value = value }
+
     val uiState: StateFlow<ConversationsUiState> =
-        repository.conversations()
-            .map { ConversationsUiState(loading = false, conversations = it) }
+        combine(repository.conversations(), _query) { conversations, query ->
+            val trimmed = query.trim()
+            val filtered = if (trimmed.isEmpty()) conversations else conversations.filter {
+                it.title.contains(trimmed, ignoreCase = true) || it.preview.contains(trimmed, ignoreCase = true)
+            }
+            ConversationsUiState(
+                loading = false,
+                conversations = filtered,
+                filteredEmpty = filtered.isEmpty() && conversations.isNotEmpty(),
+            )
+        }
             .catch { emit(ConversationsUiState(loading = false, error = it.message)) }
             .stateIn(
                 scope = viewModelScope,
