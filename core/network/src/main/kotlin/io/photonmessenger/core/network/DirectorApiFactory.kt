@@ -43,6 +43,7 @@ class DirectorApiFactory(
     fun create(config: DirectorConfig): DirectorApi {
         val client = OkHttpClient.Builder()
             .addInterceptor(AuthInterceptor(tokenStore))
+            .authenticator(TokenAuthenticator(tokenStore, "${config.authPrefix}/refresh", json))
             .build()
 
         return Retrofit.Builder()

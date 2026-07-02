@@ -26,6 +26,8 @@ import android.app.Activity
 import android.app.Application
 import android.os.Bundle
 import io.photonmessenger.app.notification.NotificationSettings
+import io.photonmessenger.app.session.NetworkMonitor
+import io.photonmessenger.app.session.SessionController
 import io.photonmessenger.core.boson.BosonTls
 import io.photonmessenger.core.network.NotificationPreferencesStore
 import dagger.hilt.android.HiltAndroidApp
@@ -47,6 +49,12 @@ class PhotonApp : Application() {
 
     @Inject
     lateinit var foregroundState: AppForegroundState
+
+    @Inject
+    lateinit var networkMonitor: NetworkMonitor
+
+    @Inject
+    lateinit var sessionController: SessionController
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -72,5 +80,8 @@ class PhotonApp : Application() {
             override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
             override fun onActivityDestroyed(activity: Activity) = Unit
         })
+
+        // Retry a bring-up that failed while offline once the network returns (R1 / M1-19).
+        networkMonitor.register { sessionController.onNetworkAvailable() }
     }
 }

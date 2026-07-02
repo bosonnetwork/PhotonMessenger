@@ -32,6 +32,7 @@ import io.photonmessenger.core.network.DirectorApiFactory
 import io.photonmessenger.core.network.DirectorConfig
 import io.photonmessenger.core.network.DirectorConfigStore
 import io.photonmessenger.core.network.ServiceDiscovery
+import io.photonmessenger.core.network.toDirectorError
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -84,6 +85,11 @@ class SessionController @Inject constructor(
     @Volatile
     private var cachedApi: Pair<String, DirectorApi>? = null
 
+    // True between ensureConnected() and disconnect(): the user intends to be online, so a
+    // network-regain should retry a bring-up that failed while offline.
+    @Volatile
+    private var wantConnected = false
+
     private suspend fun api(): DirectorApi {
         val cfg: DirectorConfig = configStore.config.first()
         cachedApi?.let { (url, api) -> if (url == cfg.baseUrl) return api }
@@ -92,6 +98,7 @@ class SessionController @Inject constructor(
 
     /** Discovers coordinates and connects the messaging client. Safe to call repeatedly. */
     fun ensureConnected() {
+        wantConnected = true
         scope.launch {
             mutex.withLock {
                 if (active.value || own.value.phase == SessionPhase.DISCOVERING) return@launch
@@ -106,10 +113,15 @@ class SessionController @Inject constructor(
                 active.value = true
             }.onFailure { e ->
                 active.value = false
-                own.value = SessionStatus(SessionPhase.FAILED, e.message ?: "Couldn't connect")
+                own.value = SessionStatus(SessionPhase.FAILED, e.toDirectorError().message ?: "Couldn't connect")
                 MessagingForegroundService.stop(context)
             }
         }
+    }
+
+    /** Retries a failed bring-up when the network comes back (M1-19), if the user wants to be online. */
+    fun onNetworkAvailable() {
+        if (wantConnected && !active.value) ensureConnected()
     }
 
     /** Retries a failed bring-up. */
@@ -120,6 +132,7 @@ class SessionController @Inject constructor(
 
     /** Tears down the live session and stops the foreground service (sign-out). */
     fun disconnect() {
+        wantConnected = false
         scope.launch {
             active.value = false
             own.value = SessionStatus(SessionPhase.IDLE)
