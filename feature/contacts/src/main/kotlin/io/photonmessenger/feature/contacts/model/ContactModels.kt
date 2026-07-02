@@ -32,6 +32,8 @@ data class UiContact(
     val isChannel: Boolean,
     val muted: Boolean,
     val blocked: Boolean,
+    /** The local alias/remark, if the user set one (M2-6). */
+    val remark: String? = null,
 )
 
 /** UI projection of an incoming friend request. */
@@ -42,13 +44,15 @@ data class UiFriendRequest(
 
 fun Contact.toUi(): UiContact {
     val id = getId().toString()
-    val name = getRemark().orElse(null) ?: getName().orElse(null) ?: shortId(id)
+    val remark = getRemark().orElse(null)?.takeIf { it.isNotBlank() }
+    val name = remark ?: getName().orElse(null) ?: shortId(id)
     return UiContact(
         id = id,
         displayName = name,
         isChannel = getType() == Contact.Type.CHANNEL,
         muted = isMuted(),
         blocked = isBlocked(),
+        remark = remark,
     )
 }
 
@@ -56,4 +60,4 @@ fun FriendRequest.toUi(): UiFriendRequest =
     UiFriendRequest(userId = getUserId().toString(), hello = getHello() ?: "")
 
 private fun shortId(id: String): String =
-    if (id.length <= 12) id else id.take(6) + "…" + id.takeLast(4)
+    if (id.length <= 12) id else id.take(6) + "..." + id.takeLast(4)

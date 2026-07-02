@@ -61,6 +61,9 @@ class ContactsViewModelTest {
         override suspend fun declineFriendRequest(userIdText: String) = Result.success(Unit)
         override suspend fun setMuted(contactId: String, muted: Boolean) = Result.success(Unit)
         override suspend fun setBlocked(contactId: String, blocked: Boolean) = Result.success(Unit)
+        var remarkArgs: Pair<String, String?>? = null
+        override suspend fun setRemark(contactId: String, remark: String?) =
+            Result.success(Unit).also { remarkArgs = contactId to remark }
         override suspend fun removeContact(contactId: String) = Result.success(Unit)
     }
 
@@ -130,6 +133,15 @@ class ContactsViewModelTest {
             assert(msg.contains("boom"))
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `setRemark forwards the alias to the repository`() = runTest {
+        val repo = FakeRepo(contactsFlow, requestsFlow)
+        val vm = ContactsViewModel(repo, FakeChannelRepo())
+
+        vm.setRemark("a", "Ali")
+        assertEquals("a" to "Ali", repo.remarkArgs)
     }
 
     @Test

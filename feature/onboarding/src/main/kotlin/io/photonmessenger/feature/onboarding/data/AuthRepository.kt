@@ -33,6 +33,7 @@ import io.photonmessenger.core.network.DirectorOAuth
 import io.photonmessenger.core.network.model.BindIdentityRequest
 import io.photonmessenger.core.network.model.MeDto
 import io.photonmessenger.core.network.model.ProviderDto
+import io.photonmessenger.core.network.model.UpdateProfileRequest
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -95,19 +96,29 @@ class AuthRepository @Inject constructor(
     /**
      * Completes registration: generates the user keypair, signs the Director nonce, and binds the
      * public key as this session's Boson identity. Stores the returned post-bind CWT (spec 2.2).
+     * A non-blank [name] or [bio] is then written to the profile so onboarding actually persists the
+     * user's chosen identity (M1-11); avatar setup lives in Settings.
      */
-    suspend fun bindIdentity(): SessionState.Authenticated = withContext(Dispatchers.IO) {
-        val directorApi = api()
-        val nonce = directorApi.getBindingNonce().nonce
-        val userKey = keyManager.generateUserKey()
-        val request = BindIdentityRequest(
-            publicKey = BosonCrypto.publicKeyBase58(userKey),
-            signature = BosonCrypto.signNonceBase58(userKey, nonce),
-        )
-        val bound = directorApi.bindUserIdentity(request)
-        tokenStore.setToken(bound.token)
-        SessionState.Authenticated(directorApi.getMe(), bound.userId)
-    }
+    suspend fun bindIdentity(name: String? = null, bio: String? = null): SessionState.Authenticated =
+        withContext(Dispatchers.IO) {
+            val directorApi = api()
+            val nonce = directorApi.getBindingNonce().nonce
+            val userKey = keyManager.generateUserKey()
+            val request = BindIdentityRequest(
+                publicKey = BosonCrypto.publicKeyBase58(userKey),
+                signature = BosonCrypto.signNonceBase58(userKey, nonce),
+            )
+            val bound = directorApi.bindUserIdentity(request)
+            tokenStore.setToken(bound.token)
+
+            val cleanName = name?.trim()?.ifBlank { null }
+            val cleanBio = bio?.trim()?.ifBlank { null }
+            if (cleanName != null || cleanBio != null) {
+                directorApi.updateProfile(UpdateProfileRequest(name = cleanName, bio = cleanBio))
+            }
+
+            SessionState.Authenticated(directorApi.getMe(), bound.userId)
+        }
 
     /** Refreshes the CWT (spec 2.1, M1-10). Call on app resume or after a 401. */
     suspend fun refreshToken() {

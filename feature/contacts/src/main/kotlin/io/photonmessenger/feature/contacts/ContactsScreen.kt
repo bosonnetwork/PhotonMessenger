@@ -84,6 +84,7 @@ fun ContactsScreen(
     var selectedTab by remember { mutableIntStateOf(0) }
     var showAddDialog by remember { mutableStateOf(false) }
     var showJoinDialog by remember { mutableStateOf(false) }
+    var editAliasContact by remember { mutableStateOf<UiContact?>(null) }
 
     LaunchedEffect(Unit) {
         viewModel.messages.collect { snackbar.showSnackbar(it) }
@@ -139,6 +140,7 @@ fun ContactsScreen(
                         onMute = viewModel::setMuted,
                         onBlock = viewModel::setBlocked,
                         onRemove = viewModel::remove,
+                        onEditAlias = { editAliasContact = it },
                     )
                     ContactsTab.REQUESTS -> RequestList(
                         requests = state.requests,
@@ -151,6 +153,7 @@ fun ContactsScreen(
                         onMute = viewModel::setMuted,
                         onBlock = viewModel::setBlocked,
                         onRemove = viewModel::remove,
+                        onEditAlias = { editAliasContact = it },
                         onClick = onOpenChannel,
                     )
                 }
@@ -177,6 +180,17 @@ fun ContactsScreen(
             },
         )
     }
+
+    editAliasContact?.let { contact ->
+        EditAliasDialog(
+            contact = contact,
+            onDismiss = { editAliasContact = null },
+            onSubmit = { alias ->
+                viewModel.setRemark(contact.id, alias)
+                editAliasContact = null
+            },
+        )
+    }
 }
 
 @Composable
@@ -186,6 +200,7 @@ private fun ContactList(
     onMute: (String, Boolean) -> Unit,
     onBlock: (String, Boolean) -> Unit,
     onRemove: (String) -> Unit,
+    onEditAlias: (UiContact) -> Unit,
     onClick: ((String) -> Unit)? = null,
 ) {
     if (contacts.isEmpty()) {
@@ -215,6 +230,12 @@ private fun ContactList(
                             Icon(Icons.Default.MoreVert, contentDescription = "Actions")
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            if (!contact.isChannel) {
+                                DropdownMenuItem(
+                                    text = { Text("Edit alias") },
+                                    onClick = { onEditAlias(contact); menuOpen = false },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text(if (contact.muted) "Unmute" else "Mute") },
                                 onClick = { onMute(contact.id, !contact.muted); menuOpen = false },
@@ -318,6 +339,33 @@ private fun JoinChannelDialog(
         confirmButton = {
             TextButton(onClick = { onSubmit(ticket) }, enabled = ticket.isNotBlank()) { Text("Join") }
         },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun EditAliasDialog(
+    contact: UiContact,
+    onDismiss: () -> Unit,
+    onSubmit: (String) -> Unit,
+) {
+    var alias by remember { mutableStateOf(contact.remark.orEmpty()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit alias") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Set a local alias for this contact. Leave blank to clear it.")
+                OutlinedTextField(
+                    value = alias,
+                    onValueChange = { alias = it },
+                    label = { Text("Alias") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSubmit(alias) }) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

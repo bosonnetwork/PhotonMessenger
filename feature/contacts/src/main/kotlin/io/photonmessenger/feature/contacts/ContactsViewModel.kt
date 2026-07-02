@@ -93,6 +93,10 @@ class ContactsViewModel @Inject constructor(
         repository.setBlocked(contactId, blocked)
     }
 
+    fun setRemark(contactId: String, remark: String?) = run("Couldn't update alias") {
+        repository.setRemark(contactId, remark)
+    }
+
     fun remove(contactId: String) = run("Couldn't remove contact") { repository.removeContact(contactId) }
 
     /** Joins a channel from a shared invite-ticket string; opens it on success via [joinedChannel]. */

@@ -96,8 +96,21 @@ fun OnboardingScreen(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = state.bio,
+                    onValueChange = viewModel::onBioChange,
+                    label = { Text("Bio (optional)") },
+                    minLines = 2,
+                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Spacer(Modifier.height(16.dp))
-                Button(onClick = viewModel::completeProfile, modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = viewModel::completeProfile,
+                    enabled = state.displayName.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     Text("Continue")
                 }
             }

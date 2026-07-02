@@ -55,6 +55,9 @@ interface ContactRepository {
     suspend fun declineFriendRequest(userIdText: String): Result<Unit>
     suspend fun setMuted(contactId: String, muted: Boolean): Result<Unit>
     suspend fun setBlocked(contactId: String, blocked: Boolean): Result<Unit>
+
+    /** Sets (or clears, when blank) the local alias/remark for a contact (M2-6). */
+    suspend fun setRemark(contactId: String, remark: String?): Result<Unit>
     suspend fun removeContact(contactId: String): Result<Unit>
 }
 
@@ -152,6 +155,9 @@ class ContactRepositoryImpl @Inject constructor(
 
     override suspend fun setBlocked(contactId: String, blocked: Boolean): Result<Unit> =
         editContact(contactId) { it.edit().setBlocked(blocked).build() }
+
+    override suspend fun setRemark(contactId: String, remark: String?): Result<Unit> =
+        editContact(contactId) { it.edit().setRemark(remark?.trim()?.ifBlank { null }).build() }
 
     override suspend fun removeContact(contactId: String): Result<Unit> = runCatching {
         client().removeContacts(listOf(parseId(contactId))).awaitResult()

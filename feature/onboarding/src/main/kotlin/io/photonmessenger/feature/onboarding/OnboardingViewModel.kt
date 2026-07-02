@@ -46,6 +46,7 @@ data class OnboardingUiState(
     val providers: List<ProviderDto> = emptyList(),
     val step: OnboardingStep = OnboardingStep.SignIn,
     val displayName: String = "",
+    val bio: String = "",
     val error: String? = null,
 )
 
@@ -113,10 +114,13 @@ class OnboardingViewModel @Inject constructor(
 
     fun onDisplayNameChange(value: String) = _uiState.update { it.copy(displayName = value) }
 
+    fun onBioChange(value: String) = _uiState.update { it.copy(bio = value) }
+
     fun completeProfile() {
         viewModelScope.launch {
+            val current = _uiState.value
             _uiState.update { it.copy(loading = true, error = null) }
-            runCatching { authRepository.bindIdentity() }
+            runCatching { authRepository.bindIdentity(current.displayName, current.bio) }
                 .onSuccess { _uiState.update { it.copy(loading = false, step = OnboardingStep.Authenticated) } }
                 .onFailure { e -> _uiState.update { it.copy(loading = false, error = e.message) } }
         }
