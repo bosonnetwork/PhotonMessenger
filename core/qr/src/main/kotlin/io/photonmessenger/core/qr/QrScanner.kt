@@ -20,7 +20,7 @@
  * SOFTWARE.
  */
 
-package io.photonmessenger.feature.settings
+package io.photonmessenger.core.qr
 
 import android.annotation.SuppressLint
 import androidx.camera.core.CameraSelector
@@ -43,9 +43,9 @@ import com.google.mlkit.vision.common.InputImage
 import java.util.concurrent.Executors
 
 /**
- * Live camera preview that decodes QR codes via ML Kit (M6-4 pairing). [onScanned] fires once per
- * decoded payload; callers gate re-scanning via their own state. The caller must hold CAMERA permission
- * before this composes.
+ * Live camera preview that decodes QR codes via ML Kit. [onScanned] fires once per decoded payload;
+ * callers gate re-scanning via their own state. The caller must hold CAMERA permission before this
+ * composes.
  */
 @Composable
 fun QrScanner(

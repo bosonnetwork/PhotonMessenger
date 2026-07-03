@@ -33,16 +33,11 @@ dependencies {
     implementation(project(":core:boson-wrapper"))
     // KeyManager's supertype lives in :core:security; needed to call keyManager.clear() on sign-out.
     implementation(project(":core:security"))
+    // QR generation + camera scanning for multi-device pairing (M6-4) and show-my-key (O5).
+    implementation(project(":core:qr"))
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.okhttp)
-
-    // Multi-device pairing (M6-4): QR generation (zxing) + camera scanning (CameraX + ML Kit).
-    implementation(libs.zxing.core)
-    implementation(libs.androidx.camera.camera2)
-    implementation(libs.androidx.camera.lifecycle)
-    implementation(libs.androidx.camera.view)
-    implementation(libs.mlkit.barcode)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)

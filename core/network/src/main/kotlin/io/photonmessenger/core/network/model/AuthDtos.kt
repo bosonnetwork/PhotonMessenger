@@ -90,6 +90,25 @@ data class ClientAuthRequest(
 )
 
 /**
+ * POST /api/v1/client/devices (authenticated; Director ClientService.addDevice). Registers THIS device
+ * under the signed-in user so the messaging service will authorize its mqtts session - the Director's
+ * `authenticateDevice` rejects any device absent from the user's device table. Called after identity is
+ * acquired on this device (create / import) since neither the OAuth bind nor a raw-key import registers
+ * a device (only the pairing flow and self-registration do). `deviceId` is a Base58 Boson id;
+ * `nonce`/`deviceSig` are Base64URL-no-pad (client-generated nonce, device-key signature). -> 201 {token};
+ * 409 if the device is already registered (treated as success). `passphrase` only when the account has one.
+ */
+@Serializable
+data class AddDeviceRequest(
+    val deviceId: String,
+    val deviceName: String,
+    val appName: String,
+    val nonce: String,
+    val deviceSig: String,
+    val passphrase: String? = null,
+)
+
+/**
  * POST /api/v1/client/usersAndInitialDevice (self-contained, non-OAuth registration; spec 2.5).
  * `userId`/`deviceId` are Base58 Boson ids; `nonce`/`userSig`/`deviceSig` are Base64 (Jackson decodes
  * a JSON string into byte[] via Base64 on the Director). Used by the headless integration harness.

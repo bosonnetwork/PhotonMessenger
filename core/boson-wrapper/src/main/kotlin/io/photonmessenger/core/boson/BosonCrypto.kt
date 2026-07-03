@@ -52,6 +52,37 @@ object BosonCrypto {
     /** The Boson user/device id derived from the public key. */
     fun idOf(kp: Signature.KeyPair): Id = Id.of(kp.publicKey().bytes())
 
+    /** Base58 of the 64-byte private key (seed || publicKey), for QR/paste identity transfer (O4/O5). */
+    fun privateKey64ToBase58(privateKey64: ByteArray): String = Base58.encode(privateKey64)
+
+    /**
+     * Decodes a pasted or scanned raw user private key. Accepts base58 or hex (optional `0x` prefix).
+     * Returns the validated 64-byte libsodium form (seed || publicKey); throws
+     * [IllegalArgumentException] if it is not a usable 64-byte Ed25519 private key.
+     */
+    fun decodePrivateKey64(text: String): ByteArray {
+        val cleaned = text.trim()
+        require(cleaned.isNotEmpty()) { "Empty key" }
+        val bytes = parseKeyBytes(cleaned)
+        require(bytes.size == 64) { "A user key must be 64 bytes (got ${bytes.size})" }
+        // Validate the bytes form a real Ed25519 keypair (throws if seed/publicKey are inconsistent).
+        Signature.KeyPair.fromPrivateKey(bytes)
+        return bytes
+    }
+
+    private const val HEX_DIGITS = "0123456789abcdefABCDEF"
+
+    // A 64-byte key is 128 hex chars; base58 of 64 bytes is ~88 chars, so length disambiguates cleanly.
+    private fun parseKeyBytes(text: String): ByteArray {
+        val hex = text.removePrefix("0x").removePrefix("0X")
+        val looksHex = hex.length == 128 && hex.all { it in HEX_DIGITS }
+        return if (looksHex) {
+            ByteArray(hex.length / 2) { i -> hex.substring(i * 2, i * 2 + 2).toInt(16).toByte() }
+        } else {
+            Base58.decode(text)
+        }
+    }
+
     /**
      * Signs the Director-issued binding nonce. The nonce arrives base58-encoded; the signature must
      * cover the decoded raw bytes (Director verifies `Signature.verify(nonceBytes, sig, pk)`).

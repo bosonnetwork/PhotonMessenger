@@ -32,7 +32,10 @@ dependencies {
     implementation(project(":core:network"))
     implementation(project(":core:security"))
     implementation(project(":core:boson-wrapper"))
+    // Scan a raw user-key QR during onboarding (O4).
+    implementation(project(":core:qr"))
 
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.browser)
     implementation(libs.kotlinx.coroutines.android)
 

@@ -20,31 +20,25 @@
  * SOFTWARE.
  */
 
-package io.photonmessenger.app.navigation
+package io.photonmessenger.feature.settings
 
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Chat
-import androidx.compose.material.icons.outlined.People
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.lifecycle.ViewModel
+import io.photonmessenger.core.boson.BosonCrypto
+import io.photonmessenger.core.boson.KeyManager
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 
-/** Top-level navigation destinations (design spec section 5 navigation). */
-enum class TopLevelDestination(
-    val route: String,
-    val label: String,
-    val icon: ImageVector,
-) {
-    HOME("home", "Chats", Icons.Outlined.Chat),
-    CONTACTS("contacts", "Contacts", Icons.Outlined.People),
-    SETTINGS("settings", "Settings", Icons.Outlined.Settings),
-}
+/**
+ * Backs the "Show my key" screen (O5): exposes the local user private key in base58 (64-byte
+ * libsodium form) so another device can scan/import it. Reads the key lazily and never logs it.
+ */
+@HiltViewModel
+class ShowKeyViewModel @Inject constructor(
+    private val keyManager: KeyManager,
+) : ViewModel() {
 
-/** Non-top-level routes. */
-object Routes {
-    const val ONBOARDING = "onboarding"
-    const val CREATE_CHANNEL = "createChannel"
-    const val DEVICES = "devices"
-    const val ADD_DEVICE = "addDevice"
-    const val APPROVE_DEVICE = "approveDevice"
-    const val SHOW_KEY = "showKey"
+    /** The user private key as base58, or null if this device has no identity key. */
+    fun userKeyBase58(): String? = keyManager.userKeyPair()?.let {
+        BosonCrypto.privateKey64ToBase58(BosonCrypto.privateKeyBytes64(it))
+    }
 }

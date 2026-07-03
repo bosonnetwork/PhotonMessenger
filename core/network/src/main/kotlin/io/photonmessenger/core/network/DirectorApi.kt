@@ -22,6 +22,7 @@
 
 package io.photonmessenger.core.network
 
+import io.photonmessenger.core.network.model.AddDeviceRequest
 import io.photonmessenger.core.network.model.AvatarUriDto
 import io.photonmessenger.core.network.model.BindIdentityRequest
 import io.photonmessenger.core.network.model.BindIdentityResponse
@@ -131,6 +132,13 @@ interface DirectorApi {
 
     @GET("client/devices")
     suspend fun getDevices(): List<DeviceDto>
+
+    /**
+     * Registers THIS device under the signed-in user (201 {token}); 409 if already registered. Required
+     * before the messaging client can connect - the node's `authenticateDevice` rejects unknown devices.
+     */
+    @POST("client/devices")
+    suspend fun addDevice(@Body body: AddDeviceRequest): TokenDto
 
     /**
      * Deregisters a device from the account (204 on success, 404 if not owned/found). Modeled as a

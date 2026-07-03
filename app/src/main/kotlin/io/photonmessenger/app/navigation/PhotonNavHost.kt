@@ -53,6 +53,7 @@ import io.photonmessenger.feature.settings.ApproveDeviceScreen
 import io.photonmessenger.feature.settings.DevicesScreen
 import io.photonmessenger.feature.settings.PairNewDeviceScreen
 import io.photonmessenger.feature.settings.SettingsScreen
+import io.photonmessenger.feature.settings.ShowKeyScreen
 
 /**
  * Root navigation. For M0 the app starts at Home with an empty Conversations list (M0 DoD).
@@ -155,7 +156,11 @@ fun PhotonNavHost(
                     onBack = { navController.popBackStack() },
                     onAddDevice = { navController.navigate(Routes.ADD_DEVICE) },
                     onApproveDevice = { navController.navigate(Routes.APPROVE_DEVICE) },
+                    onShowKey = { navController.navigate(Routes.SHOW_KEY) },
                 )
+            }
+            composable(Routes.SHOW_KEY) {
+                ShowKeyScreen(onBack = { navController.popBackStack() })
             }
             composable(Routes.ADD_DEVICE) {
                 PairNewDeviceScreen(

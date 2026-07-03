@@ -33,6 +33,7 @@ import io.photonmessenger.core.network.DirectorConfig
 import io.photonmessenger.core.network.DirectorConfigStore
 import io.photonmessenger.core.network.ServiceDiscovery
 import io.photonmessenger.core.network.toDirectorError
+import io.photonmessenger.feature.onboarding.data.AuthRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -69,6 +70,7 @@ class SessionController @Inject constructor(
     private val configStore: DirectorConfigStore,
     private val sessionManager: BosonSessionManager,
     private val messageNotifier: MessageNotifier,
+    private val authRepository: AuthRepository,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mutex = Mutex()
@@ -106,6 +108,10 @@ class SessionController @Inject constructor(
             }
             MessagingForegroundService.start(context)
             runCatching {
+                // Register this device first: the messaging node's authenticateDevice rejects any device
+                // not in the user's device table, so an unregistered device connects but never reaches
+                // READY. Idempotent (409 = already registered).
+                authRepository.ensureDeviceRegistered()
                 val coords = ServiceDiscovery.toServiceCoords(api().getNodeStatus())
                 sessionManager.connect(coords)
             }.onSuccess {

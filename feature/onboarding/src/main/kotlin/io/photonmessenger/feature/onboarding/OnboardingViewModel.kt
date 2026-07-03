@@ -25,6 +25,7 @@ package io.photonmessenger.feature.onboarding
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.photonmessenger.core.network.model.ProviderDto
+import io.photonmessenger.core.network.toDirectorError
 import io.photonmessenger.feature.onboarding.data.AuthCallback
 import io.photonmessenger.feature.onboarding.data.AuthDeepLinkBus
 import io.photonmessenger.feature.onboarding.data.AuthRepository
@@ -39,14 +40,19 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class OnboardingStep { SignIn, NeedsProfile, Authenticated }
+enum class OnboardingStep { Server, SignIn, ChooseIdentity, CreateProfile, ScanKey, PasteKey, Passphrase, Authenticated }
 
 data class OnboardingUiState(
     val loading: Boolean = false,
     val providers: List<ProviderDto> = emptyList(),
-    val step: OnboardingStep = OnboardingStep.SignIn,
+    val step: OnboardingStep = OnboardingStep.Server,
+    val serverUrl: String = "",
+    /** True only when no identity is bound yet, so "Create new identity" is offered (else import only). */
+    val allowCreateIdentity: Boolean = false,
+    val keyInput: String = "",
     val displayName: String = "",
     val bio: String = "",
+    val passphraseInput: String = "",
     val error: String? = null,
 )
 
@@ -65,7 +71,16 @@ class OnboardingViewModel @Inject constructor(
 
     init {
         authRepository.ensureDeviceKey()
-        loadProviders()
+        viewModelScope.launch {
+            if (authRepository.isSignedIn() && !authRepository.hasUserKey()) {
+                // Returning user on a fresh device/reinstall: a token exists but no local key. Skip the
+                // server + OAuth steps and resolve straight to the identity-acquisition screen (O2/O4).
+                resolveExistingSession()
+            } else {
+                // Prefill the server step with the current/default Director URL (O1, Mattermost-style).
+                _uiState.update { it.copy(serverUrl = authRepository.currentDirectorUrl()) }
+            }
+        }
         viewModelScope.launch {
             deepLinkBus.events.collect { callback ->
                 when (callback) {
@@ -76,6 +91,31 @@ class OnboardingViewModel @Inject constructor(
         }
     }
 
+    fun onServerUrlChange(value: String) = _uiState.update { it.copy(serverUrl = value) }
+
+    /** Returns to the server step to point at a different Director. */
+    fun editServer() = _uiState.update { it.copy(step = OnboardingStep.Server, error = null) }
+
+    /** Saves the entered Director URL, then loads that server's OAuth providers and advances to sign-in. */
+    fun confirmServer() {
+        val url = _uiState.value.serverUrl.trim()
+        if (url.isEmpty()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(loading = true, error = null) }
+            runCatching {
+                authRepository.setDirectorUrl(url)
+                authRepository.providers()
+            }.onSuccess { providers ->
+                _uiState.update {
+                    it.copy(loading = false, providers = providers, step = OnboardingStep.SignIn)
+                }
+            }.onFailure { e ->
+                _uiState.update { it.copy(loading = false, error = e.message ?: "Couldn't reach that server") }
+            }
+        }
+    }
+
+    /** Reloads providers for the confirmed server (retry affordance on the sign-in step). */
     fun loadProviders() {
         viewModelScope.launch {
             _uiState.update { it.copy(loading = true, error = null) }
@@ -97,18 +137,121 @@ class OnboardingViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(loading = true, error = null) }
             runCatching { authRepository.onAuthToken(token) }
-                .onSuccess { state ->
+                .onSuccess { state -> applySession(state) }
+                .onFailure { e -> _uiState.update { it.copy(loading = false, error = e.message) } }
+        }
+    }
+
+    /** Resolves the session for an already-present token (returning user, no local key). */
+    private suspend fun resolveExistingSession() {
+        _uiState.update { it.copy(loading = true, error = null) }
+        runCatching { authRepository.currentSession() }
+            .onSuccess { state -> applySession(state) }
+            .onFailure { e ->
+                // Offline / server unreachable: land on the import screen so the user can still paste a key.
+                _uiState.update {
+                    it.copy(loading = false, step = OnboardingStep.ChooseIdentity, allowCreateIdentity = false, error = e.message)
+                }
+            }
+    }
+
+    private fun applySession(state: SessionState) {
+        _uiState.update {
+            when (state) {
+                is SessionState.NeedsIdentity ->
+                    it.copy(loading = false, step = OnboardingStep.ChooseIdentity, allowCreateIdentity = true)
+                is SessionState.NeedsKey ->
+                    it.copy(loading = false, step = OnboardingStep.ChooseIdentity, allowCreateIdentity = false)
+                is SessionState.Authenticated ->
+                    it.copy(loading = false, step = OnboardingStep.Authenticated)
+            }
+        }
+    }
+
+    // --- Identity choice (O4) ---
+
+    /** Create a brand-new identity: collect a profile, then generate + bind a fresh key. */
+    fun chooseCreateNew() = _uiState.update { it.copy(step = OnboardingStep.CreateProfile, error = null) }
+
+    fun chooseScanKey() = _uiState.update { it.copy(step = OnboardingStep.ScanKey, error = null) }
+
+    fun choosePasteKey() = _uiState.update { it.copy(step = OnboardingStep.PasteKey, keyInput = "", error = null) }
+
+    /** Back to the create/scan/paste choice from a sub-step. */
+    fun backToChoose() = _uiState.update { it.copy(step = OnboardingStep.ChooseIdentity, error = null) }
+
+    fun onKeyInputChange(value: String) = _uiState.update { it.copy(keyInput = value) }
+
+    /** Imports the pasted raw key (base58 or hex). */
+    fun importPastedKey() = importKey(_uiState.value.keyInput)
+
+    // The scanner re-emits the same payload every frame; only act on the first sighting of each value.
+    private var lastScannedValue: String? = null
+
+    /** Imports a raw key scanned from another device's QR. */
+    fun onKeyScanned(text: String) {
+        if (_uiState.value.loading || text == lastScannedValue) return
+        lastScannedValue = text
+        importKey(text)
+    }
+
+    private fun importKey(text: String) {
+        if (text.isBlank()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(loading = true, error = null) }
+            runCatching { authRepository.importUserKeyText(text) }
+                .onSuccess { finishIdentitySetup() }
+                .onFailure { e -> _uiState.update { it.copy(loading = false, error = e.message ?: "Invalid key") } }
+        }
+    }
+
+    /**
+     * After an identity is acquired on this device (create or import), registers this device so it can
+     * connect to the messaging service. Adding a device is passphrase-gated: a passphrase-protected
+     * account is routed to the [OnboardingStep.Passphrase] step to collect the passphrase first; a
+     * non-protected account skips straight to [OnboardingStep.Authenticated], where the connect path
+     * registers the device silently.
+     */
+    private fun finishIdentitySetup() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(loading = true, error = null) }
+            runCatching { authRepository.isPassphraseProtected() }
+                .onSuccess { protected ->
                     _uiState.update {
-                        it.copy(
-                            loading = false,
-                            step = when (state) {
-                                is SessionState.NeedsIdentity -> OnboardingStep.NeedsProfile
-                                is SessionState.Authenticated -> OnboardingStep.Authenticated
-                            },
-                        )
+                        if (protected) {
+                            it.copy(loading = false, step = OnboardingStep.Passphrase, passphraseInput = "")
+                        } else {
+                            it.copy(loading = false, step = OnboardingStep.Authenticated)
+                        }
                     }
                 }
-                .onFailure { e -> _uiState.update { it.copy(loading = false, error = e.message) } }
+                .onFailure {
+                    // Couldn't determine passphrase state; proceed and let the connect path register the
+                    // device (non-protected) or surface a retryable connection error.
+                    _uiState.update { it.copy(loading = false, step = OnboardingStep.Authenticated) }
+                }
+        }
+    }
+
+    fun onPassphraseInputChange(value: String) = _uiState.update { it.copy(passphraseInput = value) }
+
+    /**
+     * Registers this device under a passphrase-protected account using the supplied passphrase (adding a
+     * device is a passphrase-gated action). On success the device is ready to connect; a wrong passphrase
+     * (403) keeps the user on the passphrase step with an error.
+     */
+    fun submitPassphrase() {
+        val passphrase = _uiState.value.passphraseInput
+        if (passphrase.isBlank()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(loading = true, error = null) }
+            runCatching { authRepository.registerDevice(passphrase) }
+                .onSuccess { _uiState.update { it.copy(loading = false, step = OnboardingStep.Authenticated) } }
+                .onFailure { e ->
+                    _uiState.update {
+                        it.copy(loading = false, error = e.toDirectorError().message ?: "Couldn't register this device")
+                    }
+                }
         }
     }
 
@@ -121,7 +264,7 @@ class OnboardingViewModel @Inject constructor(
             val current = _uiState.value
             _uiState.update { it.copy(loading = true, error = null) }
             runCatching { authRepository.bindIdentity(current.displayName, current.bio) }
-                .onSuccess { _uiState.update { it.copy(loading = false, step = OnboardingStep.Authenticated) } }
+                .onSuccess { finishIdentitySetup() }
                 .onFailure { e -> _uiState.update { it.copy(loading = false, error = e.message) } }
         }
     }

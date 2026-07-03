@@ -20,7 +20,7 @@
  * SOFTWARE.
  */
 
-package io.photonmessenger.feature.settings
+package io.photonmessenger.core.qr
 
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -33,7 +33,7 @@ import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 
-/** Encodes [text] as a square QR [ImageBitmap], cached per text+size (M6-4 pairing QR). */
+/** Encodes [text] as a square QR [ImageBitmap], cached per text+size. */
 @Composable
 fun rememberQrBitmap(text: String, sizePx: Int = 720): ImageBitmap? =
     remember(text, sizePx) { encodeQr(text, sizePx)?.asImageBitmap() }

@@ -78,6 +78,7 @@ fun DevicesScreen(
     onBack: () -> Unit,
     onAddDevice: () -> Unit,
     onApproveDevice: () -> Unit,
+    onShowKey: () -> Unit,
     viewModel: DevicesViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -100,7 +101,11 @@ fun DevicesScreen(
     ) { padding ->
         ResponsiveContent(modifier = Modifier.padding(padding)) {
             Column(Modifier.fillMaxSize()) {
-                PairingActions(onAddDevice = onAddDevice, onApproveDevice = onApproveDevice)
+                PairingActions(
+                    onAddDevice = onAddDevice,
+                    onApproveDevice = onApproveDevice,
+                    onShowKey = onShowKey,
+                )
                 HorizontalDivider()
                 when {
                     state.loading -> LoadingState()
@@ -164,16 +169,25 @@ private fun RemoveDevicePassphraseDialog(
 }
 
 @Composable
-private fun PairingActions(onAddDevice: () -> Unit, onApproveDevice: () -> Unit) {
-    Row(
+private fun PairingActions(
+    onAddDevice: () -> Unit,
+    onApproveDevice: () -> Unit,
+    onShowKey: () -> Unit,
+) {
+    Column(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        OutlinedButton(onClick = onAddDevice, modifier = Modifier.weight(1f)) {
-            Text("Add this device")
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = onAddDevice, modifier = Modifier.weight(1f)) {
+                Text("Add this device")
+            }
+            OutlinedButton(onClick = onApproveDevice, modifier = Modifier.weight(1f)) {
+                Text("Approve a device")
+            }
         }
-        OutlinedButton(onClick = onApproveDevice, modifier = Modifier.weight(1f)) {
-            Text("Approve a device")
+        OutlinedButton(onClick = onShowKey, modifier = Modifier.fillMaxWidth()) {
+            Text("Show my key")
         }
     }
 }

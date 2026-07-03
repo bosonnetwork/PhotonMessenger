@@ -52,7 +52,7 @@ class DirectorConfigStore(
         // the host's LAN IP (e.g. http://192.168.8.80:9000) in advanced settings; set the production
         // domain here once one exists. OAuth providers (google/github) are discovered via
         // GET /api/v1/auth/providers.
-        const val DEFAULT_DIRECTOR_URL = "http://10.0.2.2:9000"
+        const val DEFAULT_DIRECTOR_URL = "http://jmac.dev:9000"
         private val BASE_URL = stringPreferencesKey("director_base_url")
     }
 }

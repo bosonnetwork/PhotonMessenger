@@ -44,14 +44,18 @@ class AppViewModel @Inject constructor(
     authRepository: AuthRepository,
 ) : ViewModel() {
 
-    /** Home for a returning session, onboarding otherwise. Computed once at startup. */
+    /**
+     * Home only when this device is fully ready (token AND local user key); otherwise onboarding.
+     * A token without a key (returning user on a fresh device) must acquire its key first, so it goes
+     * to onboarding rather than Home where bring-up would fail with "user key missing" (O2).
+     */
     val startDestination: String =
-        if (authRepository.isSignedIn()) TopLevelDestination.HOME.route else Routes.ONBOARDING
+        if (authRepository.isReady()) TopLevelDestination.HOME.route else Routes.ONBOARDING
 
     val sessionStatus: StateFlow<SessionStatus> = sessionController.status
 
     init {
-        if (authRepository.isSignedIn()) sessionController.ensureConnected()
+        if (authRepository.isReady()) sessionController.ensureConnected()
     }
 
     /** Called after onboarding completes (sign-in or identity bind) to bring the session up. */
