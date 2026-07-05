@@ -26,18 +26,14 @@ import android.content.Context
 import android.util.Base64
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import io.photonmessenger.app.LiveTestHarness.Companion.DIRECTOR_URL
 import io.photonmessenger.app.LiveTestHarness.Companion.TIMEOUT
 import io.photonmessenger.core.boson.BosonCrypto
-import io.photonmessenger.core.boson.BosonTls
 import io.photonmessenger.core.boson.DevicePairing
 import io.photonmessenger.core.boson.PairingPayload
 import io.photonmessenger.core.boson.awaitResult
 import io.photonmessenger.core.database.MessagingStoreFactory
 import io.photonmessenger.core.model.AuthTokenStore
 import io.photonmessenger.core.network.DirectorApi
-import io.photonmessenger.core.network.DirectorApiFactory
-import io.photonmessenger.core.network.DirectorConfig
 import io.photonmessenger.core.network.model.ClientAuthRequest
 import io.photonmessenger.core.network.model.FinishRegistrationRequest
 import io.photonmessenger.core.network.model.RegisterDeviceRequest
@@ -68,7 +64,7 @@ import org.junit.runner.RunWith
  * the dev super node: multi-device pairing (M6-4), media over IonStore with cross-peer integrity (M5),
  * channels (M4), and history persistence across a client restart (M3 / Option-A Room store).
  *
- * Require the dev super node reachable at [DIRECTOR_URL]; fail-fast where it is down.
+ * Require the dev super node reachable at [TestSuperNode]; fail-fast where it is down.
  */
 @RunWith(AndroidJUnit4::class)
 class LivePhase3IntegrationTest {
@@ -81,7 +77,10 @@ class LivePhase3IntegrationTest {
         override suspend fun clear() {}
     }
 
-    private fun authlessApi(): DirectorApi = DirectorApiFactory(NoToken).create(DirectorConfig(DIRECTOR_URL))
+    // Pre-auth pairing calls use the same production identity-pinned Director client as the harness
+    // account APIs (pinned to the dev node id from the first request, see LiveDirectorTls).
+    private fun authlessApi(): DirectorApi =
+        LiveDirectorTls.pinnedApiFactory(NoToken).create(TestSuperNode.directorConfig)
 
     private fun b64(bytes: ByteArray) =
         Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
@@ -96,7 +95,6 @@ class LivePhase3IntegrationTest {
      */
     @Test
     fun multiDevicePairingRoundTrip() {
-        BosonTls.install()
         val vertx = Vertx.vertx()
         val harness = LiveTestHarness(context, vertx)
         try {
@@ -178,7 +176,6 @@ class LivePhase3IntegrationTest {
      */
     @Test
     fun mediaUploadDownloadRoundTrip() {
-        BosonTls.install()
         val vertx = Vertx.vertx()
         val harness = LiveTestHarness(context, vertx)
         try {
@@ -214,7 +211,6 @@ class LivePhase3IntegrationTest {
      */
     @Test
     fun channelCreateAndJoinAcrossTwoClients() {
-        BosonTls.install()
         val vertx = Vertx.vertx()
         val harness = LiveTestHarness(context, vertx)
         try {
@@ -277,7 +273,6 @@ class LivePhase3IntegrationTest {
      */
     @Test
     fun historyPersistsAcrossRestart() {
-        BosonTls.install()
         val vertx = Vertx.vertx()
         val harness = LiveTestHarness(context, vertx)
         val dbName = "it-persist-${System.nanoTime()}.db"

@@ -27,9 +27,11 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStoreFile
+import io.photonmessenger.core.boson.BosonDirectorTrustManagerProvider
 import io.photonmessenger.core.model.AuthTokenStore
 import io.photonmessenger.core.network.DirectorApiFactory
 import io.photonmessenger.core.network.DirectorConfigStore
+import io.photonmessenger.core.network.DirectorTrustManagerProvider
 import io.photonmessenger.core.network.NotificationPreferencesStore
 import io.photonmessenger.core.network.ThemePreferencesStore
 import dagger.Module
@@ -66,6 +68,14 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideDirectorApiFactory(tokenStore: AuthTokenStore): DirectorApiFactory =
-        DirectorApiFactory(tokenStore)
+    fun provideDirectorTrustManagerProvider(): DirectorTrustManagerProvider =
+        BosonDirectorTrustManagerProvider()
+
+    @Provides
+    @Singleton
+    fun provideDirectorApiFactory(
+        tokenStore: AuthTokenStore,
+        trustManagerProvider: DirectorTrustManagerProvider,
+    ): DirectorApiFactory =
+        DirectorApiFactory(tokenStore, trustManagerProvider)
 }

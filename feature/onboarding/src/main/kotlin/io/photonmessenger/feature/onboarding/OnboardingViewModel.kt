@@ -47,6 +47,8 @@ data class OnboardingUiState(
     val providers: List<ProviderDto> = emptyList(),
     val step: OnboardingStep = OnboardingStep.Server,
     val serverUrl: String = "",
+    /** Director node id used to identity-pin its self-signed cert; blank for a CA-fronted Director. */
+    val directorNodeId: String = "",
     /** True only when no identity is bound yet, so "Create new identity" is offered (else import only). */
     val allowCreateIdentity: Boolean = false,
     val keyInput: String = "",
@@ -77,8 +79,13 @@ class OnboardingViewModel @Inject constructor(
                 // server + OAuth steps and resolve straight to the identity-acquisition screen (O2/O4).
                 resolveExistingSession()
             } else {
-                // Prefill the server step with the current/default Director URL (O1, Mattermost-style).
-                _uiState.update { it.copy(serverUrl = authRepository.currentDirectorUrl()) }
+                // Prefill the server step with the current/default Director URL + pin id (O1, Mattermost-style).
+                _uiState.update {
+                    it.copy(
+                        serverUrl = authRepository.currentDirectorUrl(),
+                        directorNodeId = authRepository.currentDirectorNodeId(),
+                    )
+                }
             }
         }
         viewModelScope.launch {
@@ -93,6 +100,8 @@ class OnboardingViewModel @Inject constructor(
 
     fun onServerUrlChange(value: String) = _uiState.update { it.copy(serverUrl = value) }
 
+    fun onDirectorNodeIdChange(value: String) = _uiState.update { it.copy(directorNodeId = value) }
+
     /** Returns to the server step to point at a different Director. */
     fun editServer() = _uiState.update { it.copy(step = OnboardingStep.Server, error = null) }
 
@@ -100,10 +109,11 @@ class OnboardingViewModel @Inject constructor(
     fun confirmServer() {
         val url = _uiState.value.serverUrl.trim()
         if (url.isEmpty()) return
+        val nodeId = _uiState.value.directorNodeId.trim().ifBlank { null }
         viewModelScope.launch {
             _uiState.update { it.copy(loading = true, error = null) }
             runCatching {
-                authRepository.setDirectorUrl(url)
+                authRepository.setDirectorUrl(url, nodeId)
                 authRepository.providers()
             }.onSuccess { providers ->
                 _uiState.update {

@@ -39,11 +39,26 @@ class DirectorConfigStore(
 ) {
     val config: Flow<DirectorConfig> = dataStore.data.map { prefs ->
         val baseUrl = prefs[BASE_URL]?.trimEnd('/') ?: DEFAULT_DIRECTOR_URL
-        DirectorConfig(baseUrl = baseUrl, certificatePins = KnownDirectorPins.pinsFor(baseUrl))
+        DirectorConfig(
+            baseUrl = baseUrl,
+            certificatePins = KnownDirectorPins.pinsFor(baseUrl),
+            nodeId = prefs[NODE_ID]?.takeIf { it.isNotBlank() },
+        )
     }
 
     suspend fun setBaseUrl(baseUrl: String) {
         dataStore.edit { it[BASE_URL] = baseUrl.trim().trimEnd('/') }
+    }
+
+    /**
+     * Sets (or clears, when null/blank) the Director's Boson node id used to identity-pin its HTTPS
+     * certificate (see [DirectorConfig.nodeId]). A self-signed Director requires this; a Director
+     * fronted by a real CA certificate does not.
+     */
+    suspend fun setNodeId(nodeId: String?) {
+        dataStore.edit {
+            if (nodeId.isNullOrBlank()) it.remove(NODE_ID) else it[NODE_ID] = nodeId.trim()
+        }
     }
 
     companion object {
@@ -52,7 +67,8 @@ class DirectorConfigStore(
         // the host's LAN IP (e.g. http://192.168.8.80:9000) in advanced settings; set the production
         // domain here once one exists. OAuth providers (google/github) are discovered via
         // GET /api/v1/auth/providers.
-        const val DEFAULT_DIRECTOR_URL = "http://jmac.dev:9000"
+        const val DEFAULT_DIRECTOR_URL = "https://jmac.dev:9000"
         private val BASE_URL = stringPreferencesKey("director_base_url")
+        private val NODE_ID = stringPreferencesKey("director_node_id")
     }
 }

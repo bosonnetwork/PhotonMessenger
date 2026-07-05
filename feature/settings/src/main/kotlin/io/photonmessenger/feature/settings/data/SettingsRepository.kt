@@ -106,14 +106,14 @@ class SettingsRepositoryImpl @Inject constructor(
 ) : SettingsRepository {
 
     @Volatile
-    private var cachedApi: Pair<String, DirectorApi>? = null
+    private var cachedApi: Pair<DirectorConfig, DirectorApi>? = null
 
     private suspend fun config(): DirectorConfig = configStore.config.first()
 
     private suspend fun api(): DirectorApi {
         val cfg = config()
-        cachedApi?.let { (url, api) -> if (url == cfg.baseUrl) return api }
-        return apiFactory.create(cfg).also { cachedApi = cfg.baseUrl to it }
+        cachedApi?.let { (cached, api) -> if (cached == cfg) return api }
+        return apiFactory.create(cfg).also { cachedApi = cfg to it }
     }
 
     override val themePreferences: Flow<ThemePreferences> = themeStore.preferences

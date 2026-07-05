@@ -27,7 +27,6 @@ import android.util.Log
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import android.content.Context
-import io.photonmessenger.core.boson.BosonTls
 import io.vertx.core.Vertx
 import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertTrue
@@ -64,7 +63,6 @@ class LiveIdleMemoryTest {
 
     @Test
     fun idleMqttsMemoryStaysBounded() {
-        BosonTls.install()
         val vertx = Vertx.vertx()
         val harness = LiveTestHarness(context, vertx)
         try {

@@ -72,11 +72,6 @@ dependencies {
     // (slf4j-handroid / logback-android) is a M6 polish upgrade.
     runtimeOnly(libs.slf4j.simple)
 
-    // BouncyCastle JSSE: a pure-Java TLS 1.3 stack that advertises the ed25519 signature scheme.
-    // Android's Conscrypt does not, so it cannot complete the handshake with Boson's Ed25519 mqtts
-    // server certs. BosonTls registers this provider at top priority (bcprov is already transitive).
-    implementation(libs.bouncycastle.bctls)
-
     // Async bridges (design spec section 4.5)
     implementation(libs.kotlinx.coroutines.jdk8)          // CompletableFuture.await() for MessagingClient
     implementation(libs.vertx.lang.kotlin.coroutines)     // Future.coAwait() for IonStore

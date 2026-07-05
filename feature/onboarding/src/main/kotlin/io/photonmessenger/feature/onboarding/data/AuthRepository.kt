@@ -23,6 +23,7 @@
 package io.photonmessenger.feature.onboarding.data
 
 import android.os.Build
+import io.bosonnetwork.Id
 import io.photonmessenger.core.boson.BosonCrypto
 import io.photonmessenger.core.boson.KeyManager
 import io.photonmessenger.core.model.AppError
@@ -73,23 +74,41 @@ class AuthRepository @Inject constructor(
     private val keyManager: KeyManager,
 ) {
     @Volatile
-    private var cachedApi: Pair<String, DirectorApi>? = null
+    private var cachedApi: Pair<DirectorConfig, DirectorApi>? = null
 
     private suspend fun config(): DirectorConfig = configStore.config.first()
 
     /** Current Director base URL (prefilled into the pre-login server step, O1). */
     suspend fun currentDirectorUrl(): String = config().baseUrl
 
-    /** Persists a new Director base URL (pre-login server step, O1) and drops the cached API. */
-    suspend fun setDirectorUrl(url: String) {
+    /** Current Director node id used to identity-pin its cert, or "" when none is set (prefill, O1). */
+    suspend fun currentDirectorNodeId(): String = config().nodeId.orEmpty()
+
+    /**
+     * Persists the Director base URL and its identity-pin node id (pre-login server step, O1) and
+     * drops the cached API. A self-signed HTTPS Director requires [nodeId] to be trusted; pass null or
+     * blank to clear it (a Director fronted by a real CA certificate needs none).
+     */
+    suspend fun setDirectorUrl(url: String, nodeId: String?) {
+        val cleanId = nodeId?.trim()?.ifBlank { null }
+        if (cleanId != null) {
+            // Fail fast with a field-specific message: an unparseable id would otherwise only surface
+            // later as an opaque TLS/build failure when DirectorApiFactory constructs the trust manager.
+            try {
+                Id.of(cleanId)
+            } catch (e: Exception) {
+                throw AppError.InvalidInput("Invalid Server ID (expected a Boson node id)", e)
+            }
+        }
         configStore.setBaseUrl(url)
+        configStore.setNodeId(cleanId)
         cachedApi = null
     }
 
     private suspend fun api(): DirectorApi {
         val cfg = config()
-        cachedApi?.let { (url, api) -> if (url == cfg.baseUrl) return api }
-        return apiFactory.create(cfg).also { cachedApi = cfg.baseUrl to it }
+        cachedApi?.let { (cached, api) -> if (cached == cfg) return api }
+        return apiFactory.create(cfg).also { cachedApi = cfg to it }
     }
 
     /** Device key exists before any sign-in (used for device login + IonStore CWT later). */

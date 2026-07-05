@@ -142,7 +142,7 @@ class RoomMessagingStoreTest {
         assertEquals(5, store.getContactsRevision().await())
         assertEquals("Alice", store.getContact(a).await()!!.name())
 
-        store.removeContacts(6, a).await()
+        store.removeContacts(6, listOf(a)).await()
         assertEquals(6, store.getContactsRevision().await())
         assertNull(store.getContact(a).await())
     }

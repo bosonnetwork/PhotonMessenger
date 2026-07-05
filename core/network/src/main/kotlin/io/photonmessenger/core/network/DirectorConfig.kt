@@ -35,6 +35,14 @@ data class DirectorConfig(
      * Populated from [KnownDirectorPins] when the config is built. X-S4 / M1-4.
      */
     val certificatePins: List<String> = emptyList(),
+    /**
+     * The Director's Boson node id (base58). When set and [baseUrl] is HTTPS, [DirectorApiFactory]
+     * pins the connection to this Boson identity via a [DirectorTrustManagerProvider] - the same
+     * identity-pinning model the messaging and ion-store clients use - so the Director's self-signed
+     * ECDSA certificate (Ed25519 identity binding) is trusted without a public CA. Null falls back to
+     * default system-CA trust (e.g. a Director fronted by a real CA certificate). X-S4.
+     */
+    val nodeId: String? = null,
 ) {
     val apiPrefix: String get() = "$baseUrl/api/v1"
     val clientPrefix: String get() = "$apiPrefix/client"

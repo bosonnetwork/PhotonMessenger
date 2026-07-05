@@ -85,7 +85,7 @@ class SessionController @Inject constructor(
         }.stateIn(scope, SharingStarted.Eagerly, SessionStatus(SessionPhase.IDLE))
 
     @Volatile
-    private var cachedApi: Pair<String, DirectorApi>? = null
+    private var cachedApi: Pair<DirectorConfig, DirectorApi>? = null
 
     // True between ensureConnected() and disconnect(): the user intends to be online, so a
     // network-regain should retry a bring-up that failed while offline.
@@ -94,8 +94,8 @@ class SessionController @Inject constructor(
 
     private suspend fun api(): DirectorApi {
         val cfg: DirectorConfig = configStore.config.first()
-        cachedApi?.let { (url, api) -> if (url == cfg.baseUrl) return api }
-        return apiFactory.create(cfg).also { cachedApi = cfg.baseUrl to it }
+        cachedApi?.let { (cached, api) -> if (cached == cfg) return api }
+        return apiFactory.create(cfg).also { cachedApi = cfg to it }
     }
 
     /** Discovers coordinates and connects the messaging client. Safe to call repeatedly. */

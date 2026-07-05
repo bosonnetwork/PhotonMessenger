@@ -20,8 +20,8 @@
 -dontwarn com.google.mlkit.**
 -dontwarn com.google.android.gms.**
 
-# BouncyCastle JSSE/JCE provider (X-S4): the mqtts + ion-store TLS handshake resolves ed25519 via
-# BCJSSE, and the providers load algorithm implementations reflectively by class name. Stripping or
-# renaming them would break the TLS handshake in release only, so keep the whole tree.
+# BouncyCastle (bcprov): the Boson crypto provider (Ed25519 / crypto_box) loads algorithm
+# implementations reflectively by class name; stripping or renaming them would break crypto in release
+# only, so keep the whole tree. (BCJSSE is no longer bundled - ECDSA certs use Conscrypt natively.)
 -keep class org.bouncycastle.** { *; }
 -dontwarn org.bouncycastle.**

@@ -24,6 +24,8 @@ package io.photonmessenger.core.network
 
 import io.photonmessenger.core.model.AuthTokenStore
 import java.net.URI
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
 import kotlinx.serialization.json.Json
 import okhttp3.CertificatePinner
 import okhttp3.MediaType.Companion.toMediaType
@@ -40,6 +42,12 @@ import retrofit2.create
  */
 class DirectorApiFactory(
     private val tokenStore: AuthTokenStore,
+    /**
+     * Supplies the identity-pinning trust manager for HTTPS Directors (see
+     * [DirectorTrustManagerProvider]). Null (the default) leaves the client on default system-CA
+     * trust, which is all that unit tests and cleartext dev endpoints need.
+     */
+    private val trustManagerProvider: DirectorTrustManagerProvider? = null,
 ) {
     private val json: Json = DEFAULT_JSON
 
@@ -48,6 +56,7 @@ class DirectorApiFactory(
             .addInterceptor(AuthInterceptor(tokenStore))
             .authenticator(TokenAuthenticator(tokenStore, "${config.authPrefix}/refresh", json))
             .apply { certificatePinner(config)?.let { certificatePinner(it) } }
+            .apply { applyIdentityPinning(config) }
             .build()
 
         return Retrofit.Builder()
@@ -57,6 +66,22 @@ class DirectorApiFactory(
             .addConverterFactory(json.asConverterFactory(JSON_MEDIA_TYPE))
             .build()
             .create()
+    }
+
+    /**
+     * Installs Boson identity pinning on the Director client when [trustManagerProvider] yields a
+     * trust manager for [config] (i.e. a node id is configured). Trust is then anchored to the
+     * Director's Boson identity - not its DNS name - so, as with the messaging/ion-store clients, the
+     * peer may be reached via any host, IP, or emulator alias; OkHttp's hostname check is disabled to
+     * match. When the provider returns null the client keeps default system-CA trust untouched.
+     */
+    private fun OkHttpClient.Builder.applyIdentityPinning(config: DirectorConfig) {
+        val trustManager = trustManagerProvider?.trustManagerFor(config) ?: return
+        val sslContext = SSLContext.getInstance("TLS").apply {
+            init(null, arrayOf<TrustManager>(trustManager), null)
+        }
+        sslSocketFactory(sslContext.socketFactory, trustManager)
+        hostnameVerifier { _, _ -> true }
     }
 
     companion object {

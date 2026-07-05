@@ -103,6 +103,18 @@ fun OnboardingScreen(
                 Text("Connect to your server", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
+                    value = state.directorNodeId,
+                    onValueChange = viewModel::onDirectorNodeIdChange,
+                    label = { Text("Server ID") },
+                    placeholder = { Text("Boson node id (for a self-signed server)") },
+                    supportingText = {
+                        Text("Required to trust a self-signed HTTPS server; leave blank for a public CA.")
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
                     value = state.serverUrl,
                     onValueChange = viewModel::onServerUrlChange,
                     label = { Text("Server URL") },

@@ -28,7 +28,6 @@ import android.os.Bundle
 import io.photonmessenger.app.notification.NotificationSettings
 import io.photonmessenger.app.session.NetworkMonitor
 import io.photonmessenger.app.session.SessionController
-import io.photonmessenger.core.boson.BosonTls
 import io.photonmessenger.core.network.NotificationPreferencesStore
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
@@ -60,9 +59,6 @@ class PhotonApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // Enable an ed25519-capable TLS provider before any mqtts connection is attempted.
-        BosonTls.install()
-
         // Keep the synchronous notification snapshot current so the notification path (M6-6) can read
         // preferences without blocking on DataStore.
         notificationPreferencesStore.preferences

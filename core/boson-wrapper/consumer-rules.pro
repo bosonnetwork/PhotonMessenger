@@ -19,8 +19,9 @@
 }
 -dontwarn com.fasterxml.jackson.**
 
-# BouncyCastle: BosonTls.install() registers the BCJSSE provider by class name for the ed25519 TLS
-# stack; the providers must keep their names and no-arg constructors.
+# BouncyCastle (bcprov): the Boson crypto provider (Ed25519 / crypto_box, the default backend) loads
+# algorithm implementations reflectively by class name, so keep the whole tree. (The BCJSSE TLS stack
+# is no longer bundled - services present ECDSA certs that Conscrypt handles natively.)
 -keep class org.bouncycastle.** { *; }
 -dontwarn org.bouncycastle.**
 

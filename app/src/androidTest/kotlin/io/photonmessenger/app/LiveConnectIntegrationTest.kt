@@ -28,11 +28,8 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.photonmessenger.core.boson.BosonClientFactory
 import io.photonmessenger.core.boson.BosonCrypto
-import io.photonmessenger.core.boson.BosonTls
 import io.photonmessenger.core.database.MessagingStoreFactory
 import io.photonmessenger.core.model.AuthTokenStore
-import io.photonmessenger.core.network.DirectorApiFactory
-import io.photonmessenger.core.network.DirectorConfig
 import io.photonmessenger.core.network.ServiceDiscovery
 import io.photonmessenger.core.network.model.SelfRegisterRequest
 import io.bosonnetwork.Id
@@ -54,7 +51,7 @@ import org.junit.runner.RunWith
 
 /**
  * LIVE integration tests (X-T3). Require the dev super node running and reachable at
- * http://10.0.2.2:9000 (Director) / mqtts 192.168.8.80:9083 (messaging). They self-register users via
+ * https://10.0.2.2:9000 (Director) / mqtts 192.168.8.80:9083 (messaging). They self-register users via
  * the non-OAuth API and exercise the real Android stack (REST + keys + Room persistence + mqtts TLS)
  * end to end against a live node. Will fail-fast where the node is down.
  *
@@ -65,7 +62,6 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class LiveConnectIntegrationTest {
 
-    private val directorUrl = "http://10.0.2.2:9000"
     private val timeout = 30L
 
     private class MutableTokenStore : AuthTokenStore {
@@ -106,7 +102,10 @@ class LiveConnectIntegrationTest {
         )
 
         val tokenStore = MutableTokenStore()
-        val api = DirectorApiFactory(tokenStore).create(DirectorConfig(directorUrl))
+        // Register + discover over the production identity-pinned Director client (pinned to the dev
+        // node id from the first request, see LiveDirectorTls), so this exercises the real pinned TLS
+        // handshake. The messaging client below likewise pins its own service by peerId.
+        val api = LiveDirectorTls.pinnedApiFactory(tokenStore).create(TestSuperNode.directorConfig)
         val coords = runBlocking {
             tokenStore.setToken(api.register(request).token)
             ServiceDiscovery.toServiceCoords(api.getNodeStatus())
@@ -135,7 +134,6 @@ class LiveConnectIntegrationTest {
     @Test
     fun registersAndConnectsToLiveNode() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        BosonTls.install()
         val vertx = Vertx.vertx()
         var peer: Peer? = null
         try {
@@ -150,7 +148,6 @@ class LiveConnectIntegrationTest {
     @Test
     fun friendRequestAndDirectMessageRoundTrip() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        BosonTls.install()
         val vertx = Vertx.vertx()
         val peers = mutableListOf<Peer>()
         try {

@@ -30,8 +30,6 @@ import io.photonmessenger.core.database.MessagingStoreFactory
 import io.photonmessenger.core.model.AuthTokenStore
 import io.photonmessenger.core.model.ServiceCoords
 import io.photonmessenger.core.network.DirectorApi
-import io.photonmessenger.core.network.DirectorApiFactory
-import io.photonmessenger.core.network.DirectorConfig
 import io.photonmessenger.core.network.ServiceDiscovery
 import io.photonmessenger.core.network.model.SelfRegisterRequest
 import io.bosonnetwork.Id
@@ -50,7 +48,7 @@ import org.junit.Assert.assertTrue
 
 /**
  * Shared harness for the LIVE integration tests (X-T3). Requires the dev super node running and
- * reachable at [DIRECTOR_URL] (Director) / the discovered mqtts + ion-store endpoints. Centralizes
+ * reachable at [TestSuperNode] (Director) / the discovered mqtts + ion-store endpoints. Centralizes
  * self-registration (non-OAuth), service discovery, client/IonStore construction, and keys so the
  * per-phase test classes stay focused on the behavior under test.
  *
@@ -107,7 +105,9 @@ class LiveTestHarness(
             deviceSig = b64(BosonCrypto.sign(deviceKp, nonce)),
         )
         val tokenStore = MutableTokenStore()
-        val api = DirectorApiFactory(tokenStore).create(DirectorConfig(DIRECTOR_URL))
+        // Identity-pinned from the first request: the dev node id is a stable known value, so register
+        // + discovery + every later call all drive the production pinned trust path (see LiveDirectorTls).
+        val api = LiveDirectorTls.pinnedApiFactory(tokenStore).create(TestSuperNode.directorConfig)
         val coords = runBlocking {
             tokenStore.setToken(api.register(request).token)
             ServiceDiscovery.toServiceCoords(api.getNodeStatus())
@@ -156,7 +156,6 @@ class LiveTestHarness(
     }
 
     companion object {
-        const val DIRECTOR_URL = "http://10.0.2.2:9000"
         const val TIMEOUT = 30L
     }
 }
