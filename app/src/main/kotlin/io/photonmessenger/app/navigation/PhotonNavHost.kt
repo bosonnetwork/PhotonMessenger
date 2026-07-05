@@ -135,6 +135,7 @@ fun PhotonNavHost(
             }
             composable(TopLevelDestination.CONTACTS.route) {
                 ContactsScreen(
+                    onOpenConversation = { id -> navController.navigate("chat/$id") },
                     onOpenChannel = { id -> navController.navigate("chat/$id") },
                     onCreateChannel = { navController.navigate(Routes.CREATE_CHANNEL) },
                 )

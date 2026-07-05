@@ -77,6 +77,7 @@ private enum class ContactsTab(val label: String) { FRIENDS("Friends"), REQUESTS
 @Composable
 fun ContactsScreen(
     modifier: Modifier = Modifier,
+    onOpenConversation: (String) -> Unit = {},
     onOpenChannel: (String) -> Unit = {},
     onCreateChannel: () -> Unit = {},
     viewModel: ContactsViewModel = hiltViewModel(),
@@ -144,6 +145,7 @@ fun ContactsScreen(
                         onBlock = viewModel::setBlocked,
                         onRemove = viewModel::remove,
                         onEditAlias = { editAliasContact = it },
+                        onClick = onOpenConversation,
                     )
                     ContactsTab.REQUESTS -> RequestList(
                         requests = state.requests,
