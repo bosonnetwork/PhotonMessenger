@@ -34,6 +34,10 @@ data class UiContact(
     val blocked: Boolean,
     /** The local alias/remark, if the user set one (M2-6). */
     val remark: String? = null,
+    /** The profile name (without any local alias applied), when known. */
+    val name: String? = null,
+    /** Fetchable avatar URL, null for channels or when unresolvable. */
+    val avatarUrl: String? = null,
 )
 
 /** UI projection of an incoming friend request. */
@@ -42,10 +46,11 @@ data class UiFriendRequest(
     val hello: String,
 )
 
-fun Contact.toUi(): UiContact {
+fun Contact.toUi(avatarUrl: String? = null): UiContact {
     val id = getId().toString()
     val remark = getRemark().orElse(null)?.takeIf { it.isNotBlank() }
-    val name = remark ?: getName().orElse(null) ?: shortId(id)
+    val profileName = getName().orElse(null)?.takeIf { it.isNotBlank() }
+    val name = remark ?: profileName ?: shortId(id)
     return UiContact(
         id = id,
         displayName = name,
@@ -53,6 +58,8 @@ fun Contact.toUi(): UiContact {
         muted = isMuted(),
         blocked = isBlocked(),
         remark = remark,
+        name = profileName,
+        avatarUrl = avatarUrl,
     )
 }
 

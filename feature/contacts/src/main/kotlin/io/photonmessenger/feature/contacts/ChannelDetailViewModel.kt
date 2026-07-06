@@ -66,9 +66,17 @@ class ChannelDetailViewModel @Inject constructor(
                 initialValue = ChannelDetailUiState(loading = true),
             )
 
-    /** Transient one-shot messages (action failures, generated invite ticket) for a snackbar. */
+    /** Transient one-shot messages (action failures) for a snackbar. */
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val messages = _messages.asSharedFlow()
+
+    /** Emitted after a leave/delete succeeds, so the screen navigates away only on success. */
+    private val _closed = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val closed = _closed.asSharedFlow()
+
+    /** Emits a freshly minted, shareable invite-ticket string (M4-2). */
+    private val _inviteTicket = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val inviteTicket = _inviteTicket.asSharedFlow()
 
     fun setRole(memberId: String, role: UiChannelRole) =
         run("Couldn't change role") { repository.setRole(channelId, memberId, role) }
@@ -76,8 +84,22 @@ class ChannelDetailViewModel @Inject constructor(
     fun ban(memberId: String) = run("Couldn't ban member") { repository.ban(channelId, memberId) }
     fun unban(memberId: String) = run("Couldn't unban member") { repository.unban(channelId, memberId) }
     fun kick(memberId: String) = run("Couldn't remove member") { repository.kick(channelId, memberId) }
-    fun leave() = run("Couldn't leave channel") { repository.leave(channelId) }
-    fun remove() = run("Couldn't delete channel") { repository.remove(channelId) }
+
+    fun leave() {
+        viewModelScope.launch {
+            repository.leave(channelId)
+                .onSuccess { _closed.tryEmit(Unit) }
+                .onFailure { e -> _messages.tryEmit(e.toUserMessage("Couldn't leave channel")) }
+        }
+    }
+
+    fun remove() {
+        viewModelScope.launch {
+            repository.remove(channelId)
+                .onSuccess { _closed.tryEmit(Unit) }
+                .onFailure { e -> _messages.tryEmit(e.toUserMessage("Couldn't delete channel")) }
+        }
+    }
 
     fun transferOwnership(memberId: String) =
         run("Couldn't transfer ownership") { repository.transferOwnership(channelId, memberId) }
@@ -88,12 +110,12 @@ class ChannelDetailViewModel @Inject constructor(
     fun rotateSessionKey() =
         run("Couldn't rotate session key") { repository.rotateSessionKey(channelId) }
 
-    /** Invites a specific user; surfaces the resulting ticket text via [messages]. */
+    /** Mints an invite (open, or bound to [inviteeId]); the ticket surfaces via [inviteTicket]. */
     fun invite(inviteeId: String?) {
         viewModelScope.launch {
             repository.invite(channelId, inviteeId)
-                .onSuccess { _messages.tryEmit("Invite ticket: $it") }
-                .onFailure { _messages.tryEmit("Couldn't create invite: ${it.message ?: "unknown error"}") }
+                .onSuccess { _inviteTicket.tryEmit(it) }
+                .onFailure { _messages.tryEmit(it.toUserMessage("Couldn't create invite")) }
         }
     }
 

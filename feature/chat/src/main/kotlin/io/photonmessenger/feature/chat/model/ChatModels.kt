@@ -35,17 +35,21 @@ data class UiConversation(
     val preview: String,
     val isChannel: Boolean,
     val updatedAt: Long,
+    /** Fetchable avatar URL for the peer (DMs), null for channels or when unresolvable. */
+    val avatarUrl: String? = null,
 )
 
 /**
  * Header shown at the top of a chat (M4-3). For a channel [isChannel] is true and [subtitle] carries
  * the member count so the same chat screen serves DMs and channels; the title links to the channel
- * detail/roster only when [isChannel].
+ * detail/roster (channels) or the contact profile (DMs).
  */
 data class ChatHeader(
     val title: String,
     val subtitle: String? = null,
     val isChannel: Boolean = false,
+    /** Fetchable avatar URL for the DM peer, null for channels or when unresolvable. */
+    val avatarUrl: String? = null,
 )
 
 /** Compact form of a long Boson id for display (e.g. an untitled conversation). */
@@ -63,25 +67,33 @@ data class UiMessage(
     val createdAt: Long,
     val attachment: UiAttachment? = null,
     val status: MessageStatus = MessageStatus.SENT,
+    /** Sender's user id (base58), when known. */
+    val senderId: String? = null,
+    /** Sender display name; shown above incoming bubbles in channels (M4). */
+    val senderName: String? = null,
 )
 
-fun Conversation.toUi(): UiConversation = UiConversation(
+fun Conversation.toUi(avatarUrl: String? = null): UiConversation = UiConversation(
     id = getId().toString(),
     title = getTitle(),
     preview = getPreview().orElse(""),
     isChannel = isChannel(),
     updatedAt = getUpdatedAt(),
+    avatarUrl = avatarUrl,
 )
 
-fun Message.toUi(myUserId: Id?): UiMessage {
+fun Message.toUi(myUserId: Id?, resolveSenderName: ((Id) -> String?)? = null): UiMessage {
     val from = getFrom().orElse(null)
     val attachment = runCatching { extractAttachment() }.getOrNull()
+    val fromMe = from != null && from == myUserId
     return UiMessage(
         id = getId().toString(),
         text = if (attachment != null) "" else runCatching { getPayloadAsContent().asText() }.getOrDefault(""),
-        fromMe = from != null && from == myUserId,
+        fromMe = fromMe,
         createdAt = getCreatedAt(),
         attachment = attachment,
+        senderId = from?.toString(),
+        senderName = if (!fromMe && from != null) resolveSenderName?.invoke(from) else null,
     )
 }
 

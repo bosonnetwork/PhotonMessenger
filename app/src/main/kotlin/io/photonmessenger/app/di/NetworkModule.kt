@@ -29,6 +29,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStoreFile
 import io.photonmessenger.core.boson.BosonDirectorTrustManagerProvider
 import io.photonmessenger.core.model.AuthTokenStore
+import io.photonmessenger.core.model.AvatarUrls
 import io.photonmessenger.core.network.DirectorApiFactory
 import io.photonmessenger.core.network.DirectorConfigStore
 import io.photonmessenger.core.network.DirectorTrustManagerProvider
@@ -40,6 +41,10 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -78,4 +83,26 @@ object NetworkModule {
         trustManagerProvider: DirectorTrustManagerProvider,
     ): DirectorApiFactory =
         DirectorApiFactory(tokenStore, trustManagerProvider)
+
+    /**
+     * Public per-user avatar URLs from the configured Director (auth-less
+     * `GET /api/v1/client/avatar/{userId}`). Tracks the persisted base URL so feature modules can
+     * render contact avatars without a core:network dependency.
+     */
+    @Provides
+    @Singleton
+    fun provideAvatarUrls(configStore: DirectorConfigStore): AvatarUrls =
+        object : AvatarUrls {
+            private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+            @Volatile
+            private var baseUrl: String? = null
+
+            init {
+                scope.launch { configStore.config.collect { baseUrl = it.baseUrl } }
+            }
+
+            override fun forUser(userId: String): String? =
+                baseUrl?.let { "$it/api/v1/client/avatar/$userId" }
+        }
 }

@@ -22,6 +22,12 @@
 
 package io.photonmessenger.app.navigation
 
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -46,6 +52,7 @@ import io.photonmessenger.app.AppViewModel
 import io.photonmessenger.feature.chat.ChatScreen
 import io.photonmessenger.feature.chat.ConversationsScreen
 import io.photonmessenger.feature.contacts.ChannelDetailScreen
+import io.photonmessenger.feature.contacts.ContactDetailScreen
 import io.photonmessenger.feature.contacts.ContactsScreen
 import io.photonmessenger.feature.contacts.CreateChannelScreen
 import io.photonmessenger.feature.onboarding.OnboardingScreen
@@ -108,7 +115,19 @@ fun PhotonNavHost(
         NavHost(
             navController = navController,
             startDestination = appViewModel.startDestination,
-            modifier = Modifier.padding(innerPadding),
+            // Consume the shell padding as insets too, so screen-level TopAppBars don't re-apply
+            // the status-bar inset when the connection banner already occupies that space.
+            modifier = Modifier.padding(innerPadding).consumeWindowInsets(innerPadding),
+            enterTransition = {
+                fadeIn(animationSpec = tween(220)) +
+                    slideInHorizontally(animationSpec = tween(220)) { it / 8 }
+            },
+            exitTransition = { fadeOut(animationSpec = tween(180)) },
+            popEnterTransition = { fadeIn(animationSpec = tween(220)) },
+            popExitTransition = {
+                fadeOut(animationSpec = tween(180)) +
+                    slideOutHorizontally(animationSpec = tween(220)) { it / 8 }
+            },
         ) {
             composable(Routes.ONBOARDING) {
                 OnboardingScreen(
@@ -137,6 +156,8 @@ fun PhotonNavHost(
                 ContactsScreen(
                     onOpenConversation = { id -> navController.navigate("chat/$id") },
                     onOpenChannel = { id -> navController.navigate("chat/$id") },
+                    onOpenContactDetail = { id -> navController.navigate("contact/$id") },
+                    onOpenChannelDetail = { id -> navController.navigate("channel/$id") },
                     onCreateChannel = { navController.navigate(Routes.CREATE_CHANNEL) },
                 )
             }
@@ -182,6 +203,21 @@ fun PhotonNavHost(
                 ChatScreen(
                     onBack = { navController.popBackStack() },
                     onOpenChannelDetail = { id -> navController.navigate("channel/$id") },
+                    onOpenContactDetail = { id -> navController.navigate("contact/$id") },
+                )
+            }
+            composable(
+                route = "contact/{contactId}",
+                arguments = listOf(navArgument("contactId") { type = NavType.StringType }),
+            ) {
+                ContactDetailScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenChat = { id ->
+                        navController.navigate("chat/$id") {
+                            popUpTo("contact/{contactId}") { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
                 )
             }
             composable(Routes.CREATE_CHANNEL) {

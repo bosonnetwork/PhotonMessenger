@@ -64,6 +64,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.photonmessenger.core.designsystem.component.ConfirmDialog
 import io.photonmessenger.core.designsystem.component.EmptyState
 import io.photonmessenger.core.designsystem.component.ErrorState
 import io.photonmessenger.core.designsystem.component.LoadingState
@@ -83,6 +84,7 @@ fun DevicesScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    var removeTarget by remember { mutableStateOf<UiDevice?>(null) }
 
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
 
@@ -113,13 +115,24 @@ fun DevicesScreen(
                     state.devices.isEmpty() -> EmptyState("No devices")
                     else -> LazyColumn(Modifier.fillMaxSize()) {
                         items(state.devices, key = { it.deviceId }) { device ->
-                            DeviceRow(device, viewModel)
+                            DeviceRow(device, viewModel, onRemove = { removeTarget = it })
                             HorizontalDivider()
                         }
                     }
                 }
             }
         }
+    }
+
+    removeTarget?.let { device ->
+        ConfirmDialog(
+            title = "Remove ${device.name}?",
+            text = "The device is deregistered from your account and can no longer sign in " +
+                "with its device key.",
+            confirmLabel = "Remove",
+            onConfirm = { viewModel.removeDevice(device.deviceId) },
+            onDismiss = { removeTarget = null },
+        )
     }
 
     state.passphrasePrompt?.let { prompt ->
@@ -193,7 +206,7 @@ private fun PairingActions(
 }
 
 @Composable
-private fun DeviceRow(device: UiDevice, viewModel: DevicesViewModel) {
+private fun DeviceRow(device: UiDevice, viewModel: DevicesViewModel, onRemove: (UiDevice) -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
 
     ListItem(
@@ -227,10 +240,10 @@ private fun DeviceRow(device: UiDevice, viewModel: DevicesViewModel) {
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("Remove device") },
+                            text = { Text("Remove device", color = MaterialTheme.colorScheme.error) },
                             onClick = {
                                 menuOpen = false
-                                viewModel.removeDevice(device.deviceId)
+                                onRemove(device)
                             },
                         )
                     }

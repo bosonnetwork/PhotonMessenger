@@ -28,13 +28,16 @@ import io.photonmessenger.feature.chat.data.ChatRepository
 import io.photonmessenger.feature.chat.model.UiConversation
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 data class ConversationsUiState(
     val loading: Boolean = true,
@@ -53,6 +56,19 @@ class ConversationsViewModel @Inject constructor(
     val query: StateFlow<String> = _query.asStateFlow()
 
     fun onQueryChange(value: String) { _query.value = value }
+
+    /** Transient one-shot messages (action failures) for a snackbar. */
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val messages = _messages.asSharedFlow()
+
+    /** Deletes a conversation's message history (the contact/channel itself is unaffected). */
+    fun deleteConversation(conversationId: String) {
+        viewModelScope.launch {
+            repository.removeConversation(conversationId).onFailure { e ->
+                _messages.tryEmit("Couldn't delete conversation: ${e.message ?: "unknown error"}")
+            }
+        }
+    }
 
     val uiState: StateFlow<ConversationsUiState> =
         combine(repository.conversations(), _query) { conversations, query ->

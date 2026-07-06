@@ -24,62 +24,92 @@ package io.photonmessenger.feature.chat
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import io.photonmessenger.core.designsystem.component.PhotonAvatar
 import io.photonmessenger.core.designsystem.component.ResponsiveContent
+import io.photonmessenger.core.designsystem.component.formatBubbleTime
+import io.photonmessenger.core.designsystem.component.formatDayHeader
+import io.photonmessenger.core.designsystem.component.identityColor
+import io.photonmessenger.core.designsystem.component.sameDay
 import io.photonmessenger.feature.chat.model.AttachmentKind
 import io.photonmessenger.feature.chat.model.AttachmentSource
 import io.photonmessenger.feature.chat.model.MessageStatus
 import io.photonmessenger.feature.chat.model.UiAttachment
 import io.photonmessenger.feature.chat.model.UiMessage
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,6 +117,7 @@ fun ChatScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     onOpenChannelDetail: (String) -> Unit = {},
+    onOpenContactDetail: (String) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -118,44 +149,69 @@ fun ChatScreen(
     // Load older history when the user scrolls to the top (M3-5).
     LaunchedEffect(listState) {
         snapshotFlow { listState.firstVisibleItemIndex }
-            .collect { index -> if (index == 0) viewModel.loadOlder() }
+            .collect { index -> if (index == 0 && state.messages.isNotEmpty()) viewModel.loadOlder() }
     }
 
-    // Auto-scroll to the newest message only when one is appended (not when older pages prepend).
+    // Follow new messages only when the user is already reading the newest ones; never yank
+    // someone who scrolled up into history back to the bottom.
+    val nearBottom by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+            info.totalItemsCount == 0 || last >= info.totalItemsCount - 3
+        }
+    }
     val newestId = state.messages.lastOrNull()?.id
+    val newestFromMe = state.messages.lastOrNull()?.fromMe == true
     LaunchedEffect(newestId) {
-        if (newestId != null) listState.animateScrollToItem(state.messages.lastIndex)
+        if (newestId != null && (nearBottom || newestFromMe) && state.messages.isNotEmpty()) {
+            listState.animateScrollToItem(state.messages.lastIndex)
+        }
     }
 
     Scaffold(
-        modifier = modifier,
+        modifier = modifier.imePadding(),
         topBar = {
-            val openDetail = { onOpenChannelDetail(viewModel.conversationId) }
+            val openDetail = {
+                if (header.isChannel) onOpenChannelDetail(viewModel.conversationId)
+                else onOpenContactDetail(viewModel.conversationId)
+            }
             TopAppBar(
                 title = {
-                    val titleModifier = if (header.isChannel) Modifier.clickable(onClick = openDetail) else Modifier
-                    Column(modifier = titleModifier) {
-                        Text(header.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        header.subtitle?.let {
+                    Row(
+                        modifier = Modifier.clickable(onClick = openDetail),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        PhotonAvatar(
+                            model = header.avatarUrl,
+                            name = header.title,
+                            colorKey = viewModel.conversationId,
+                            isChannel = header.isChannel,
+                            size = 38.dp,
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column {
                             Text(
-                                it,
-                                style = MaterialTheme.typography.labelMedium,
+                                header.title,
+                                style = MaterialTheme.typography.titleMedium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
+                            header.subtitle?.let {
+                                Text(
+                                    it,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    if (header.isChannel) {
-                        IconButton(onClick = openDetail) {
-                            Icon(Icons.Filled.Groups, contentDescription = "Channel members")
-                        }
                     }
                 },
             )
@@ -174,30 +230,64 @@ fun ChatScreen(
         },
     ) { padding ->
         ResponsiveContent(modifier = Modifier.padding(padding)) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                if (loadingOlder) {
-                    item(key = "loading-older") {
-                        Box(modifier = Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp))
+            Box(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    if (loadingOlder) {
+                        item(key = "loading-older") {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                            }
+                        }
+                    }
+                    itemsIndexed(state.messages, key = { _, msg -> msg.id }) { index, msg ->
+                        val prev = state.messages.getOrNull(index - 1)
+                        val download = msg.attachment?.let { att ->
+                            (att.source as? AttachmentSource.Remote)?.let { downloads[it.contentId] }
+                        }
+                        Column(modifier = Modifier.animateItem()) {
+                            if (prev == null || !sameDay(prev.createdAt, msg.createdAt)) {
+                                DayHeader(msg.createdAt)
+                            }
+                            MessageBubble(
+                                message = msg,
+                                isChannel = header.isChannel,
+                                showSender = msg.senderName != null &&
+                                    (prev == null || prev.senderId != msg.senderId ||
+                                        !sameDay(prev.createdAt, msg.createdAt)),
+                                download = download,
+                                onDownload = { viewModel.download(it) },
+                                onRetry = { viewModel.retrySend(SendFailure("", it.text, it.id)) },
+                            )
                         }
                     }
                 }
-                items(state.messages, key = { it.id }) { msg ->
-                    val download = msg.attachment?.let { att ->
-                        (att.source as? AttachmentSource.Remote)?.let { downloads[it.contentId] }
+
+                // Jump back to the newest message after scrolling up into history.
+                val scope = rememberCoroutineScope()
+                AnimatedVisibility(
+                    visible = !nearBottom && state.messages.isNotEmpty(),
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+                    enter = fadeIn() + scaleIn(),
+                    exit = fadeOut() + scaleOut(),
+                ) {
+                    SmallFloatingActionButton(
+                        onClick = {
+                            scope.launch {
+                                listState.animateScrollToItem(state.messages.lastIndex)
+                            }
+                        },
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ) {
+                        Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Scroll to newest")
                     }
-                    MessageBubble(
-                        message = msg,
-                        download = download,
-                        onDownload = { viewModel.download(it) },
-                        onRetry = { viewModel.retrySend(SendFailure("", it.text, it.id)) },
-                        modifier = Modifier.animateItem(),
-                    )
                 }
             }
         }
@@ -205,69 +295,146 @@ fun ChatScreen(
 }
 
 @Composable
+private fun DayHeader(epochMillis: Long) {
+    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = RoundedCornerShape(12.dp),
+        ) {
+            Text(
+                text = formatDayHeader(epochMillis),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
 private fun MessageBubble(
     message: UiMessage,
+    isChannel: Boolean,
+    showSender: Boolean,
     download: AttachmentDownload?,
     onDownload: (UiAttachment) -> Unit,
     onRetry: (UiMessage) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val alignment = if (message.fromMe) Alignment.End else Alignment.Start
-    val bubbleAlignment = if (message.fromMe) Alignment.CenterEnd else Alignment.CenterStart
     val failed = message.status == MessageStatus.FAILED
-    val baseColor = if (message.fromMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+    val baseColor = if (message.fromMe) MaterialTheme.colorScheme.primary
+    else MaterialTheme.colorScheme.surfaceContainerHigh
     val color = if (failed) MaterialTheme.colorScheme.errorContainer else baseColor
     val onColor = when {
         failed -> MaterialTheme.colorScheme.onErrorContainer
         message.fromMe -> MaterialTheme.colorScheme.onPrimary
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> MaterialTheme.colorScheme.onSurface
     }
+    // Telegram-style asymmetric corners: the corner nearest the sender is tightened.
+    val shape = if (message.fromMe) {
+        RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomEnd = 6.dp, bottomStart = 18.dp)
+    } else {
+        RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomEnd = 18.dp, bottomStart = 6.dp)
+    }
+    val clipboard = LocalClipboardManager.current
+
     // A sending bubble is slightly muted until it is confirmed on the live stream (M3-4).
     val bubbleModifier = Modifier
-        .widthIn(max = 280.dp)
-        .then(if (message.status == MessageStatus.SENDING) Modifier.alpha(0.7f) else Modifier)
+        .widthIn(max = 300.dp)
+        .then(if (message.status == MessageStatus.SENDING) Modifier.alpha(0.75f) else Modifier)
+
     Column(modifier = modifier.fillMaxWidth(), horizontalAlignment = alignment) {
-        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = bubbleAlignment) {
-            Surface(
-                color = color,
-                shape = RoundedCornerShape(16.dp),
-                modifier = bubbleModifier,
-            ) {
+        Surface(
+            color = color,
+            shape = shape,
+            modifier = bubbleModifier.combinedClickable(
+                onClick = {},
+                onLongClick = {
+                    if (message.text.isNotBlank()) clipboard.setText(AnnotatedString(message.text))
+                },
+            ),
+        ) {
+            Column {
+                if (isChannel && showSender && !message.fromMe && message.senderName != null) {
+                    Text(
+                        text = message.senderName,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = identityColor(message.senderId),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 6.dp),
+                    )
+                }
                 if (message.attachment != null) {
                     AttachmentContent(message.attachment, download, onColor, onDownload)
+                    BubbleMeta(message, onColor, Modifier.align(Alignment.End))
                 } else {
-                    Text(
-                        text = message.text,
-                        color = onColor,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    )
+                    Row(
+                        verticalAlignment = Alignment.Bottom,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                    ) {
+                        Text(
+                            text = message.text,
+                            color = onColor,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        BubbleMeta(message, onColor)
+                    }
                 }
             }
         }
-        MessageStatusLabel(message, onRetry)
+        if (failed) {
+            Text(
+                text = "Not delivered. Tap to retry",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier
+                    .clickable { onRetry(message) }
+                    .padding(horizontal = 12.dp, vertical = 2.dp),
+            )
+        }
     }
 }
 
-/** Shows delivery state under outgoing bubbles: a "Sending" hint, or a tap-to-retry failure (M3-4). */
+/** Time + delivery state rendered inside the bubble's trailing corner. */
 @Composable
-private fun MessageStatusLabel(message: UiMessage, onRetry: (UiMessage) -> Unit) {
-    if (!message.fromMe) return
-    when (message.status) {
-        MessageStatus.SENDING -> Text(
-            text = "Sending...",
+private fun BubbleMeta(message: UiMessage, onColor: Color, modifier: Modifier = Modifier) {
+    Row(
+        modifier = if (message.attachment != null) {
+            modifier.padding(end = 10.dp, bottom = 4.dp, start = 10.dp)
+        } else {
+            modifier
+        },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Text(
+            text = formatBubbleTime(message.createdAt),
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+            color = onColor.copy(alpha = 0.75f),
         )
-        MessageStatus.FAILED -> Text(
-            text = "Not delivered. Tap to retry",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.error,
-            modifier = Modifier
-                .clickable { onRetry(message) }
-                .padding(horizontal = 12.dp, vertical = 2.dp),
-        )
-        MessageStatus.SENT -> Unit
+        if (message.fromMe) {
+            val icon = when (message.status) {
+                MessageStatus.SENDING -> Icons.Filled.Schedule
+                MessageStatus.SENT -> Icons.Filled.Check
+                MessageStatus.FAILED -> Icons.Filled.ErrorOutline
+            }
+            Icon(
+                icon,
+                contentDescription = when (message.status) {
+                    MessageStatus.SENDING -> "Sending"
+                    MessageStatus.SENT -> "Sent"
+                    MessageStatus.FAILED -> "Failed"
+                },
+                modifier = Modifier.size(13.dp),
+                tint = onColor.copy(alpha = 0.75f),
+            )
+        }
     }
 }
 
@@ -275,7 +442,7 @@ private fun MessageStatusLabel(message: UiMessage, onRetry: (UiMessage) -> Unit)
 private fun AttachmentContent(
     attachment: UiAttachment,
     download: AttachmentDownload?,
-    onColor: androidx.compose.ui.graphics.Color,
+    onColor: Color,
     onDownload: (UiAttachment) -> Unit,
 ) {
     val source = attachment.source
@@ -289,7 +456,7 @@ private fun AttachmentContent(
             when (download) {
                 is AttachmentDownload.Ready -> AttachmentImage(model = download.file, attachment = attachment)
                 is AttachmentDownload.Failed -> FileChip(attachment, onColor, "Tap to retry") { onDownload(attachment) }
-                else -> ImagePlaceholder(attachment)
+                else -> ImagePlaceholder()
             }
         }
 
@@ -316,15 +483,15 @@ private fun AttachmentImage(model: Any, attachment: UiAttachment) {
         contentDescription = attachment.name,
         contentScale = ContentScale.Crop,
         modifier = Modifier
-            .widthIn(max = 240.dp)
+            .widthIn(max = 260.dp)
             .aspectRatio(ratio.coerceIn(0.5f, 2f)),
     )
 }
 
 @Composable
-private fun ImagePlaceholder(attachment: UiAttachment) {
+private fun ImagePlaceholder() {
     Box(
-        modifier = Modifier.size(160.dp),
+        modifier = Modifier.size(180.dp),
         contentAlignment = Alignment.Center,
     ) {
         CircularProgressIndicator()
@@ -334,7 +501,7 @@ private fun ImagePlaceholder(attachment: UiAttachment) {
 @Composable
 private fun FileChip(
     attachment: UiAttachment,
-    onColor: androidx.compose.ui.graphics.Color,
+    onColor: Color,
     secondary: String,
     onClick: () -> Unit,
 ) {
@@ -366,22 +533,41 @@ private fun MessageInput(
     onSend: () -> Unit,
     onAttach: () -> Unit,
 ) {
-    Surface(tonalElevation = 2.dp) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.Bottom,
         ) {
             IconButton(onClick = onAttach) {
-                Icon(Icons.Default.AttachFile, contentDescription = "Attach")
+                Icon(
+                    Icons.Default.AttachFile,
+                    contentDescription = "Attach",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            OutlinedTextField(
+            TextField(
                 value = value,
                 onValueChange = onValueChange,
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("Message") },
-                maxLines = 4,
+                maxLines = 5,
+                shape = RoundedCornerShape(24.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    disabledIndicatorColor = Color.Transparent,
+                ),
             )
-            IconButton(onClick = onSend, enabled = value.isNotBlank()) {
+            Spacer(Modifier.width(6.dp))
+            FilledIconButton(
+                onClick = onSend,
+                enabled = value.isNotBlank(),
+                shape = CircleShape,
+            ) {
                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
             }
         }

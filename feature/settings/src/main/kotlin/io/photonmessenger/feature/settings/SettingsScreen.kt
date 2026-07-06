@@ -30,6 +30,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -39,11 +40,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -51,6 +56,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -68,12 +74,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -82,12 +91,15 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.photonmessenger.core.designsystem.component.ConfirmDialog
 import io.photonmessenger.core.designsystem.component.LoadingState
 import io.photonmessenger.core.designsystem.component.PhotonAvatar
 import io.photonmessenger.core.designsystem.component.ResponsiveContent
 import io.photonmessenger.core.model.NotificationPreferences
 import io.photonmessenger.core.model.ThemeMode
+import io.photonmessenger.core.qr.rememberQrBitmap
 import io.photonmessenger.feature.settings.model.UiProfile
+import kotlinx.coroutines.launch
 
 /** Settings hub: profile, appearance, devices, account (design spec screen 6, 2.6, M6). */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -108,6 +120,8 @@ fun SettingsScreen(
     var editing by rememberSaveable { mutableStateOf(false) }
     var showSetPassphrase by rememberSaveable { mutableStateOf(false) }
     var showRemovePassphrase by rememberSaveable { mutableStateOf(false) }
+    var showIdQr by rememberSaveable { mutableStateOf(false) }
+    var confirmSignOut by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.passphraseUpdated.collect {
@@ -138,6 +152,16 @@ fun SettingsScreen(
                         onEdit = { editing = true },
                     )
                     HorizontalDivider()
+
+                    state.profile?.let { profile ->
+                        SectionTitle("Account")
+                        UserIdRow(
+                            userId = profile.id,
+                            snackbar = snackbar,
+                            onShowQr = { showIdQr = true },
+                        )
+                        HorizontalDivider()
+                    }
 
                     SectionTitle("Appearance")
                     ThemeModeRow(theme.mode, viewModel::setThemeMode)
@@ -174,11 +198,14 @@ fun SettingsScreen(
                     )
                     HorizontalDivider()
 
+                    AboutSection()
+                    HorizontalDivider()
+
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(
-                        onClick = { viewModel.signOut() },
+                        onClick = { confirmSignOut = true },
                         modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    ) { Text("Sign out") }
+                    ) { Text("Sign out", color = MaterialTheme.colorScheme.error) }
                 }
             }
         }
@@ -211,6 +238,112 @@ fun SettingsScreen(
             onSubmit = { current -> viewModel.clearPassphrase(current) },
         )
     }
+
+    if (showIdQr) {
+        state.profile?.let { profile ->
+            UserIdQrDialog(
+                userId = profile.id,
+                name = profile.name,
+                onDismiss = { showIdQr = false },
+            )
+        }
+    }
+
+    if (confirmSignOut) {
+        ConfirmDialog(
+            title = "Sign out?",
+            text = "Signing out removes your identity key from this device. Make sure it is " +
+                "available on another device (or exported via Devices > Show my key), or you " +
+                "will permanently lose access to this identity.",
+            confirmLabel = "Sign out",
+            onConfirm = { viewModel.signOut() },
+            onDismiss = { confirmSignOut = false },
+        )
+    }
+}
+
+/**
+ * The user's own Boson ID - the value friends need to send a friend request - with one-tap copy
+ * and a QR for in-person sharing. This is the public identity, safe to show and share.
+ */
+@Composable
+private fun UserIdRow(
+    userId: String,
+    snackbar: SnackbarHostState,
+    onShowQr: () -> Unit,
+) {
+    val clipboard = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
+    ListItem(
+        modifier = Modifier.clickable(role = Role.Button, onClick = onShowQr),
+        headlineContent = { Text("User ID") },
+        supportingContent = {
+            Text(
+                userId,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        trailingContent = {
+            Row {
+                IconButton(onClick = {
+                    clipboard.setText(AnnotatedString(userId))
+                    scope.launch { snackbar.showSnackbar("User ID copied") }
+                }) {
+                    Icon(Icons.Filled.ContentCopy, contentDescription = "Copy user ID")
+                }
+                IconButton(onClick = onShowQr) {
+                    Icon(Icons.Filled.QrCode2, contentDescription = "Show user ID as QR")
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun UserIdQrDialog(userId: String, name: String, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("My user ID") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    "Friends scan or type this ID to add ${name.ifBlank { "you" }}. " +
+                        "It is public and safe to share.",
+                )
+                rememberQrBitmap(userId)?.let { qr ->
+                    Image(
+                        bitmap = qr,
+                        contentDescription = "User ID QR code",
+                        modifier = Modifier.size(220.dp),
+                    )
+                }
+                SelectionContainer {
+                    Text(userId, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
+}
+
+@Composable
+private fun AboutSection() {
+    val context = LocalContext.current
+    val version = remember {
+        runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull() ?: "unknown"
+    }
+    SectionTitle("About")
+    ListItem(
+        headlineContent = { Text("PhotonMessenger") },
+        supportingContent = { Text("Version $version - decentralized messaging on Boson") },
+    )
 }
 
 /**

@@ -120,9 +120,22 @@ class OnboardingViewModel @Inject constructor(
                     it.copy(loading = false, providers = providers, step = OnboardingStep.SignIn)
                 }
             }.onFailure { e ->
-                _uiState.update { it.copy(loading = false, error = e.message ?: "Couldn't reach that server") }
+                _uiState.update { it.copy(loading = false, error = serverErrorMessage(e)) }
             }
         }
+    }
+
+    /** Friendly copy for server-connect failures; TLS trust errors point at the Server ID field. */
+    private fun serverErrorMessage(e: Throwable): String {
+        var cause: Throwable? = e
+        while (cause != null) {
+            if (cause is javax.net.ssl.SSLException || cause is java.security.cert.CertificateException) {
+                return "Couldn't establish a secure connection. If this server uses a " +
+                    "self-signed certificate, enter its Server ID under Advanced options."
+            }
+            cause = cause.cause
+        }
+        return e.message ?: "Couldn't reach that server"
     }
 
     /** Reloads providers for the confirmed server (retry affordance on the sign-in step). */

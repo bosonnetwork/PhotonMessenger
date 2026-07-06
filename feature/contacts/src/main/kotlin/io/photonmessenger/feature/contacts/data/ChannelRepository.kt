@@ -141,7 +141,7 @@ class ChannelRepositoryImpl @Inject constructor(
             channel.loadMembers().awaitResult()
             return UiChannelDetail(
                 channel = channel.toUi(myId),
-                members = channel.members.map { it.toUi() },
+                members = channel.members.map { it.toUi(myId) },
             )
         }
 

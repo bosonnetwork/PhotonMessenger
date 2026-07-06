@@ -25,6 +25,7 @@ package io.photonmessenger.feature.chat.data
 import io.photonmessenger.core.boson.BosonSessionManager
 import io.photonmessenger.core.boson.awaitResult
 import io.photonmessenger.core.model.AppError
+import io.photonmessenger.core.model.AvatarUrls
 import io.photonmessenger.feature.chat.model.AttachmentCarrier
 import io.photonmessenger.feature.chat.model.AttachmentSource
 import io.photonmessenger.feature.chat.model.ChatHeader
@@ -86,6 +87,7 @@ class ChatRepositoryImpl @Inject constructor(
     private val session: BosonSessionManager,
     private val mediaPreparer: MediaPreparer,
     private val cache: AttachmentCache,
+    private val avatarUrls: AvatarUrls,
 ) : ChatRepository {
 
     private fun client(): MessagingClient =
@@ -106,7 +108,10 @@ class ChatRepositoryImpl @Inject constructor(
 
         suspend fun refresh() {
             val list = client.getConversations().awaitResult()
-                .map { it.toUi() }
+                .map { convo ->
+                    val avatar = if (convo.isChannel) null else avatarUrls.forUser(convo.id.toString())
+                    convo.toUi(avatarUrl = avatar)
+                }
                 .sortedByDescending { it.updatedAt }
             trySend(list)
         }
@@ -141,7 +146,7 @@ class ChatRepositoryImpl @Inject constructor(
             val title = convoTitle
                 ?: contact?.name?.orElse(null)?.takeIf { it.isNotBlank() }
                 ?: shortId(conversationId)
-            ChatHeader(title = title, isChannel = false)
+            ChatHeader(title = title, isChannel = false, avatarUrl = avatarUrls.forUser(conversationId))
         }
     }
 
@@ -155,19 +160,23 @@ class ChatRepositoryImpl @Inject constructor(
         val convo = parseId(conversationId)
         val me = myId()
 
+        // Sender attribution for channel bubbles (M4): resolve member ids to display names once
+        // per stream; unknown senders fall back to a short id.
+        val resolveSender = channelSenderResolver(client, convo)
+
         // ordered oldest -> newest, de-duplicated by message id
         val byId = LinkedHashMap<String, UiMessage>()
 
         fun emit() = trySend(byId.values.sortedBy { it.createdAt })
 
         client.getMessagesBefore(convo, Long.MAX_VALUE, ChatRepository.PAGE_SIZE, 0).awaitResult()
-            .forEach { val ui = it.toUi(me); byId[ui.id] = ui }
+            .forEach { val ui = it.toUi(me, resolveSender); byId[ui.id] = ui }
         emit()
 
         val listener = object : MessageListener {
             private fun accept(message: Message) {
                 if (message.conversationId.orElse(null) != convo) return
-                val ui = message.toUi(me)
+                val ui = message.toUi(me, resolveSender)
                 byId[ui.id] = ui
                 emit()
             }
@@ -261,9 +270,13 @@ class ChatRepositoryImpl @Inject constructor(
 
     override suspend fun loadOlder(conversationId: String, before: Long, limit: Int): Result<List<UiMessage>> =
         runCatching {
+            val client = client()
             val me = myId()
-            client().getMessagesBefore(parseId(conversationId), before, limit, 0).awaitResult()
-                .map { it.toUi(me) }
+            val convo = parseId(conversationId)
+            // Older channel pages carry senders too; resolve them the same way as the live stream.
+            val resolveSender = channelSenderResolver(client, convo)
+            client.getMessagesBefore(convo, before, limit, 0).awaitResult()
+                .map { it.toUi(me, resolveSender) }
                 .sortedBy { it.createdAt }
         }
 
@@ -271,6 +284,23 @@ class ChatRepositoryImpl @Inject constructor(
         client().removeConversation(parseId(conversationId)).awaitResult()
         Unit
     }
+
+    /**
+     * For a channel conversation, returns a member-id -> display-name resolver (falling back to a
+     * short id for unknown senders); null for DMs, where bubbles need no attribution.
+     */
+    private suspend fun channelSenderResolver(client: MessagingClient, convo: Id): ((Id) -> String?)? =
+        runCatching {
+            val contact = client.getContact(convo).awaitResult().orElse(null) as? Channel
+                ?: return@runCatching null
+            contact.loadMembers().awaitResult()
+            val names = mutableMapOf<Id, String>()
+            contact.members.forEach { member ->
+                member.displayName?.takeIf { it.isNotBlank() }?.let { names[member.id] = it }
+            }
+            val resolver: (Id) -> String? = { from -> names[from] ?: shortId(from.toString()) }
+            resolver
+        }.getOrNull()
 
     private fun parseId(text: String): Id =
         try {

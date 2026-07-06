@@ -56,6 +56,7 @@ class ContactsViewModelTest {
     ) : ContactRepository {
         override fun contacts() = contacts
         override fun friendRequests() = requests
+        override fun contact(contactId: String): Flow<UiContact?> = MutableStateFlow(null)
         override suspend fun sendFriendRequest(idText: String, hello: String) = sendResult
         override suspend fun acceptFriendRequest(userIdText: String) = Result.success(Unit)
         override suspend fun declineFriendRequest(userIdText: String) = Result.success(Unit)

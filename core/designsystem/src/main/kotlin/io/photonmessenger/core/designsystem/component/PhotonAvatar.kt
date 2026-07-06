@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,16 +36,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
+import kotlin.math.absoluteValue
 
 /**
- * Circular user/contact avatar (X-A2). Renders the image at [model] when present, otherwise falls back
- * to the person's initials, or a person icon when no name is known. Callers previously duplicated this
- * clip-circle + AsyncImage + fallback logic per screen; this centralizes the look so every avatar in
- * the app is consistent.
+ * Circular user/contact/channel avatar (X-A2). Renders the image at [model] when present, falling
+ * back to the person's initials on a per-identity tinted background (or a person/group icon when no
+ * name is known). The fallback also covers image-load failures: the avatar endpoint legitimately
+ * 404s for users who never set a photo, and a blank circle would otherwise remain.
  */
 @Composable
 fun PhotonAvatar(
@@ -52,43 +55,83 @@ fun PhotonAvatar(
     modifier: Modifier = Modifier,
     size: Dp = 40.dp,
     name: String? = null,
+    /** Seed for the fallback background tint, so different people get different colors. */
+    colorKey: String? = null,
+    isChannel: Boolean = false,
     contentDescription: String? = null,
 ) {
-    val shape = CircleShape
+    val base = modifier.size(size).clip(CircleShape)
     if (model != null) {
-        AsyncImage(
+        SubcomposeAsyncImage(
             model = model,
             contentDescription = contentDescription,
             contentScale = ContentScale.Crop,
-            modifier = modifier.size(size).clip(shape),
+            modifier = base,
+            loading = { FallbackAvatar(size, name, colorKey, isChannel, contentDescription) },
+            error = { FallbackAvatar(size, name, colorKey, isChannel, contentDescription) },
         )
-        return
+    } else {
+        Box(modifier = base) {
+            FallbackAvatar(size, name, colorKey, isChannel, contentDescription)
+        }
     }
+}
 
+@Composable
+private fun FallbackAvatar(
+    size: Dp,
+    name: String?,
+    colorKey: String?,
+    isChannel: Boolean,
+    contentDescription: String?,
+) {
+    val background = avatarColorFor(colorKey ?: name)
     Box(
-        modifier = modifier
-            .size(size)
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.secondaryContainer),
+        modifier = Modifier.size(size).clip(CircleShape).background(background),
         contentAlignment = Alignment.Center,
     ) {
         val initials = name?.let(::initialsOf)
         if (!initials.isNullOrBlank()) {
             Text(
                 text = initials,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                style = when {
+                    size >= 72.dp -> MaterialTheme.typography.headlineMedium
+                    size >= 48.dp -> MaterialTheme.typography.titleLarge
+                    else -> MaterialTheme.typography.titleMedium
+                },
+                color = Color.White,
             )
         } else {
             Icon(
-                Icons.Filled.Person,
+                if (isChannel) Icons.Outlined.Groups else Icons.Filled.Person,
                 contentDescription = contentDescription,
-                modifier = Modifier.size(size * 0.6f),
-                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.size(size * 0.55f),
+                tint = Color.White,
             )
         }
     }
 }
+
+/** Muted, white-text-safe hues; stable per identity so an avatar keeps its color everywhere. */
+private val AvatarColors = listOf(
+    Color(0xFFE56B6F), // coral
+    Color(0xFFE88C30), // orange
+    Color(0xFFC0578E), // magenta
+    Color(0xFF2F9E6E), // green
+    Color(0xFF3D8BD9), // blue
+    Color(0xFF7C64D6), // violet
+    Color(0xFF2FA3A8), // teal
+)
+
+/**
+ * Stable per-identity tint, shared by avatar fallbacks and channel sender names so one person is
+ * always the same color across the app.
+ */
+fun identityColor(key: String?): Color = avatarColorFor(key)
+
+private fun avatarColorFor(key: String?): Color =
+    if (key.isNullOrBlank()) AvatarColors[4]
+    else AvatarColors[key.hashCode().absoluteValue % AvatarColors.size]
 
 /** Up to two uppercase initials from a display name; blank if none can be derived. */
 private fun initialsOf(name: String): String =

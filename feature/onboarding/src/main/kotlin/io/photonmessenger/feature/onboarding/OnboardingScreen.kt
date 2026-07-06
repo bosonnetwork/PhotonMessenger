@@ -30,13 +30,23 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -84,14 +94,30 @@ fun OnboardingScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        Surface(
+            color = MaterialTheme.colorScheme.primaryContainer,
+            shape = CircleShape,
+        ) {
+            Box(modifier = Modifier.size(72.dp), contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Chat,
+                    contentDescription = null,
+                    modifier = Modifier.size(36.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+        }
+        Spacer(Modifier.height(16.dp))
         Text(text = "PhotonMessenger", style = MaterialTheme.typography.headlineMedium)
         Text(
-            text = "decentralized messaging",
+            text = "Decentralized messaging on Boson",
             style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(32.dp))
@@ -103,18 +129,6 @@ fun OnboardingScreen(
                 Text("Connect to your server", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
-                    value = state.directorNodeId,
-                    onValueChange = viewModel::onDirectorNodeIdChange,
-                    label = { Text("Server ID") },
-                    placeholder = { Text("Boson node id (for a self-signed server)") },
-                    supportingText = {
-                        Text("Required to trust a self-signed HTTPS server; leave blank for a public CA.")
-                    },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
                     value = state.serverUrl,
                     onValueChange = viewModel::onServerUrlChange,
                     label = { Text("Server URL") },
@@ -122,6 +136,23 @@ fun OnboardingScreen(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                var showAdvanced by remember { mutableStateOf(state.directorNodeId.isNotBlank()) }
+                Spacer(Modifier.height(8.dp))
+                if (showAdvanced) {
+                    OutlinedTextField(
+                        value = state.directorNodeId,
+                        onValueChange = viewModel::onDirectorNodeIdChange,
+                        label = { Text("Server ID (advanced)") },
+                        placeholder = { Text("Boson node id (for a self-signed server)") },
+                        supportingText = {
+                            Text("Required to trust a self-signed HTTPS server; leave blank for a public CA.")
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    TextButton(onClick = { showAdvanced = true }) { Text("Advanced options") }
+                }
                 Spacer(Modifier.height(16.dp))
                 Button(
                     onClick = viewModel::confirmServer,
@@ -152,11 +183,11 @@ fun OnboardingScreen(
                     }
                     Spacer(Modifier.height(12.dp))
                 }
-                Button(onClick = viewModel::chooseScanKey, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = viewModel::chooseScanKey, modifier = Modifier.fillMaxWidth()) {
                     Text("Scan QR from another device")
                 }
                 Spacer(Modifier.height(12.dp))
-                Button(onClick = viewModel::choosePasteKey, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = viewModel::choosePasteKey, modifier = Modifier.fillMaxWidth()) {
                     Text("Enter key manually")
                 }
             }

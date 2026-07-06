@@ -51,6 +51,8 @@ data class UiChannelMember(
     val id: String,
     val displayName: String,
     val role: UiChannelRole,
+    /** True when this member is the signed-in user; their own row is never moderatable. */
+    val isMe: Boolean = false,
 )
 
 /** A channel together with its member roster, for the detail screen. */
@@ -110,5 +112,10 @@ fun Channel.toUi(myId: Id): UiChannel {
     )
 }
 
-fun Channel.Member.toUi(): UiChannelMember =
-    UiChannelMember(id = id.toString(), displayName = displayName, role = role.toUi())
+fun Channel.Member.toUi(myId: Id): UiChannelMember =
+    UiChannelMember(
+        id = id.toString(),
+        displayName = displayName,
+        role = role.toUi(),
+        isMe = id == myId,
+    )

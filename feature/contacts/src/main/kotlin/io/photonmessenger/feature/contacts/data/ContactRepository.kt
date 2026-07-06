@@ -25,6 +25,7 @@ package io.photonmessenger.feature.contacts.data
 import io.photonmessenger.core.boson.BosonSessionManager
 import io.photonmessenger.core.boson.awaitResult
 import io.photonmessenger.core.model.AppError
+import io.photonmessenger.core.model.AvatarUrls
 import io.photonmessenger.feature.contacts.model.UiContact
 import io.photonmessenger.feature.contacts.model.UiFriendRequest
 import io.photonmessenger.feature.contacts.model.toUi
@@ -50,6 +51,9 @@ interface ContactRepository {
     /** Live pending friend requests; seeded from getFriendRequests() and kept current via the listener. */
     fun friendRequests(): Flow<List<UiFriendRequest>>
 
+    /** Live view of a single contact (for the detail screen); emits null once the contact is removed. */
+    fun contact(contactId: String): Flow<UiContact?>
+
     suspend fun sendFriendRequest(idText: String, hello: String): Result<Unit>
     suspend fun acceptFriendRequest(userIdText: String): Result<Unit>
     suspend fun declineFriendRequest(userIdText: String): Result<Unit>
@@ -64,10 +68,14 @@ interface ContactRepository {
 @Singleton
 class ContactRepositoryImpl @Inject constructor(
     private val session: BosonSessionManager,
+    private val avatarUrls: AvatarUrls,
 ) : ContactRepository {
 
     private fun client(): MessagingClient =
         session.messagingClient ?: throw AppError.Network("Not connected to the messaging service")
+
+    private fun Contact.toUiWithAvatar(): UiContact =
+        toUi(avatarUrl = if (type == Contact.Type.CHANNEL) null else avatarUrls.forUser(id.toString()))
 
     override fun contacts(): Flow<List<UiContact>> = callbackFlow {
         val client = session.messagingClient
@@ -79,27 +87,58 @@ class ContactRepositoryImpl @Inject constructor(
 
         val current = LinkedHashMap<Id, Contact>()
         client.getContacts().awaitResult().forEach { current[it.id] = it }
-        trySend(current.values.map { it.toUi() })
+        trySend(current.values.map { it.toUiWithAvatar() })
 
         val listener = object : ContactListener {
             override fun onContactAdded(contact: Contact) {
                 current[contact.id] = contact
-                trySend(current.values.map { it.toUi() })
+                trySend(current.values.map { it.toUiWithAvatar() })
             }
 
             override fun onContactsUpdated(contacts: List<Contact>) {
                 contacts.forEach { current[it.id] = it }
-                trySend(current.values.map { it.toUi() })
+                trySend(current.values.map { it.toUiWithAvatar() })
             }
 
             override fun onContactsRemoved(contactIds: List<Id>) {
                 contactIds.forEach { current.remove(it) }
-                trySend(current.values.map { it.toUi() })
+                trySend(current.values.map { it.toUiWithAvatar() })
             }
 
             override fun onContactsCleared() {
                 current.clear()
                 trySend(emptyList())
+            }
+        }
+        client.addContactListener(listener)
+        awaitClose { client.removeContactListener(listener) }
+    }
+
+    override fun contact(contactId: String): Flow<UiContact?> = callbackFlow {
+        val client = client()
+        val id = parseId(contactId)
+
+        suspend fun emit() {
+            val contact = client.getContact(id).awaitResult().orElse(null)
+            trySend(contact?.toUiWithAvatar())
+        }
+        emit()
+
+        val listener = object : ContactListener {
+            override fun onContactAdded(contact: Contact) {
+                if (contact.id == id) trySend(contact.toUiWithAvatar())
+            }
+
+            override fun onContactsUpdated(contacts: List<Contact>) {
+                contacts.firstOrNull { it.id == id }?.let { trySend(it.toUiWithAvatar()) }
+            }
+
+            override fun onContactsRemoved(contactIds: List<Id>) {
+                if (id in contactIds) trySend(null)
+            }
+
+            override fun onContactsCleared() {
+                trySend(null)
             }
         }
         client.addContactListener(listener)

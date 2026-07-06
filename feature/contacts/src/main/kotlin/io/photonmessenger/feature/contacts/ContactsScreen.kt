@@ -26,6 +26,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -40,9 +41,11 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -53,6 +56,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -60,13 +64,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.runtime.LaunchedEffect
+import io.photonmessenger.core.designsystem.component.ConfirmDialog
 import io.photonmessenger.core.designsystem.component.EmptyState
 import io.photonmessenger.core.designsystem.component.ErrorState
 import io.photonmessenger.core.designsystem.component.LoadingState
+import io.photonmessenger.core.designsystem.component.PhotonAvatar
 import io.photonmessenger.core.designsystem.component.ResponsiveContent
 import io.photonmessenger.feature.contacts.model.UiContact
 import io.photonmessenger.feature.contacts.model.UiFriendRequest
@@ -79,6 +85,8 @@ fun ContactsScreen(
     modifier: Modifier = Modifier,
     onOpenConversation: (String) -> Unit = {},
     onOpenChannel: (String) -> Unit = {},
+    onOpenContactDetail: (String) -> Unit = {},
+    onOpenChannelDetail: (String) -> Unit = {},
     onCreateChannel: () -> Unit = {},
     viewModel: ContactsViewModel = hiltViewModel(),
 ) {
@@ -88,6 +96,8 @@ fun ContactsScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var showJoinDialog by remember { mutableStateOf(false) }
     var editAliasContact by remember { mutableStateOf<UiContact?>(null) }
+    var blockTarget by remember { mutableStateOf<UiContact?>(null) }
+    var removeTarget by remember { mutableStateOf<UiContact?>(null) }
 
     LaunchedEffect(Unit) {
         viewModel.messages.collect { snackbar.showSnackbar(it) }
@@ -118,51 +128,51 @@ fun ContactsScreen(
     ) { padding ->
         ResponsiveContent(modifier = Modifier.padding(padding)) {
             Column(modifier = Modifier.fillMaxSize()) {
-            val tabs = ContactsTab.entries
-            TabRow(selectedTabIndex = selectedTab) {
-                tabs.forEachIndexed { index, tab ->
-                    val count = when (tab) {
-                        ContactsTab.FRIENDS -> state.friends.size
-                        ContactsTab.REQUESTS -> state.requests.size
-                        ContactsTab.CHANNELS -> state.channels.size
+                val tabs = ContactsTab.entries
+                TabRow(selectedTabIndex = selectedTab) {
+                    tabs.forEachIndexed { index, tab ->
+                        val count = when (tab) {
+                            ContactsTab.FRIENDS -> state.friends.size
+                            ContactsTab.REQUESTS -> state.requests.size
+                            ContactsTab.CHANNELS -> state.channels.size
+                        }
+                        Tab(
+                            selected = selectedTab == index,
+                            onClick = { selectedTab = index },
+                            text = { Text(if (count > 0) "${tab.label} ($count)" else tab.label) },
+                        )
                     }
-                    Tab(
-                        selected = selectedTab == index,
-                        onClick = { selectedTab = index },
-                        text = { Text(if (count > 0) "${tab.label} ($count)" else tab.label) },
-                    )
                 }
-            }
 
-            when {
-                state.loading -> LoadingState()
-                state.error != null -> ErrorState(state.error!!)
-                else -> when (tabs[selectedTab]) {
-                    ContactsTab.FRIENDS -> ContactList(
-                        contacts = state.friends,
-                        emptyText = "No friends yet. Tap + to add one.",
-                        onMute = viewModel::setMuted,
-                        onBlock = viewModel::setBlocked,
-                        onRemove = viewModel::remove,
-                        onEditAlias = { editAliasContact = it },
-                        onClick = onOpenConversation,
-                    )
-                    ContactsTab.REQUESTS -> RequestList(
-                        requests = state.requests,
-                        onAccept = viewModel::accept,
-                        onDecline = viewModel::decline,
-                    )
-                    ContactsTab.CHANNELS -> ContactList(
-                        contacts = state.channels,
-                        emptyText = "No channels yet. Tap the group icon to create one.",
-                        onMute = viewModel::setMuted,
-                        onBlock = viewModel::setBlocked,
-                        onRemove = viewModel::remove,
-                        onEditAlias = { editAliasContact = it },
-                        onClick = onOpenChannel,
-                    )
+                when {
+                    state.loading -> LoadingState()
+                    state.error != null -> ErrorState(state.error!!)
+                    else -> when (tabs[selectedTab]) {
+                        ContactsTab.FRIENDS -> FriendList(
+                            contacts = state.friends,
+                            onOpen = onOpenConversation,
+                            onOpenProfile = onOpenContactDetail,
+                            onMute = viewModel::setMuted,
+                            onBlock = { contact ->
+                                if (contact.blocked) viewModel.setBlocked(contact.id, false)
+                                else blockTarget = contact
+                            },
+                            onEditAlias = { editAliasContact = it },
+                            onRemove = { removeTarget = it },
+                        )
+                        ContactsTab.REQUESTS -> RequestList(
+                            requests = state.requests,
+                            onAccept = viewModel::accept,
+                            onDecline = viewModel::decline,
+                        )
+                        ContactsTab.CHANNELS -> ChannelList(
+                            channels = state.channels,
+                            onOpen = onOpenChannel,
+                            onOpenDetail = onOpenChannelDetail,
+                            onMute = viewModel::setMuted,
+                        )
+                    }
                 }
-            }
             }
         }
     }
@@ -197,20 +207,44 @@ fun ContactsScreen(
             },
         )
     }
+
+    blockTarget?.let { contact ->
+        ConfirmDialog(
+            title = "Block ${contact.displayName}?",
+            text = "You will no longer receive messages from this contact.",
+            confirmLabel = "Block",
+            onConfirm = { viewModel.setBlocked(contact.id, true) },
+            onDismiss = { blockTarget = null },
+        )
+    }
+
+    removeTarget?.let { contact ->
+        ConfirmDialog(
+            title = "Remove contact?",
+            text = "${contact.displayName} will be removed from your contacts. " +
+                "You can add them again later with their ID.",
+            confirmLabel = "Remove",
+            onConfirm = { viewModel.remove(contact.id) },
+            onDismiss = { removeTarget = null },
+        )
+    }
 }
 
 @Composable
-private fun ContactList(
+private fun FriendList(
     contacts: List<UiContact>,
-    emptyText: String,
+    onOpen: (String) -> Unit,
+    onOpenProfile: (String) -> Unit,
     onMute: (String, Boolean) -> Unit,
-    onBlock: (String, Boolean) -> Unit,
-    onRemove: (String) -> Unit,
+    onBlock: (UiContact) -> Unit,
     onEditAlias: (UiContact) -> Unit,
-    onClick: ((String) -> Unit)? = null,
+    onRemove: (UiContact) -> Unit,
 ) {
     if (contacts.isEmpty()) {
-        EmptyState(emptyText)
+        EmptyState(
+            "No friends yet.\nShare your user ID (Settings) or add a friend with theirs.",
+            icon = Icons.Outlined.PersonAdd,
+        )
         return
     }
     LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -219,20 +253,26 @@ private fun ContactList(
             ListItem(
                 modifier = Modifier
                     .animateItem()
-                    .then(
-                        if (onClick != null) {
-                            Modifier.clickable(role = Role.Button) { onClick(contact.id) }
-                        } else {
-                            Modifier
-                        },
-                    ),
-                headlineContent = { Text(contact.displayName) },
+                    .clickable(role = Role.Button) { onOpen(contact.id) },
+                leadingContent = {
+                    PhotonAvatar(
+                        model = contact.avatarUrl,
+                        name = contact.displayName,
+                        colorKey = contact.id,
+                        size = 48.dp,
+                    )
+                },
+                headlineContent = {
+                    Text(contact.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                },
                 supportingContent = {
                     val flags = buildList {
-                        if (contact.muted) add("muted")
-                        if (contact.blocked) add("blocked")
+                        if (contact.muted) add("Muted")
+                        if (contact.blocked) add("Blocked")
                     }
-                    if (flags.isNotEmpty()) Text(flags.joinToString(", "))
+                    if (flags.isNotEmpty()) {
+                        Text(flags.joinToString(", "), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 },
                 trailingContent = {
                     Box {
@@ -240,23 +280,85 @@ private fun ContactList(
                             Icon(Icons.Default.MoreVert, contentDescription = "Actions")
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                            if (!contact.isChannel) {
-                                DropdownMenuItem(
-                                    text = { Text("Edit alias") },
-                                    onClick = { onEditAlias(contact); menuOpen = false },
-                                )
-                            }
+                            DropdownMenuItem(
+                                text = { Text("View profile") },
+                                onClick = { menuOpen = false; onOpenProfile(contact.id) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Edit alias") },
+                                onClick = { menuOpen = false; onEditAlias(contact) },
+                            )
                             DropdownMenuItem(
                                 text = { Text(if (contact.muted) "Unmute" else "Mute") },
-                                onClick = { onMute(contact.id, !contact.muted); menuOpen = false },
+                                onClick = { menuOpen = false; onMute(contact.id, !contact.muted) },
                             )
                             DropdownMenuItem(
                                 text = { Text(if (contact.blocked) "Unblock" else "Block") },
-                                onClick = { onBlock(contact.id, !contact.blocked); menuOpen = false },
+                                onClick = { menuOpen = false; onBlock(contact) },
                             )
                             DropdownMenuItem(
-                                text = { Text("Remove") },
-                                onClick = { onRemove(contact.id); menuOpen = false },
+                                text = { Text("Remove", color = MaterialTheme.colorScheme.error) },
+                                onClick = { menuOpen = false; onRemove(contact) },
+                            )
+                        }
+                    }
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChannelList(
+    channels: List<UiContact>,
+    onOpen: (String) -> Unit,
+    onOpenDetail: (String) -> Unit,
+    onMute: (String, Boolean) -> Unit,
+) {
+    if (channels.isEmpty()) {
+        EmptyState(
+            "No channels yet.\nCreate one with the group icon, or join with an invite ticket.",
+            icon = Icons.Outlined.GroupAdd,
+        )
+        return
+    }
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
+        items(channels, key = { it.id }) { channel ->
+            var menuOpen by remember(channel.id) { mutableStateOf(false) }
+            ListItem(
+                modifier = Modifier
+                    .animateItem()
+                    .clickable(role = Role.Button) { onOpen(channel.id) },
+                leadingContent = {
+                    PhotonAvatar(
+                        model = null,
+                        name = channel.displayName,
+                        colorKey = channel.id,
+                        isChannel = true,
+                        size = 48.dp,
+                    )
+                },
+                headlineContent = {
+                    Text(channel.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                },
+                supportingContent = {
+                    if (channel.muted) {
+                        Text("Muted", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                trailingContent = {
+                    Box {
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "Channel actions")
+                        }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Channel info") },
+                                onClick = { menuOpen = false; onOpenDetail(channel.id) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (channel.muted) "Unmute" else "Mute") },
+                                onClick = { menuOpen = false; onMute(channel.id, !channel.muted) },
                             )
                         }
                     }
@@ -280,18 +382,34 @@ private fun RequestList(
         items(requests, key = { it.userId }) { request ->
             ListItem(
                 modifier = Modifier.animateItem(),
-                headlineContent = { Text(request.userId) },
-                supportingContent = { if (request.hello.isNotBlank()) Text(request.hello) },
-                trailingContent = {
-                    androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        TextButton(onClick = { onDecline(request.userId) }) { Text("Decline") }
-                        TextButton(onClick = { onAccept(request.userId) }) { Text("Accept") }
+                leadingContent = {
+                    PhotonAvatar(model = null, name = null, colorKey = request.userId, size = 48.dp)
+                },
+                headlineContent = {
+                    Text(shortRequestId(request.userId), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                },
+                supportingContent = {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (request.hello.isNotBlank()) {
+                            Text(
+                                "\"${request.hello}\"",
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilledTonalButton(onClick = { onAccept(request.userId) }) { Text("Accept") }
+                            TextButton(onClick = { onDecline(request.userId) }) { Text("Decline") }
+                        }
                     }
                 },
             )
         }
     }
 }
+
+private fun shortRequestId(id: String): String =
+    if (id.length <= 16) id else id.take(10) + "..." + id.takeLast(4)
 
 @Composable
 private fun AddFriendDialog(
@@ -305,6 +423,7 @@ private fun AddFriendDialog(
         title = { Text("Add friend") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Ask your friend for their user ID (shown in their Settings).")
                 OutlinedTextField(
                     value = id,
                     onValueChange = { id = it },
@@ -355,7 +474,7 @@ private fun JoinChannelDialog(
 }
 
 @Composable
-private fun EditAliasDialog(
+internal fun EditAliasDialog(
     contact: UiContact,
     onDismiss: () -> Unit,
     onSubmit: (String) -> Unit,
@@ -380,4 +499,3 @@ private fun EditAliasDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
-
