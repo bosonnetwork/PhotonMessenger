@@ -31,6 +31,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -76,6 +77,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -87,10 +89,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -169,14 +174,16 @@ fun ChatScreen(
         }
     }
 
+    val topBarScroll = TopAppBarDefaults.pinnedScrollBehavior()
     Scaffold(
-        modifier = modifier.imePadding(),
+        modifier = modifier.imePadding().nestedScroll(topBarScroll.nestedScrollConnection),
         topBar = {
             val openDetail = {
                 if (header.isChannel) onOpenChannelDetail(viewModel.conversationId)
                 else onOpenContactDetail(viewModel.conversationId)
             }
             TopAppBar(
+                scrollBehavior = topBarScroll,
                 title = {
                     Row(
                         modifier = Modifier.clickable(onClick = openDetail),
@@ -230,7 +237,12 @@ fun ChatScreen(
         },
     ) { padding ->
         ResponsiveContent(modifier = Modifier.padding(padding)) {
-            Box(modifier = Modifier.fillMaxSize()) {
+            // Subtle tint behind the message list separates the conversation canvas from the chrome.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
+            ) {
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
@@ -339,6 +351,7 @@ private fun MessageBubble(
         RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomEnd = 18.dp, bottomStart = 6.dp)
     }
     val clipboard = LocalClipboardManager.current
+    val haptics = LocalHapticFeedback.current
 
     // A sending bubble is slightly muted until it is confirmed on the live stream (M3-4).
     val bubbleModifier = Modifier
@@ -352,7 +365,10 @@ private fun MessageBubble(
             modifier = bubbleModifier.combinedClickable(
                 onClick = {},
                 onLongClick = {
-                    if (message.text.isNotBlank()) clipboard.setText(AnnotatedString(message.text))
+                    if (message.text.isNotBlank()) {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        clipboard.setText(AnnotatedString(message.text))
+                    }
                 },
             ),
         ) {

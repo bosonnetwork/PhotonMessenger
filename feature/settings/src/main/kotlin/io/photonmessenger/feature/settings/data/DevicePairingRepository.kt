@@ -28,6 +28,8 @@ import io.photonmessenger.core.boson.KeyManager
 import io.photonmessenger.core.boson.PairingPayload
 import io.photonmessenger.core.model.AppError
 import io.photonmessenger.core.model.AuthTokenStore
+import io.photonmessenger.core.network.DeviceRegistration
+import io.photonmessenger.core.network.DeviceRegistrationStore
 import io.photonmessenger.core.network.DirectorApi
 import io.photonmessenger.core.network.DirectorApiFactory
 import io.photonmessenger.core.network.DirectorConfig
@@ -96,6 +98,7 @@ class DevicePairingRepositoryImpl @Inject constructor(
     private val configStore: DirectorConfigStore,
     private val keyManager: KeyManager,
     private val tokenStore: AuthTokenStore,
+    private val registrationStore: DeviceRegistrationStore,
 ) : DevicePairingRepository {
 
     /** State the new device must keep between showing its QR and finishing the pairing. */
@@ -121,7 +124,10 @@ class DevicePairingRepositoryImpl @Inject constructor(
 
     override suspend fun createInvite(deviceName: String): Result<PairingInvite> = runCatching {
         withContext(Dispatchers.IO) {
-            val deviceKey = keyManager.ensureDeviceKey()
+            // The pairing registration binds this device key server-side BEFORE the adopted identity
+            // is known, so a key ever registered under a previous identity must be rotated NOW - the
+            // paired identity is guaranteed new-or-unknown (never reuse a device key across users).
+            val deviceKey = keyManager.ensureDeviceKeyFor(null)
             val deviceId = BosonCrypto.idOf(deviceKey).toString()
             val nonce = newNonce()
             val request = RegisterDeviceRequest(
@@ -171,6 +177,14 @@ class DevicePairingRepositoryImpl @Inject constructor(
                 ),
             ).token
             tokenStore.setToken(token)
+
+            // Pairing registered this device server-side: record it so the first bring-up after
+            // pairing skips re-registration.
+            keyManager.setDeviceKeyOwner(response.userId)
+            val cfg = config()
+            registrationStore.set(
+                DeviceRegistration(response.userId, cfg.baseUrl, cfg.nodeId, deviceId),
+            )
 
             active = null
             response.userId

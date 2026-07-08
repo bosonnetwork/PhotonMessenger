@@ -23,6 +23,7 @@
 package io.photonmessenger.feature.contacts
 
 import app.cash.turbine.test
+import io.photonmessenger.core.model.ResolvedProfile
 import io.photonmessenger.feature.contacts.data.ChannelRepository
 import io.photonmessenger.feature.contacts.data.ContactRepository
 import io.photonmessenger.feature.contacts.model.UiChannel
@@ -109,7 +110,7 @@ class ContactsViewModelTest {
             UiContact("c", "Team", isChannel = true, muted = false, blocked = false),
         )
         requestsFlow.value = listOf(UiFriendRequest("r", "hi"))
-        val vm = ContactsViewModel(FakeRepo(contactsFlow, requestsFlow), FakeChannelRepo())
+        val vm = ContactsViewModel(FakeRepo(contactsFlow, requestsFlow), FakeChannelRepo(), FakeProfileResolver())
 
         vm.uiState.test {
             // skip initial loading state, take the first loaded state
@@ -124,9 +125,36 @@ class ContactsViewModelTest {
     }
 
     @Test
+    fun `friend requests are enriched with resolved profiles`() = runTest {
+        requestsFlow.value = listOf(UiFriendRequest("USER-R", "hello there"))
+        val resolver = FakeProfileResolver()
+        val vm = ContactsViewModel(FakeRepo(contactsFlow, requestsFlow), FakeChannelRepo(), resolver)
+
+        vm.uiState.test {
+            var state = awaitItem()
+            while (state.loading) state = awaitItem()
+            assertEquals(null, state.requests.single().name)
+
+            resolver.profiles.value = mapOf(
+                "USER-R" to ResolvedProfile(
+                    userId = "USER-R",
+                    name = "Robert",
+                    bio = null,
+                    avatarUrl = "https://node/api/v1/client/avatar/USER-R",
+                ),
+            )
+
+            state = awaitItem()
+            assertEquals("Robert", state.requests.single().name)
+            assertEquals("https://node/api/v1/client/avatar/USER-R", state.requests.single().avatarUrl)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `failed add emits a message`() = runTest {
         val repo = FakeRepo(contactsFlow, requestsFlow, sendResult = Result.failure(IllegalStateException("boom")))
-        val vm = ContactsViewModel(repo, FakeChannelRepo())
+        val vm = ContactsViewModel(repo, FakeChannelRepo(), FakeProfileResolver())
 
         vm.messages.test {
             vm.addFriend("bad-id", "hi")
@@ -139,7 +167,7 @@ class ContactsViewModelTest {
     @Test
     fun `setRemark forwards the alias to the repository`() = runTest {
         val repo = FakeRepo(contactsFlow, requestsFlow)
-        val vm = ContactsViewModel(repo, FakeChannelRepo())
+        val vm = ContactsViewModel(repo, FakeChannelRepo(), FakeProfileResolver())
 
         vm.setRemark("a", "Ali")
         assertEquals("a" to "Ali", repo.remarkArgs)
@@ -150,6 +178,7 @@ class ContactsViewModelTest {
         val vm = ContactsViewModel(
             FakeRepo(contactsFlow, requestsFlow),
             FakeChannelRepo(joinResult = Result.success("CHAN9")),
+            FakeProfileResolver(),
         )
         vm.joinedChannel.test {
             vm.joinChannel(" ticket-json ")
@@ -163,6 +192,7 @@ class ContactsViewModelTest {
         val vm = ContactsViewModel(
             FakeRepo(contactsFlow, requestsFlow),
             FakeChannelRepo(joinResult = Result.failure(IllegalStateException("bad ticket"))),
+            FakeProfileResolver(),
         )
         vm.messages.test {
             vm.joinChannel("nope")

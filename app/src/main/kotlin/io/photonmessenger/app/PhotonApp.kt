@@ -25,6 +25,9 @@ package io.photonmessenger.app
 import android.app.Activity
 import android.app.Application
 import android.os.Bundle
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import io.photonmessenger.app.image.DirectorImageCallFactory
 import io.photonmessenger.app.notification.NotificationSettings
 import io.photonmessenger.app.session.NetworkMonitor
 import io.photonmessenger.app.session.SessionController
@@ -38,10 +41,13 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.launchIn
 
 @HiltAndroidApp
-class PhotonApp : Application() {
+class PhotonApp : Application(), ImageLoaderFactory {
 
     @Inject
     lateinit var notificationPreferencesStore: NotificationPreferencesStore
+
+    @Inject
+    lateinit var imageCallFactory: DirectorImageCallFactory
 
     @Inject
     lateinit var notificationSettings: NotificationSettings
@@ -80,4 +86,15 @@ class PhotonApp : Application() {
         // Retry a bring-up that failed while offline once the network returns (R1 / M1-19).
         networkMonitor.register { sessionController.onNetworkAvailable() }
     }
+
+    /**
+     * App-wide Coil loader: avatar fetches go through the Director-pinned, authenticated HTTP stack
+     * (remote users' avatars require the CWT). Coil respects the endpoint's cache headers, so its
+     * disk cache + conditional GETs handle avatar-image persistence.
+     */
+    override fun newImageLoader(): ImageLoader =
+        ImageLoader.Builder(this)
+            .callFactory(imageCallFactory)
+            .crossfade(true)
+            .build()
 }

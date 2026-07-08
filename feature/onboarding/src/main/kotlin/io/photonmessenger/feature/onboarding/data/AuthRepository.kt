@@ -28,6 +28,8 @@ import io.photonmessenger.core.boson.BosonCrypto
 import io.photonmessenger.core.boson.KeyManager
 import io.photonmessenger.core.model.AppError
 import io.photonmessenger.core.model.AuthTokenStore
+import io.photonmessenger.core.network.DeviceRegistration
+import io.photonmessenger.core.network.DeviceRegistrationStore
 import io.photonmessenger.core.network.DirectorApi
 import io.photonmessenger.core.network.DirectorApiFactory
 import io.photonmessenger.core.network.DirectorConfig
@@ -72,6 +74,7 @@ class AuthRepository @Inject constructor(
     private val configStore: DirectorConfigStore,
     private val tokenStore: AuthTokenStore,
     private val keyManager: KeyManager,
+    private val registrationStore: DeviceRegistrationStore,
 ) {
     @Volatile
     private var cachedApi: Pair<DirectorConfig, DirectorApi>? = null
@@ -163,6 +166,10 @@ class AuthRepository @Inject constructor(
     private suspend fun importUserKey(privateKey64: ByteArray): SessionState.Authenticated =
         withContext(Dispatchers.IO) {
             val kp = BosonCrypto.keyPairFromPrivate64(privateKey64)
+            val derivedId = BosonCrypto.idOf(kp).toString()
+            // Never reuse a device key across identity changes: adopting a different identity than
+            // the one this device key was registered under rotates the key and drops the stale record.
+            adoptIdentity(derivedId)
             val me = api().getMe()
             val boundId = me.userId
             if (boundId.isNullOrEmpty()) {
@@ -179,14 +186,27 @@ class AuthRepository @Inject constructor(
                 SessionState.Authenticated(api().getMe(), bound.userId)
             } else {
                 // An identity is already bound: the imported key must match it, or we would fork identity.
-                val derived = BosonCrypto.idOf(kp).toString()
-                if (derived != boundId) {
+                if (derivedId != boundId) {
                     throw AppError.InvalidInput("This key does not match your account identity")
                 }
                 keyManager.storeUserKey(privateKey64)
                 SessionState.Authenticated(me, boundId)
             }
         }
+
+    /**
+     * Prepares this device for adopting [newUserId] as its identity: when the device key was
+     * registered under a different user, it is rotated (a device key must never straddle two
+     * identities) and the stale registration record is dropped. A never-registered key, or one
+     * already owned by [newUserId], is kept.
+     */
+    private suspend fun adoptIdentity(newUserId: String?) {
+        val owner = keyManager.deviceKeyOwner()
+        if (owner != null && owner != newUserId) {
+            keyManager.rotateDeviceKey()
+            registrationStore.clear()
+        }
+    }
 
     /**
      * Completes registration: generates the user keypair, signs the Director nonce, and binds the
@@ -196,6 +216,9 @@ class AuthRepository @Inject constructor(
      */
     suspend fun bindIdentity(name: String? = null, bio: String? = null): SessionState.Authenticated =
         withContext(Dispatchers.IO) {
+            // A freshly generated user key is by definition a new identity: never carry a device key
+            // registered under a previous one into it.
+            adoptIdentity(null)
             val directorApi = api()
             val nonce = directorApi.getBindingNonce().nonce
             val userKey = keyManager.generateUserKey()
@@ -239,10 +262,15 @@ class AuthRepository @Inject constructor(
      */
     suspend fun registerDevice(passphrase: String? = null) {
         withContext(Dispatchers.IO) {
-            val deviceKey = keyManager.ensureDeviceKey()
+            val userId = keyManager.userId()?.toString()
+                ?: throw AppError.InvalidInput("No user identity on this device")
+            // Defense in depth: a device key registered under a different identity is rotated here
+            // rather than re-registered across users.
+            val deviceKey = keyManager.ensureDeviceKeyFor(userId)
+            val deviceId = BosonCrypto.idOf(deviceKey).toString()
             val nonce = ByteArray(NONCE_BYTES).also { SecureRandom().nextBytes(it) }
             val request = AddDeviceRequest(
-                deviceId = BosonCrypto.idOf(deviceKey).toString(),
+                deviceId = deviceId,
                 deviceName = Build.MODEL?.takeIf { it.isNotBlank() } ?: DEFAULT_DEVICE_NAME,
                 appName = APP_NAME,
                 nonce = B64URL.encodeToString(nonce),
@@ -256,18 +284,31 @@ class AuthRepository @Inject constructor(
                 // failure (a cancellation maps to a non-Conflict error and so is rethrown).
                 if (e.toDirectorError() !is AppError.Conflict) throw e
             }
+            // Persist the completed registration so subsequent bring-ups skip re-registering until
+            // the user, node, or device key changes.
+            keyManager.setDeviceKeyOwner(userId)
+            val cfg = config()
+            registrationStore.set(DeviceRegistration(userId, cfg.baseUrl, cfg.nodeId, deviceId))
         }
     }
 
     /**
-     * Silent best-effort device registration for the connect path (before every bring-up). Registers
-     * this device when the account has no passphrase, and skips otherwise: silent bring-up has no
-     * passphrase to supply, and the Director checks the passphrase BEFORE the already-registered (409)
-     * short-circuit, so a re-registration attempt would return 428 ("Passphrase required") even for a
-     * device that is already registered. Passphrase-protected accounts register this device during
-     * onboarding instead - with the passphrase, via [registerDevice].
+     * Silent best-effort device registration for the connect path (before every bring-up). Skips with
+     * ZERO network calls when the persisted [DeviceRegistration] still covers the current user, node,
+     * and device key; any mismatch (user, node, or device key changed) falls through to registering.
+     *
+     * Without a matching record: registers when the account has no passphrase, and skips otherwise -
+     * silent bring-up has no passphrase to supply, and the Director checks the passphrase BEFORE the
+     * already-registered (409) short-circuit, so a re-registration attempt would return 428
+     * ("Passphrase required") even for a device that is already registered. Passphrase-protected
+     * accounts register this device during onboarding instead - with the passphrase, via
+     * [registerDevice] - which writes the record that makes later bring-ups skip.
      */
     suspend fun ensureDeviceRegistered() {
+        val userId = keyManager.userId()?.toString() ?: return // no identity yet; nothing to register
+        val cfg = config()
+        val deviceId = BosonCrypto.idOf(keyManager.ensureDeviceKey()).toString()
+        if (registrationStore.get()?.matches(userId, cfg, deviceId) == true) return
         if (isPassphraseProtected()) return
         registerDevice(null)
     }
@@ -285,6 +326,7 @@ class AuthRepository @Inject constructor(
         runCatching { api().signOut() }
         tokenStore.clear()
         keyManager.clear()
+        registrationStore.clear()
         cachedApi = null
     }
 

@@ -112,7 +112,7 @@ class ChannelViewModelsTest {
 
     @Test
     fun `detail exposes channel and members`() = runTest {
-        val vm = ChannelDetailViewModel(FakeChannelRepository(), SavedStateHandle(mapOf("channelId" to "CHAN1")))
+        val vm = ChannelDetailViewModel(FakeChannelRepository(), FakeProfileResolver(), SavedStateHandle(mapOf("channelId" to "CHAN1")))
         vm.uiState.test {
             val state = awaitItem()
             assertEquals("Team", state.detail?.channel?.name)
@@ -125,6 +125,7 @@ class ChannelViewModelsTest {
     fun `failed moderation action emits a message`() = runTest {
         val vm = ChannelDetailViewModel(
             FakeChannelRepository(actionResult = Result.failure(RuntimeException("denied"))),
+            FakeProfileResolver(),
             SavedStateHandle(mapOf("channelId" to "CHAN1")),
         )
         vm.messages.test {

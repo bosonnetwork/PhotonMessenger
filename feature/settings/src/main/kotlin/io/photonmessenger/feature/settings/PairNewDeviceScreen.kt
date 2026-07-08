@@ -38,6 +38,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import io.photonmessenger.core.designsystem.component.LoadingState
 import io.photonmessenger.core.qr.rememberQrBitmap
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -81,7 +82,7 @@ fun PairNewDeviceScreen(
         ) {
             when (val s = state) {
                 is PairNewDeviceUiState.Preparing ->
-                    CircularProgressIndicator()
+                    LoadingState(label = "Preparing pairing code...")
 
                 is PairNewDeviceUiState.WaitingForApproval -> {
                     Text(

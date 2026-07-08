@@ -55,6 +55,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -63,6 +64,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -106,10 +108,12 @@ fun ContactsScreen(
         viewModel.joinedChannel.collect(onOpenChannel)
     }
 
+    val topBarScroll = TopAppBarDefaults.enterAlwaysScrollBehavior()
     Scaffold(
-        modifier = modifier,
+        modifier = modifier.nestedScroll(topBarScroll.nestedScrollConnection),
         topBar = {
             TopAppBar(
+                scrollBehavior = topBarScroll,
                 title = { Text("Contacts") },
                 actions = {
                     IconButton(onClick = { showJoinDialog = true }) {
@@ -375,7 +379,7 @@ private fun RequestList(
     onDecline: (String) -> Unit,
 ) {
     if (requests.isEmpty()) {
-        EmptyState("No pending requests.")
+        EmptyState("No pending requests.", icon = Icons.Outlined.PersonAdd)
         return
     }
     LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -383,13 +387,29 @@ private fun RequestList(
             ListItem(
                 modifier = Modifier.animateItem(),
                 leadingContent = {
-                    PhotonAvatar(model = null, name = null, colorKey = request.userId, size = 48.dp)
+                    PhotonAvatar(
+                        model = request.avatarUrl,
+                        name = request.name,
+                        colorKey = request.userId,
+                        size = 48.dp,
+                    )
                 },
                 headlineContent = {
-                    Text(shortRequestId(request.userId), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        request.name ?: shortRequestId(request.userId),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 },
                 supportingContent = {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (request.name != null) {
+                            Text(
+                                shortRequestId(request.userId),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         if (request.hello.isNotBlank()) {
                             Text(
                                 "\"${request.hello}\"",

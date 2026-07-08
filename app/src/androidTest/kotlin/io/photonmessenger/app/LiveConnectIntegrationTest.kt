@@ -51,7 +51,7 @@ import org.junit.runner.RunWith
 
 /**
  * LIVE integration tests (X-T3). Require the dev super node running and reachable at
- * https://10.0.2.2:9000 (Director) / mqtts 192.168.8.80:9083 (messaging). They self-register users via
+ * [TestSuperNode.directorUrl] (Director) plus its discovered mqtts endpoint. They self-register users via
  * the non-OAuth API and exercise the real Android stack (REST + keys + Room persistence + mqtts TLS)
  * end to end against a live node. Will fail-fast where the node is down.
  *

@@ -20,23 +20,24 @@
  * SOFTWARE.
  */
 
-package io.photonmessenger.app
+package io.photonmessenger.feature.contacts
 
-import io.photonmessenger.core.network.DirectorConfig
+import io.photonmessenger.core.model.ProfileResolver
+import io.photonmessenger.core.model.ResolvedProfile
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 
-/**
- * The dev super node the LIVE integration tests run against. Single source of truth for the node's
- * coordinates so no test hardcodes the Director URL.
- *
- * The node is reachable at its public DNS name and serves a real (Let's Encrypt) certificate, so
- * tests use default system-CA trust: [directorNodeId] is null (no identity pin). To run against a
- * self-signed node instead, set [directorNodeId] to the node's Boson id - the factory then pins the
- * certificate to that identity exactly as the app does when the operator enters a Server ID.
- */
-object TestSuperNode {
-    const val directorUrl = "https://whisper.freeddns.org:9000"
-    val directorNodeId: String? = null
+/** Test double: profiles are seeded/updated through [profiles]; prefetch is a no-op. */
+internal class FakeProfileResolver(
+    initial: Map<String, ResolvedProfile> = emptyMap(),
+) : ProfileResolver {
+    val profiles = MutableStateFlow(initial)
 
-    /** A [DirectorConfig] for the dev super node (CA-trusted; identity-pinned when an id is set). */
-    val directorConfig: DirectorConfig get() = DirectorConfig(directorUrl, nodeId = directorNodeId)
+    override fun profile(userId: String): Flow<ResolvedProfile?> =
+        profiles.map { it[userId] }
+
+    override fun cached(userId: String): ResolvedProfile? = profiles.value[userId]
+
+    override fun prefetch(userId: String) = Unit
 }

@@ -24,18 +24,24 @@ package io.photonmessenger.feature.contacts
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.photonmessenger.core.model.ProfileResolver
 import io.photonmessenger.feature.contacts.data.ChannelRepository
 import io.photonmessenger.feature.contacts.data.ContactRepository
 import io.photonmessenger.feature.contacts.model.UiContact
 import io.photonmessenger.feature.contacts.model.UiFriendRequest
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -51,10 +57,11 @@ data class ContactsUiState(
 class ContactsViewModel @Inject constructor(
     private val repository: ContactRepository,
     private val channelRepository: ChannelRepository,
+    private val profileResolver: ProfileResolver,
 ) : ViewModel() {
 
     val uiState: StateFlow<ContactsUiState> =
-        combine(repository.contacts(), repository.friendRequests()) { contacts, requests ->
+        combine(repository.contacts(), resolvedFriendRequests()) { contacts, requests ->
             ContactsUiState(
                 loading = false,
                 friends = contacts.filter { !it.isChannel },
@@ -68,6 +75,22 @@ class ContactsViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = ContactsUiState(loading = true),
         )
+
+    /**
+     * Friend requests enriched with the sender's Director-resolved public profile: raw ids become
+     * names + avatars once resolution completes (requests carry nothing but the id + hello).
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun resolvedFriendRequests(): Flow<List<UiFriendRequest>> =
+        repository.friendRequests().flatMapLatest { requests ->
+            if (requests.isEmpty()) return@flatMapLatest flowOf(emptyList())
+            val enriched = requests.map { request ->
+                profileResolver.profile(request.userId).map { profile ->
+                    request.copy(name = profile?.name, avatarUrl = profile?.avatarUrl)
+                }
+            }
+            combine(enriched) { it.toList() }
+        }
 
     /** Transient one-shot messages (e.g. action failures) for a snackbar. */
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 1)

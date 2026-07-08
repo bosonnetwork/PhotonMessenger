@@ -28,6 +28,12 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Box
@@ -122,176 +128,190 @@ fun OnboardingScreen(
         )
         Spacer(Modifier.height(32.dp))
 
-        when {
-            state.loading -> CircularProgressIndicator()
+        AnimatedContent(
+            targetState = state.loading to state.step,
+            transitionSpec = {
+                (fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 16 })
+                    .togetherWith(fadeOut(tween(120)))
+            },
+            label = "onboarding-step",
+        ) { (loading, step) ->
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                when {
+                    loading -> CircularProgressIndicator()
 
-            state.step == OnboardingStep.Server -> {
-                Text("Connect to your server", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = state.serverUrl,
-                    onValueChange = viewModel::onServerUrlChange,
-                    label = { Text("Server URL") },
-                    placeholder = { Text("https://your-node:9000") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                var showAdvanced by remember { mutableStateOf(state.directorNodeId.isNotBlank()) }
-                Spacer(Modifier.height(8.dp))
-                if (showAdvanced) {
-                    OutlinedTextField(
-                        value = state.directorNodeId,
-                        onValueChange = viewModel::onDirectorNodeIdChange,
-                        label = { Text("Server ID (advanced)") },
-                        placeholder = { Text("Boson node id (for a self-signed server)") },
-                        supportingText = {
-                            Text("Required to trust a self-signed HTTPS server; leave blank for a public CA.")
-                        },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                } else {
-                    TextButton(onClick = { showAdvanced = true }) { Text("Advanced options") }
-                }
-                Spacer(Modifier.height(16.dp))
-                Button(
-                    onClick = viewModel::confirmServer,
-                    enabled = state.serverUrl.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Continue")
-                }
-            }
-
-            state.step == OnboardingStep.ChooseIdentity -> {
-                Text("Set up your identity", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = if (state.allowCreateIdentity) {
-                        "Create a new identity key, or bring an existing one from another device."
-                    } else {
-                        "This device needs your identity key. Import it from a device where you are " +
-                            "already signed in."
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(16.dp))
-                if (state.allowCreateIdentity) {
-                    Button(onClick = viewModel::chooseCreateNew, modifier = Modifier.fillMaxWidth()) {
-                        Text("Create new identity")
+                    step == OnboardingStep.Server -> {
+                        Text("Connect to your server", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = state.serverUrl,
+                            onValueChange = viewModel::onServerUrlChange,
+                            label = { Text("Server URL") },
+                            placeholder = { Text("https://your-node:9000") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        var showAdvanced by remember { mutableStateOf(state.directorNodeId.isNotBlank()) }
+                        Spacer(Modifier.height(8.dp))
+                        if (showAdvanced) {
+                            OutlinedTextField(
+                                value = state.directorNodeId,
+                                onValueChange = viewModel::onDirectorNodeIdChange,
+                                label = { Text("Server ID (advanced)") },
+                                placeholder = { Text("Boson node id (for a self-signed server)") },
+                                supportingText = {
+                                    Text("Required to trust a self-signed HTTPS server; leave blank for a public CA.")
+                                },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else {
+                            TextButton(onClick = { showAdvanced = true }) { Text("Advanced options") }
+                        }
+                        Spacer(Modifier.height(16.dp))
+                        Button(
+                            onClick = viewModel::confirmServer,
+                            enabled = state.serverUrl.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Continue")
+                        }
                     }
-                    Spacer(Modifier.height(12.dp))
-                }
-                OutlinedButton(onClick = viewModel::chooseScanKey, modifier = Modifier.fillMaxWidth()) {
-                    Text("Scan QR from another device")
-                }
-                Spacer(Modifier.height(12.dp))
-                OutlinedButton(onClick = viewModel::choosePasteKey, modifier = Modifier.fillMaxWidth()) {
-                    Text("Enter key manually")
-                }
-            }
 
-            state.step == OnboardingStep.ScanKey ->
-                KeyScanStep(onScanned = viewModel::onKeyScanned, onCancel = viewModel::backToChoose)
-
-            state.step == OnboardingStep.PasteKey -> {
-                Text("Enter your identity key", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Paste your user private key (base58 or hex) from another device.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = state.keyInput,
-                    onValueChange = viewModel::onKeyInputChange,
-                    label = { Text("Private key") },
-                    minLines = 2,
-                    maxLines = 4,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(16.dp))
-                Button(
-                    onClick = viewModel::importPastedKey,
-                    enabled = state.keyInput.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Import identity")
-                }
-                TextButton(onClick = viewModel::backToChoose) { Text("Back") }
-            }
-
-            state.step == OnboardingStep.CreateProfile -> {
-                Text("Create your profile", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = state.displayName,
-                    onValueChange = viewModel::onDisplayNameChange,
-                    label = { Text("Display name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = state.bio,
-                    onValueChange = viewModel::onBioChange,
-                    label = { Text("Bio (optional)") },
-                    minLines = 2,
-                    maxLines = 4,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(16.dp))
-                Button(
-                    onClick = viewModel::completeProfile,
-                    enabled = state.displayName.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Continue")
-                }
-            }
-
-            state.step == OnboardingStep.Passphrase -> {
-                Text("Enter your account passphrase", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Your account is protected by a passphrase. Enter it to register this device.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = state.passphraseInput,
-                    onValueChange = viewModel::onPassphraseInputChange,
-                    label = { Text("Passphrase") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(16.dp))
-                Button(
-                    onClick = viewModel::submitPassphrase,
-                    enabled = state.passphraseInput.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Register this device")
-                }
-            }
-
-            else -> {
-                state.providers.forEach { provider ->
-                    Button(
-                        onClick = { viewModel.onProviderSelected(provider) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Continue with ${provider.name}")
+                    step == OnboardingStep.ChooseIdentity -> {
+                        Text("Set up your identity", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = if (state.allowCreateIdentity) {
+                                "Create a new identity key, or bring an existing one from another device."
+                            } else {
+                                "This device needs your identity key. Import it from a device where you are " +
+                                    "already signed in."
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        if (state.allowCreateIdentity) {
+                            Button(onClick = viewModel::chooseCreateNew, modifier = Modifier.fillMaxWidth()) {
+                                Text("Create new identity")
+                            }
+                            Spacer(Modifier.height(12.dp))
+                        }
+                        OutlinedButton(onClick = viewModel::chooseScanKey, modifier = Modifier.fillMaxWidth()) {
+                            Text("Scan QR from another device")
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedButton(onClick = viewModel::choosePasteKey, modifier = Modifier.fillMaxWidth()) {
+                            Text("Enter key manually")
+                        }
                     }
-                    Spacer(Modifier.height(12.dp))
-                }
-                TextButton(onClick = viewModel::editServer) {
-                    Text("Change server")
+
+                    step == OnboardingStep.ScanKey ->
+                        KeyScanStep(onScanned = viewModel::onKeyScanned, onCancel = viewModel::backToChoose)
+
+                    step == OnboardingStep.PasteKey -> {
+                        Text("Enter your identity key", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Paste your user private key (base58 or hex) from another device.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = state.keyInput,
+                            onValueChange = viewModel::onKeyInputChange,
+                            label = { Text("Private key") },
+                            minLines = 2,
+                            maxLines = 4,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Button(
+                            onClick = viewModel::importPastedKey,
+                            enabled = state.keyInput.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Import identity")
+                        }
+                        TextButton(onClick = viewModel::backToChoose) { Text("Back") }
+                    }
+
+                    step == OnboardingStep.CreateProfile -> {
+                        Text("Create your profile", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = state.displayName,
+                            onValueChange = viewModel::onDisplayNameChange,
+                            label = { Text("Display name") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = state.bio,
+                            onValueChange = viewModel::onBioChange,
+                            label = { Text("Bio (optional)") },
+                            minLines = 2,
+                            maxLines = 4,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Button(
+                            onClick = viewModel::completeProfile,
+                            enabled = state.displayName.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Continue")
+                        }
+                    }
+
+                    step == OnboardingStep.Passphrase -> {
+                        Text("Enter your account passphrase", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Your account is protected by a passphrase. Enter it to register this device.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = state.passphraseInput,
+                            onValueChange = viewModel::onPassphraseInputChange,
+                            label = { Text("Passphrase") },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Button(
+                            onClick = viewModel::submitPassphrase,
+                            enabled = state.passphraseInput.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Register this device")
+                        }
+                    }
+
+                    else -> {
+                        state.providers.forEach { provider ->
+                            Button(
+                                onClick = { viewModel.onProviderSelected(provider) },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text("Continue with ${provider.name}")
+                            }
+                            Spacer(Modifier.height(12.dp))
+                        }
+                        TextButton(onClick = viewModel::editServer) {
+                            Text("Change server")
+                        }
+                    }
                 }
             }
         }

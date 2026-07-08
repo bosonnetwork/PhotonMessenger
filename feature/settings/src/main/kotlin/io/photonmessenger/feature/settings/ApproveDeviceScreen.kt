@@ -26,6 +26,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import io.photonmessenger.core.designsystem.component.LoadingState
 import io.photonmessenger.core.qr.QrScanner
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,7 +38,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -118,9 +118,11 @@ fun ApproveDeviceScreen(
                     }
                 }
 
-                is ApproveDeviceUiState.Loading,
+                is ApproveDeviceUiState.Loading ->
+                    LoadingState(label = "Reading pairing request...")
+
                 is ApproveDeviceUiState.Approving ->
-                    CircularProgressIndicator(Modifier.align(Alignment.Center))
+                    LoadingState(label = "Authorizing device...")
 
                 is ApproveDeviceUiState.Confirm -> {
                     var passphrase by remember { mutableStateOf("") }

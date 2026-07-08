@@ -23,7 +23,6 @@
 package io.photonmessenger.core.designsystem.component
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -46,11 +45,24 @@ import androidx.compose.ui.unit.dp
  * consistent loading / empty / error look.
  */
 
-/** Centered progress indicator for a screen whose data is still loading. */
+/** Centered progress indicator for a screen whose data is still loading, with an optional [label]. */
 @Composable
-fun LoadingState(modifier: Modifier = Modifier) {
-    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+fun LoadingState(modifier: Modifier = Modifier, label: String? = null) {
+    Column(
+        modifier = modifier.fillMaxSize().padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
         CircularProgressIndicator()
+        if (label != null) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 16.dp),
+            )
+        }
     }
 }
 

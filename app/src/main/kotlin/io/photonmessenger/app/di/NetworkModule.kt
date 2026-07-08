@@ -30,8 +30,11 @@ import androidx.datastore.preferences.preferencesDataStoreFile
 import io.photonmessenger.core.boson.BosonDirectorTrustManagerProvider
 import io.photonmessenger.core.model.AuthTokenStore
 import io.photonmessenger.core.model.AvatarUrls
+import io.photonmessenger.core.model.ProfileResolver
+import io.photonmessenger.core.network.DeviceRegistrationStore
 import io.photonmessenger.core.network.DirectorApiFactory
 import io.photonmessenger.core.network.DirectorConfigStore
+import io.photonmessenger.core.network.DirectorProfileResolver
 import io.photonmessenger.core.network.DirectorTrustManagerProvider
 import io.photonmessenger.core.network.NotificationPreferencesStore
 import io.photonmessenger.core.network.ThemePreferencesStore
@@ -60,6 +63,11 @@ object NetworkModule {
     @Singleton
     fun provideDirectorConfigStore(dataStore: DataStore<Preferences>): DirectorConfigStore =
         DirectorConfigStore(dataStore)
+
+    @Provides
+    @Singleton
+    fun provideDeviceRegistrationStore(dataStore: DataStore<Preferences>): DeviceRegistrationStore =
+        DeviceRegistrationStore(dataStore)
 
     @Provides
     @Singleton
@@ -105,4 +113,20 @@ object NetworkModule {
             override fun forUser(userId: String): String? =
                 baseUrl?.let { "$it/api/v1/client/avatar/$userId" }
         }
+
+    /**
+     * Resolves public profiles (name/bio/avatar) for ANY user id from the Director's
+     * `GET /api/v1/client/profile/{userId}`, with in-memory TTL caching. Enriches friend requests,
+     * channel member lists, and chat sender names beyond what the Boson library provides locally.
+     */
+    @Provides
+    @Singleton
+    fun provideProfileResolver(
+        apiFactory: DirectorApiFactory,
+        configStore: DirectorConfigStore,
+    ): ProfileResolver = DirectorProfileResolver(
+        apiFactory = apiFactory,
+        configStore = configStore,
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    )
 }

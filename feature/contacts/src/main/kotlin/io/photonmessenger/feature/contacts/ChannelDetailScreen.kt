@@ -60,6 +60,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -68,6 +69,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -115,9 +117,12 @@ fun ChannelDetailScreen(
     LaunchedEffect(Unit) { viewModel.closed.collect { onBack() } }
     LaunchedEffect(Unit) { viewModel.inviteTicket.collect { inviteTicket = it } }
 
+    val topBarScroll = TopAppBarDefaults.pinnedScrollBehavior()
     Scaffold(
+        modifier = Modifier.nestedScroll(topBarScroll.nestedScrollConnection),
         topBar = {
             TopAppBar(
+                scrollBehavior = topBarScroll,
                 title = { Text(state.detail?.channel?.name ?: "Channel") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -291,7 +296,12 @@ private fun MemberRow(
 
     ListItem(
         leadingContent = {
-            PhotonAvatar(model = null, name = member.displayName, colorKey = member.id, size = 44.dp)
+            PhotonAvatar(
+                model = member.avatarUrl,
+                name = member.displayName,
+                colorKey = member.id,
+                size = 44.dp,
+            )
         },
         headlineContent = {
             Text(if (member.isMe) "${member.displayName} (you)" else member.displayName)

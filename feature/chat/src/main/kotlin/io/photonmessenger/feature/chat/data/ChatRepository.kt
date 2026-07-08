@@ -26,6 +26,7 @@ import io.photonmessenger.core.boson.BosonSessionManager
 import io.photonmessenger.core.boson.awaitResult
 import io.photonmessenger.core.model.AppError
 import io.photonmessenger.core.model.AvatarUrls
+import io.photonmessenger.core.model.ProfileResolver
 import io.photonmessenger.feature.chat.model.AttachmentCarrier
 import io.photonmessenger.feature.chat.model.AttachmentSource
 import io.photonmessenger.feature.chat.model.ChatHeader
@@ -88,6 +89,7 @@ class ChatRepositoryImpl @Inject constructor(
     private val mediaPreparer: MediaPreparer,
     private val cache: AttachmentCache,
     private val avatarUrls: AvatarUrls,
+    private val profileResolver: ProfileResolver,
 ) : ChatRepository {
 
     private fun client(): MessagingClient =
@@ -286,8 +288,10 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     /**
-     * For a channel conversation, returns a member-id -> display-name resolver (falling back to a
-     * short id for unknown senders); null for DMs, where bubbles need no attribution.
+     * For a channel conversation, returns a member-id -> display-name resolver; null for DMs, where
+     * bubbles need no attribution. Members without a local display name are prefetched from the
+     * Director so their resolved public names attach on the next mapping pass; until then (or when
+     * the Director doesn't know them either) senders fall back to a short id.
      */
     private suspend fun channelSenderResolver(client: MessagingClient, convo: Id): ((Id) -> String?)? =
         runCatching {
@@ -296,9 +300,15 @@ class ChatRepositoryImpl @Inject constructor(
             contact.loadMembers().awaitResult()
             val names = mutableMapOf<Id, String>()
             contact.members.forEach { member ->
-                member.displayName?.takeIf { it.isNotBlank() }?.let { names[member.id] = it }
+                val name = member.displayName?.takeIf { it.isNotBlank() }
+                if (name != null) names[member.id] = name
+                else profileResolver.prefetch(member.id.toString())
             }
-            val resolver: (Id) -> String? = { from -> names[from] ?: shortId(from.toString()) }
+            val resolver: (Id) -> String? = { from ->
+                names[from]
+                    ?: profileResolver.cached(from.toString())?.name
+                    ?: shortId(from.toString())
+            }
             resolver
         }.getOrNull()
 

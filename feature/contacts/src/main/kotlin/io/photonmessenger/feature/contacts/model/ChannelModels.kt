@@ -46,13 +46,16 @@ data class UiChannel(
     val canModerate: Boolean get() = myRole == UiChannelRole.OWNER || myRole == UiChannelRole.MODERATOR
 }
 
-/** UI projection of a single channel member. */
+/** UI projection of a single channel member. [avatarUrl] is Director-resolved. */
 data class UiChannelMember(
     val id: String,
     val displayName: String,
     val role: UiChannelRole,
     /** True when this member is the signed-in user; their own row is never moderatable. */
     val isMe: Boolean = false,
+    val avatarUrl: String? = null,
+    /** True when [displayName] is a shortened id, i.e. no real name was available locally. */
+    val nameIsFallback: Boolean = false,
 )
 
 /** A channel together with its member roster, for the detail screen. */
@@ -112,10 +115,14 @@ fun Channel.toUi(myId: Id): UiChannel {
     )
 }
 
-fun Channel.Member.toUi(myId: Id): UiChannelMember =
-    UiChannelMember(
-        id = id.toString(),
-        displayName = displayName,
+fun Channel.Member.toUi(myId: Id): UiChannelMember {
+    val idText = id.toString()
+    val name = displayName?.takeIf { it.isNotBlank() }
+    return UiChannelMember(
+        id = idText,
+        displayName = name ?: shortId(idText),
         role = role.toUi(),
         isMe = id == myId,
+        nameIsFallback = name == null,
     )
+}

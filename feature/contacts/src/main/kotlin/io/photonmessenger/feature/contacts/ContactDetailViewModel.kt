@@ -25,6 +25,7 @@ package io.photonmessenger.feature.contacts
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.photonmessenger.core.model.ProfileResolver
 import io.photonmessenger.feature.contacts.data.ContactRepository
 import io.photonmessenger.feature.contacts.model.UiContact
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -34,13 +35,15 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 data class ContactDetailUiState(
     val loading: Boolean = true,
     val contact: UiContact? = null,
+    /** The contact's public bio, when their Director profile has one. */
+    val bio: String? = null,
     val error: String? = null,
 )
 
@@ -48,14 +51,16 @@ data class ContactDetailUiState(
 @HiltViewModel
 class ContactDetailViewModel @Inject constructor(
     private val repository: ContactRepository,
+    profileResolver: ProfileResolver,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
     val contactId: String = checkNotNull(savedStateHandle["contactId"]) { "contactId arg missing" }
 
     val uiState: StateFlow<ContactDetailUiState> =
-        repository.contact(contactId)
-            .map { ContactDetailUiState(loading = false, contact = it) }
+        combine(repository.contact(contactId), profileResolver.profile(contactId)) { contact, profile ->
+            ContactDetailUiState(loading = false, contact = contact, bio = profile?.bio)
+        }
             .catch { e -> emit(ContactDetailUiState(loading = false, error = e.message)) }
             .stateIn(
                 scope = viewModelScope,

@@ -40,10 +40,12 @@ data class UiContact(
     val avatarUrl: String? = null,
 )
 
-/** UI projection of an incoming friend request. */
+/** UI projection of an incoming friend request. [name]/[avatarUrl] are Director-resolved. */
 data class UiFriendRequest(
     val userId: String,
     val hello: String,
+    val name: String? = null,
+    val avatarUrl: String? = null,
 )
 
 fun Contact.toUi(avatarUrl: String? = null): UiContact {

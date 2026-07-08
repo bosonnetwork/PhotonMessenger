@@ -52,6 +52,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,6 +62,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
@@ -97,9 +99,12 @@ fun ContactDetailScreen(
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
     LaunchedEffect(Unit) { viewModel.removed.collect { onBack() } }
 
+    val topBarScroll = TopAppBarDefaults.pinnedScrollBehavior()
     Scaffold(
+        modifier = Modifier.nestedScroll(topBarScroll.nestedScrollConnection),
         topBar = {
             TopAppBar(
+                scrollBehavior = topBarScroll,
                 title = { Text("Contact") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -118,6 +123,7 @@ fun ContactDetailScreen(
                 contact == null -> EmptyState("This contact is no longer in your list")
                 else -> ContactDetailContent(
                     contact = contact,
+                    bio = state.bio,
                     snackbar = snackbar,
                     onOpenChat = { onOpenChat(contact.id) },
                     onMute = viewModel::setMuted,
@@ -166,6 +172,7 @@ fun ContactDetailScreen(
 @Composable
 private fun ContactDetailContent(
     contact: UiContact,
+    bio: String?,
     snackbar: SnackbarHostState,
     onOpenChat: () -> Unit,
     onMute: (Boolean) -> Unit,
@@ -200,6 +207,16 @@ private fun ContactDetailContent(
                     contact.name,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (!bio.isNullOrBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    bio,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
             }
             if (contact.blocked) {

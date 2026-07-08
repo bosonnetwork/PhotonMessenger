@@ -68,6 +68,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -79,6 +80,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
@@ -134,8 +136,10 @@ fun SettingsScreen(
         if (uri != null) viewModel.updateAvatar(uri.toString())
     }
 
+    val topBarScroll = TopAppBarDefaults.enterAlwaysScrollBehavior()
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Settings") }) },
+        modifier = Modifier.nestedScroll(topBarScroll.nestedScrollConnection),
+        topBar = { TopAppBar(title = { Text("Settings") }, scrollBehavior = topBarScroll) },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         ResponsiveContent(modifier = Modifier.padding(padding)) {

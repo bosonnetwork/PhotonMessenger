@@ -30,6 +30,7 @@ import io.photonmessenger.core.model.AuthTokenStore
 import io.photonmessenger.core.model.NotificationPreferences
 import io.photonmessenger.core.model.ThemeMode
 import io.photonmessenger.core.model.ThemePreferences
+import io.photonmessenger.core.network.DeviceRegistrationStore
 import io.photonmessenger.core.network.DirectorApi
 import io.photonmessenger.core.network.DirectorApiFactory
 import io.photonmessenger.core.network.DirectorConfig
@@ -103,6 +104,7 @@ class SettingsRepositoryImpl @Inject constructor(
     private val keyManager: KeyManager,
     private val session: BosonSessionManager,
     private val avatarPreparer: AvatarPreparer,
+    private val registrationStore: DeviceRegistrationStore,
 ) : SettingsRepository {
 
     @Volatile
@@ -220,6 +222,7 @@ class SettingsRepositoryImpl @Inject constructor(
         runCatching { session.disconnect() }
         tokenStore.clear()
         keyManager.clear()
+        registrationStore.clear()
         cachedApi = null
     }
 

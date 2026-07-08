@@ -45,6 +45,7 @@ import io.photonmessenger.core.network.model.SelfRegisterRequest
 import io.photonmessenger.core.network.model.SetPassphraseRequest
 import io.photonmessenger.core.network.model.TokenDto
 import io.photonmessenger.core.network.model.UpdateProfileRequest
+import io.photonmessenger.core.network.model.UserPublicProfileDto
 import okhttp3.RequestBody
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -101,6 +102,13 @@ interface DirectorApi {
 
     @GET("client/profile")
     suspend fun getProfile(): ProfileDto
+
+    /**
+     * Public profile of ANY user by Base58 id (Director getUserProfile). Auth is optional for local
+     * users, but the Bearer CWT is required for the Director to resolve REMOTE users; 404 unknown.
+     */
+    @GET("client/profile/{userId}")
+    suspend fun getUserProfile(@Path("userId") userId: String): UserPublicProfileDto
 
     /** Updates any subset of {name, bio, email}; 204 No Content on success. */
     @PUT("client/profile")

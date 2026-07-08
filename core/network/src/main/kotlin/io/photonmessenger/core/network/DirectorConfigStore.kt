@@ -62,12 +62,9 @@ class DirectorConfigStore(
     }
 
     companion object {
-        // D-2: default to the local dev super node. 10.0.2.2 is the host loopback as seen from the
-        // Android emulator (the Director listens on host :9000). On a physical device, override with
-        // the host's LAN IP (e.g. http://192.168.8.80:9000) in advanced settings; set the production
-        // domain here once one exists. OAuth providers (google/github) are discovered via
+        // OAuth providers (Google/GitHub) are discovered via
         // GET /api/v1/auth/providers.
-        const val DEFAULT_DIRECTOR_URL = "https://jmac.dev:9000"
+        const val DEFAULT_DIRECTOR_URL = "https://your.super.node/"
         private val BASE_URL = stringPreferencesKey("director_base_url")
         private val NODE_ID = stringPreferencesKey("director_node_id")
     }

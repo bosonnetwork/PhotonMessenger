@@ -25,19 +25,26 @@ package io.photonmessenger.feature.contacts
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.photonmessenger.core.model.ProfileResolver
 import io.photonmessenger.feature.contacts.data.ChannelRepository
 import io.photonmessenger.feature.contacts.model.UiChannelDetail
+import io.photonmessenger.feature.contacts.model.UiChannelMember
 import io.photonmessenger.feature.contacts.model.UiChannelRole
 import io.bosonnetwork.photonmessaging.exceptions.ChannelNotExistsException
 import io.bosonnetwork.photonmessaging.exceptions.InsufficientPermissionException
 import io.bosonnetwork.photonmessaging.exceptions.NotChannelMemberException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -51,13 +58,16 @@ data class ChannelDetailUiState(
 @HiltViewModel
 class ChannelDetailViewModel @Inject constructor(
     private val repository: ChannelRepository,
+    private val profileResolver: ProfileResolver,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
     val channelId: String = checkNotNull(savedStateHandle["channelId"]) { "channelId arg missing" }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     val uiState: StateFlow<ChannelDetailUiState> =
         repository.channelDetail(channelId)
+            .flatMapLatest { detail -> resolvedMembers(detail) }
             .map { ChannelDetailUiState(loading = false, detail = it) }
             .catch { e -> emit(ChannelDetailUiState(loading = false, error = e.message)) }
             .stateIn(
@@ -65,6 +75,27 @@ class ChannelDetailViewModel @Inject constructor(
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = ChannelDetailUiState(loading = true),
             )
+
+    /**
+     * Enriches the roster with Director-resolved profiles: every member gets an avatar, and members
+     * whose local name is just a shortened id are upgraded to their resolved public name. Capped to
+     * the first [MAX_RESOLVED_MEMBERS] to bound the per-channel fan-out on large rosters.
+     */
+    private fun resolvedMembers(detail: UiChannelDetail): Flow<UiChannelDetail> {
+        val members = detail.members
+        if (members.isEmpty()) return flowOf(detail)
+        val enriched = members.mapIndexed { index, member ->
+            if (index >= MAX_RESOLVED_MEMBERS) return@mapIndexed flowOf(member)
+            profileResolver.profile(member.id).map { profile ->
+                val resolvedName = profile?.name?.takeIf { member.nameIsFallback && it.isNotBlank() }
+                member.copy(
+                    avatarUrl = profile?.avatarUrl,
+                    displayName = resolvedName ?: member.displayName,
+                )
+            }
+        }
+        return combine(enriched) { detail.copy(members = it.toList()) }
+    }
 
     /** Transient one-shot messages (action failures) for a snackbar. */
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 1)
@@ -131,5 +162,9 @@ class ChannelDetailViewModel @Inject constructor(
         is NotChannelMemberException -> "You're not a member of this channel"
         is ChannelNotExistsException -> "This channel no longer exists"
         else -> "$failurePrefix: ${message ?: "unknown error"}"
+    }
+
+    private companion object {
+        const val MAX_RESOLVED_MEMBERS = 100
     }
 }

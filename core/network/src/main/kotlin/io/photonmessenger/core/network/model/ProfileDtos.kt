@@ -48,6 +48,22 @@ data class ProfileDto(
 )
 
 /**
+ * GET /api/v1/client/profile/{userId} -> the PUBLIC profile of any user (Director UserPublicProfile
+ * JSON). All ids are Base58; `avatar` is a `bnr://` URI whose presence signals the user has an
+ * avatar (fetch the image via `GET /api/v1/client/avatar/{userId}`). No timestamps are exposed.
+ * 404 when the user is unknown; resolving a REMOTE (non-local) user requires the Bearer CWT.
+ */
+@Serializable
+data class UserPublicProfileDto(
+    val id: String,
+    val name: String? = null,
+    val avatar: String? = null,
+    val bio: String? = null,
+    val homeNode: String? = null,
+    val messagingHomePeer: String? = null,
+)
+
+/**
  * PUT /api/v1/client/profile body: any subset of {name, bio, email}. Null fields are omitted by the
  * converter (explicitNulls = false), so only provided keys are updated (Director updateProfile).
  * [passphrase] is required only when the account has a passphrase configured, otherwise ignored.

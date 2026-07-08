@@ -51,22 +51,27 @@ class DirectorApiFactory(
 ) {
     private val json: Json = DEFAULT_JSON
 
-    fun create(config: DirectorConfig): DirectorApi {
-        val client = OkHttpClient.Builder()
+    /**
+     * OkHttp client with Bearer auth + token refresh + certificate/identity pinning for [config].
+     * Shared by the Retrofit API and the Coil image loader so avatar fetches carry the same trust
+     * and authentication as API calls (the Director requires the CWT to resolve remote users).
+     */
+    fun createHttpClient(config: DirectorConfig): OkHttpClient =
+        OkHttpClient.Builder()
             .addInterceptor(AuthInterceptor(tokenStore))
             .authenticator(TokenAuthenticator(tokenStore, "${config.authPrefix}/refresh", json))
             .apply { certificatePinner(config)?.let { certificatePinner(it) } }
             .apply { applyIdentityPinning(config) }
             .build()
 
-        return Retrofit.Builder()
+    fun create(config: DirectorConfig): DirectorApi =
+        Retrofit.Builder()
             // baseUrl must end with '/'; client routes resolve against "<base>/api/v1/".
             .baseUrl("${config.apiPrefix}/")
-            .client(client)
+            .client(createHttpClient(config))
             .addConverterFactory(json.asConverterFactory(JSON_MEDIA_TYPE))
             .build()
             .create()
-    }
 
     /**
      * Installs Boson identity pinning on the Director client when [trustManagerProvider] yields a
