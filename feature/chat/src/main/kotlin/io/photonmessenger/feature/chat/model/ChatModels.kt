@@ -37,6 +37,13 @@ data class UiConversation(
     val updatedAt: Long,
     /** Fetchable avatar URL for the peer (DMs), null for channels or when unresolvable. */
     val avatarUrl: String? = null,
+    /** DM peer's library profile name (null for channels / when unknown); lets the ViewModel decide
+     *  whether the title needs a Director-resolved name (see name preference in the ViewModel). */
+    val peerName: String? = null,
+    /** DM peer's local alias/remark (null for channels / when unset). */
+    val remark: String? = null,
+    /** Unread inbound message count for the conversation badge (M4). */
+    val unreadCount: Int = 0,
 )
 
 /**
@@ -73,14 +80,20 @@ data class UiMessage(
     val senderName: String? = null,
 )
 
-fun Conversation.toUi(avatarUrl: String? = null): UiConversation = UiConversation(
-    id = getId().toString(),
-    title = getTitle(),
-    preview = getPreview().orElse(""),
-    isChannel = isChannel(),
-    updatedAt = getUpdatedAt(),
-    avatarUrl = avatarUrl,
-)
+fun Conversation.toUi(avatarUrl: String? = null): UiConversation {
+    val channel = isChannel()
+    val contact = getContact()
+    return UiConversation(
+        id = getId().toString(),
+        title = getTitle(),
+        preview = getPreview().orElse(""),
+        isChannel = channel,
+        updatedAt = getUpdatedAt(),
+        avatarUrl = avatarUrl,
+        peerName = if (channel) null else contact.getName().orElse(null)?.takeIf { it.isNotBlank() },
+        remark = if (channel) null else contact.getRemark().orElse(null)?.takeIf { it.isNotBlank() },
+    )
+}
 
 fun Message.toUi(myUserId: Id?, resolveSenderName: ((Id) -> String?)? = null): UiMessage {
     val from = getFrom().orElse(null)

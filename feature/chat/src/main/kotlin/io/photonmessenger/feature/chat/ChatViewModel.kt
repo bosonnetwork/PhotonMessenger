@@ -25,6 +25,7 @@ package io.photonmessenger.feature.chat
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.photonmessenger.core.boson.UnreadTracker
 import io.photonmessenger.feature.chat.data.ChatRepository
 import io.photonmessenger.feature.chat.model.AttachmentSource
 import io.photonmessenger.feature.chat.model.ChatHeader
@@ -69,6 +70,7 @@ sealed interface AttachmentDownload {
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val repository: ChatRepository,
+    private val unreadTracker: UnreadTracker,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -91,9 +93,16 @@ class ChatViewModel @Inject constructor(
     private val pending = MutableStateFlow<List<UiMessage>>(emptyList())
 
     init {
+        // Viewing a conversation reads it: clear its badge now and suppress unread while it's open.
+        unreadTracker.setActiveConversation(conversationId)
         viewModelScope.launch {
             repository.header(conversationId).onSuccess { _header.value = it }
         }
+    }
+
+    override fun onCleared() {
+        unreadTracker.setActiveConversation(null)
+        super.onCleared()
     }
 
     val uiState: StateFlow<ChatUiState> =

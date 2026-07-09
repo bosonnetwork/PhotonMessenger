@@ -20,16 +20,30 @@
  * SOFTWARE.
  */
 
-package io.photonmessenger.core.model
+package io.photonmessenger.core.designsystem.component
+
+import androidx.compose.material3.Badge
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
+
+/** Formats a notification/unread count for a compact badge, capping large values at "99+". */
+fun badgeCount(count: Int): String = if (count > 99) "99+" else count.toString()
 
 /**
- * Messaging transport connection state, surfaced to the UI (spec 1.4 / M1-16). Derived from the Boson
- * `ConnectionListener` callbacks: onConnecting -> CONNECTING, onConnected/onContactSynced -> CONNECTED,
- * then READY once BOTH onConnected and onContactSynced have fired, onDisconnected -> DISCONNECTED.
+ * A small count pill used for unread and pending-request badges (conversation rows, contact tabs,
+ * bottom-navigation items). Renders nothing when [count] is not positive, so callers can place it
+ * unconditionally. Defaults to the accent (primary) colour for a Telegram-style unread badge.
  */
-enum class ConnectionState {
-    DISCONNECTED,
-    CONNECTING,
-    CONNECTED,
-    READY,
+@Composable
+fun CountBadge(
+    count: Int,
+    containerColor: Color = MaterialTheme.colorScheme.primary,
+    contentColor: Color = MaterialTheme.colorScheme.onPrimary,
+) {
+    if (count <= 0) return
+    Badge(containerColor = containerColor, contentColor = contentColor) {
+        Text(badgeCount(count))
+    }
 }

@@ -63,6 +63,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.semantics.Role
@@ -71,6 +72,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.photonmessenger.core.designsystem.component.ConfirmDialog
+import io.photonmessenger.core.designsystem.component.CountBadge
 import io.photonmessenger.core.designsystem.component.EmptyState
 import io.photonmessenger.core.designsystem.component.ErrorState
 import io.photonmessenger.core.designsystem.component.LoadingState
@@ -143,7 +145,21 @@ fun ContactsScreen(
                         Tab(
                             selected = selectedTab == index,
                             onClick = { selectedTab = index },
-                            text = { Text(if (count > 0) "${tab.label} ($count)" else tab.label) },
+                            text = {
+                                // Pending requests are actionable notifications, so they get a badge;
+                                // friend/channel totals stay as a plain "(count)" suffix.
+                                if (tab == ContactsTab.REQUESTS && count > 0) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Text(tab.label)
+                                        CountBadge(count)
+                                    }
+                                } else {
+                                    Text(if (count > 0) "${tab.label} ($count)" else tab.label)
+                                }
+                            },
                         )
                     }
                 }

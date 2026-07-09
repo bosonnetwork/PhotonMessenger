@@ -29,6 +29,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -49,6 +50,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import io.photonmessenger.app.AppViewModel
+import io.photonmessenger.core.designsystem.component.CountBadge
 import io.photonmessenger.feature.chat.ChatScreen
 import io.photonmessenger.feature.chat.ConversationsScreen
 import io.photonmessenger.feature.contacts.ChannelDetailScreen
@@ -73,6 +75,7 @@ fun PhotonNavHost(
     appViewModel: AppViewModel = hiltViewModel(),
 ) {
     val sessionStatus by appViewModel.sessionStatus.collectAsStateWithLifecycle()
+    val badges by appViewModel.badges.collectAsStateWithLifecycle()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
     val topLevel = TopLevelDestination.entries
@@ -104,7 +107,16 @@ fun PhotonNavHost(
                                 restoreState = true
                             }
                         },
-                            icon = { Icon(destination.icon, contentDescription = destination.label) },
+                            icon = {
+                                val count = when (destination) {
+                                    TopLevelDestination.HOME -> badges.chats
+                                    TopLevelDestination.CONTACTS -> badges.contacts
+                                    else -> 0
+                                }
+                                BadgedBox(badge = { CountBadge(count) }) {
+                                    Icon(destination.icon, contentDescription = destination.label)
+                                }
+                            },
                             label = { Text(destination.label) },
                         )
                     }

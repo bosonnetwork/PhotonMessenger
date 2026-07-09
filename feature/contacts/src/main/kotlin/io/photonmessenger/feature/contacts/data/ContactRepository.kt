@@ -38,7 +38,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
 
 /**
  * Contacts and friend requests over the Boson [MessagingClient] (spec 1.2, screen 5, M2). Returns UI
@@ -74,6 +76,13 @@ class ContactRepositoryImpl @Inject constructor(
     private fun client(): MessagingClient =
         session.messagingClient ?: throw AppError.Network("Not connected to the messaging service")
 
+    // Local mutations (accept/decline a request, edit/remove a contact) are initiated by THIS device,
+    // so the messaging client deliberately does not fire the corresponding listener callback here (it
+    // fires on the user's OTHER devices instead). We therefore poke the live flows ourselves after a
+    // successful local op so the lists refresh without waiting for a callback that will never come.
+    private val contactsRefresh = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    private val requestsRefresh = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
     private fun Contact.toUiWithAvatar(): UiContact =
         toUi(avatarUrl = if (type == Contact.Type.CHANNEL) null else avatarUrls.forUser(id.toString()))
 
@@ -85,64 +94,43 @@ class ContactRepositoryImpl @Inject constructor(
             return@callbackFlow
         }
 
-        val current = LinkedHashMap<Id, Contact>()
-        client.getContacts().awaitResult().forEach { current[it.id] = it }
-        trySend(current.values.map { it.toUiWithAvatar() })
+        suspend fun refresh() {
+            trySend(client.getContacts().awaitResult().map { it.toUiWithAvatar() })
+        }
+        refresh()
 
         val listener = object : ContactListener {
-            override fun onContactAdded(contact: Contact) {
-                current[contact.id] = contact
-                trySend(current.values.map { it.toUiWithAvatar() })
-            }
-
-            override fun onContactsUpdated(contacts: List<Contact>) {
-                contacts.forEach { current[it.id] = it }
-                trySend(current.values.map { it.toUiWithAvatar() })
-            }
-
-            override fun onContactsRemoved(contactIds: List<Id>) {
-                contactIds.forEach { current.remove(it) }
-                trySend(current.values.map { it.toUiWithAvatar() })
-            }
-
-            override fun onContactsCleared() {
-                current.clear()
-                trySend(emptyList())
-            }
+            override fun onContactAdded(contact: Contact) { launch { refresh() } }
+            override fun onContactsUpdated(contacts: List<Contact>) { launch { refresh() } }
+            override fun onContactsRemoved(contactIds: List<Id>) { launch { refresh() } }
+            override fun onContactsCleared() { trySend(emptyList()) }
         }
         client.addContactListener(listener)
-        awaitClose { client.removeContactListener(listener) }
+        val refreshJob = launch { contactsRefresh.collect { refresh() } }
+        awaitClose { client.removeContactListener(listener); refreshJob.cancel() }
     }
 
     override fun contact(contactId: String): Flow<UiContact?> = callbackFlow {
         val client = client()
         val id = parseId(contactId)
 
-        suspend fun emit() {
+        suspend fun refresh() {
             val contact = client.getContact(id).awaitResult().orElse(null)
             trySend(contact?.toUiWithAvatar())
         }
-        emit()
+        refresh()
 
         val listener = object : ContactListener {
-            override fun onContactAdded(contact: Contact) {
-                if (contact.id == id) trySend(contact.toUiWithAvatar())
-            }
-
+            override fun onContactAdded(contact: Contact) { if (contact.id == id) launch { refresh() } }
             override fun onContactsUpdated(contacts: List<Contact>) {
-                contacts.firstOrNull { it.id == id }?.let { trySend(it.toUiWithAvatar()) }
+                if (contacts.any { it.id == id }) launch { refresh() }
             }
-
-            override fun onContactsRemoved(contactIds: List<Id>) {
-                if (id in contactIds) trySend(null)
-            }
-
-            override fun onContactsCleared() {
-                trySend(null)
-            }
+            override fun onContactsRemoved(contactIds: List<Id>) { if (id in contactIds) trySend(null) }
+            override fun onContactsCleared() { trySend(null) }
         }
         client.addContactListener(listener)
-        awaitClose { client.removeContactListener(listener) }
+        val refreshJob = launch { contactsRefresh.collect { refresh() } }
+        awaitClose { client.removeContactListener(listener); refreshJob.cancel() }
     }
 
     override fun friendRequests(): Flow<List<UiFriendRequest>> = callbackFlow {
@@ -153,25 +141,21 @@ class ContactRepositoryImpl @Inject constructor(
             return@callbackFlow
         }
 
-        val pending = LinkedHashMap<Id, String>()
-        client.getFriendRequests().awaitResult()
-            .filter { !it.isAccepted }
-            .forEach { pending[it.userId] = it.hello ?: "" }
-        trySend(pending.map { UiFriendRequest(it.key.toString(), it.value) })
+        suspend fun refresh() {
+            val pending = client.getFriendRequests().awaitResult()
+                .filter { !it.isAccepted }
+                .map { UiFriendRequest(it.userId.toString(), it.hello ?: "") }
+            trySend(pending)
+        }
+        refresh()
 
         val listener = object : FriendRequestListener {
-            override fun onFriendRequest(userId: Id, hello: String) {
-                pending[userId] = hello
-                trySend(pending.map { UiFriendRequest(it.key.toString(), it.value) })
-            }
-
-            override fun onFriendRequestAccepted(userId: Id) {
-                pending.remove(userId)
-                trySend(pending.map { UiFriendRequest(it.key.toString(), it.value) })
-            }
+            override fun onFriendRequest(userId: Id, hello: String) { launch { refresh() } }
+            override fun onFriendRequestAccepted(userId: Id) { launch { refresh() } }
         }
         client.addFriendRequestListener(listener)
-        awaitClose { client.removeFriendRequestListener(listener) }
+        val refreshJob = launch { requestsRefresh.collect { refresh() } }
+        awaitClose { client.removeFriendRequestListener(listener); refreshJob.cancel() }
     }
 
     override suspend fun sendFriendRequest(idText: String, hello: String): Result<Unit> = runCatching {
@@ -181,11 +165,15 @@ class ContactRepositoryImpl @Inject constructor(
 
     override suspend fun acceptFriendRequest(userIdText: String): Result<Unit> = runCatching {
         client().acceptFriendRequest(parseId(userIdText)).awaitResult()
+        // Accepting adds the sender as a contact AND clears the pending request on this device.
+        requestsRefresh.tryEmit(Unit)
+        contactsRefresh.tryEmit(Unit)
         Unit
     }
 
     override suspend fun declineFriendRequest(userIdText: String): Result<Unit> = runCatching {
         client().removeFriendRequest(parseId(userIdText)).awaitResult()
+        requestsRefresh.tryEmit(Unit)
         Unit
     }
 
@@ -200,6 +188,7 @@ class ContactRepositoryImpl @Inject constructor(
 
     override suspend fun removeContact(contactId: String): Result<Unit> = runCatching {
         client().removeContacts(listOf(parseId(contactId))).awaitResult()
+        contactsRefresh.tryEmit(Unit)
         Unit
     }
 
@@ -208,6 +197,7 @@ class ContactRepositoryImpl @Inject constructor(
         val contact = client.getContact(parseId(contactId)).awaitResult().orElse(null)
             ?: throw AppError.NotFound("Contact not found")
         client.updateContact(edit(contact)).awaitResult()
+        contactsRefresh.tryEmit(Unit)
         Unit
     }
 

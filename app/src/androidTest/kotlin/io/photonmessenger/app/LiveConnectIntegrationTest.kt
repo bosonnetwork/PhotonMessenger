@@ -124,7 +124,7 @@ class LiveConnectIntegrationTest {
 
         val ready = CountDownLatch(1)
         mc.addConnectionListener(object : ConnectionListener {
-            override fun onReady() = ready.countDown()
+            override fun onContactSynced() = ready.countDown()
         })
         mc.start().get(timeout, TimeUnit.SECONDS)
         assertTrue("$name did not reach READY", ready.await(timeout, TimeUnit.SECONDS))

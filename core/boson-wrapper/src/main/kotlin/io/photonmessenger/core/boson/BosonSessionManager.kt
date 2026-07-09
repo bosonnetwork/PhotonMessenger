@@ -67,14 +67,45 @@ class BosonSessionManager(
     @Volatile
     private var shouldStayConnected = false
 
+    // The session is fully READY only once BOTH the transport is connected (onConnected) and the
+    // startup contact-sync has completed (onContactSynced). These two callbacks are NOT ordered: on a
+    // warm reconnect the messaging server resumes a persistent session whose subscriptions are already
+    // restored, so it delivers the contact-sync as soon as the CONNACK is sent - that can arrive
+    // BEFORE the client's own SUBACK (which drives onConnected). Surfacing READY on the sync alone
+    // would then let the trailing onConnected() knock the state back to CONNECTED, leaving the UI
+    // stuck on "Securing connection..." forever. Gating on both, in either order, avoids that.
+    @Volatile
+    private var connectedFired = false
+
+    @Volatile
+    private var contactSyncedFired = false
+
     private val connectionListener = object : ConnectionListener {
-        override fun onConnecting() { _connectionState.value = ConnectionState.CONNECTING }
-        override fun onConnected() { _connectionState.value = ConnectionState.CONNECTED }
-        override fun onReady() { _connectionState.value = ConnectionState.READY }
+        override fun onConnecting() {
+            connectedFired = false
+            contactSyncedFired = false
+            _connectionState.value = ConnectionState.CONNECTING
+        }
+        override fun onConnected() {
+            connectedFired = true
+            publishConnectedOrReady()
+        }
+        override fun onContactSynced() {
+            contactSyncedFired = true
+            publishConnectedOrReady()
+        }
         override fun onDisconnected() {
+            connectedFired = false
+            contactSyncedFired = false
             _connectionState.value = ConnectionState.DISCONNECTED
             if (shouldStayConnected) scheduleReconnect()
         }
+    }
+
+    /** READY only when connected AND contact-synced; otherwise CONNECTED (still "securing"). */
+    private fun publishConnectedOrReady() {
+        _connectionState.value =
+            if (connectedFired && contactSyncedFired) ConnectionState.READY else ConnectionState.CONNECTED
     }
 
     /** Builds the clients from discovered coordinates and starts the messaging connection. */

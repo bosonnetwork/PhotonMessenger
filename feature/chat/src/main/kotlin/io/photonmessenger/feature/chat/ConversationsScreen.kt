@@ -24,6 +24,7 @@ package io.photonmessenger.feature.chat
 
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -70,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.photonmessenger.core.designsystem.component.ConfirmDialog
+import io.photonmessenger.core.designsystem.component.CountBadge
 import io.photonmessenger.core.designsystem.component.EmptyState
 import io.photonmessenger.core.designsystem.component.ErrorState
 import io.photonmessenger.core.designsystem.component.LoadingState
@@ -209,11 +211,17 @@ private fun ConversationRow(
                 )
             },
             trailingContent = {
-                Text(
-                    formatListTime(conversation.updatedAt),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        formatListTime(conversation.updatedAt),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    CountBadge(conversation.unreadCount)
+                }
             },
         )
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {

@@ -61,7 +61,7 @@ class ContactsViewModel @Inject constructor(
 ) : ViewModel() {
 
     val uiState: StateFlow<ContactsUiState> =
-        combine(repository.contacts(), resolvedFriendRequests()) { contacts, requests ->
+        combine(resolvedContacts(), resolvedFriendRequests()) { contacts, requests ->
             ContactsUiState(
                 loading = false,
                 friends = contacts.filter { !it.isChannel },
@@ -75,6 +75,28 @@ class ContactsViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = ContactsUiState(loading = true),
         )
+
+    /**
+     * Contacts with display names upgraded from a short id to the Director-resolved profile name.
+     * Name preference: remark > library profile name > resolved name > short id. Only friends whose
+     * name still falls back to a short id (no remark, no library name) are resolved; channels and
+     * already-named contacts pass through untouched.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun resolvedContacts(): Flow<List<UiContact>> =
+        repository.contacts().flatMapLatest { contacts ->
+            val needsName = contacts.filter { !it.isChannel && it.remark == null && it.name == null }
+            if (needsName.isEmpty()) return@flatMapLatest flowOf(contacts)
+            val nameFlows = needsName.map { contact ->
+                profileResolver.profile(contact.id).map { contact.id to it?.name }
+            }
+            combine(nameFlows) { pairs ->
+                val names = pairs.toMap()
+                contacts.map { contact ->
+                    names[contact.id]?.let { contact.copy(displayName = it) } ?: contact
+                }
+            }
+        }
 
     /**
      * Friend requests enriched with the sender's Director-resolved public profile: raw ids become

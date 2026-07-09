@@ -24,6 +24,9 @@ package io.photonmessenger.feature.chat
 
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
+import io.photonmessenger.core.boson.UnreadTracker
+import io.photonmessenger.core.model.ProfileResolver
+import io.photonmessenger.core.model.ResolvedProfile
 import io.photonmessenger.feature.chat.data.ChatRepository
 import io.photonmessenger.feature.chat.model.ChatHeader
 import io.photonmessenger.feature.chat.model.MessageStatus
@@ -32,6 +35,9 @@ import io.photonmessenger.feature.chat.model.UiMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -66,6 +72,28 @@ class ChatViewModelsTest {
         override suspend fun removeConversation(conversationId: String) = Result.success(Unit)
     }
 
+    /** No-op resolver: DM titles are already provided by the fakes, so nothing needs resolving. */
+    private val resolver = object : ProfileResolver {
+        override fun profile(userId: String): Flow<ResolvedProfile?> = flowOf(null)
+        override fun cached(userId: String): ResolvedProfile? = null
+        override fun prefetch(userId: String) = Unit
+    }
+
+    private class FakeUnreadTracker : UnreadTracker {
+        private val counts = MutableStateFlow<Map<String, Int>>(emptyMap())
+        override val unread: StateFlow<Map<String, Int>> = counts
+        override val totalUnread: StateFlow<Int> = MutableStateFlow(0)
+        var lastActive: String? = null
+        override fun markRead(conversationId: String) { counts.update { it - conversationId } }
+        override fun setActiveConversation(conversationId: String?) { lastActive = conversationId }
+    }
+
+    private fun conversationsVm(repo: ChatRepository) =
+        ConversationsViewModel(repo, resolver, FakeUnreadTracker())
+
+    private fun chatVm(repo: ChatRepository, conversationId: String) =
+        ChatViewModel(repo, FakeUnreadTracker(), SavedStateHandle(mapOf("conversationId" to conversationId)))
+
     @Before
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
@@ -79,7 +107,7 @@ class ChatViewModelsTest {
     @Test
     fun `conversations are exposed`() = runTest {
         convosFlow.value = listOf(UiConversation("a", "Alice", "hi", false, 10))
-        val vm = ConversationsViewModel(FakeChatRepo(convosFlow, msgsFlow))
+        val vm = conversationsVm(FakeChatRepo(convosFlow, msgsFlow))
 
         vm.uiState.test {
             var state = awaitItem()
@@ -94,7 +122,7 @@ class ChatViewModelsTest {
     fun `chat exposes messages and blank send is ignored`() = runTest {
         msgsFlow.value = listOf(UiMessage("m1", "hello", fromMe = false, createdAt = 1))
         val repo = FakeChatRepo(convosFlow, msgsFlow)
-        val vm = ChatViewModel(repo, SavedStateHandle(mapOf("conversationId" to "abc")))
+        val vm = chatVm(repo, "abc")
 
         assertEquals("abc", vm.conversationId)
         vm.uiState.test {
@@ -113,7 +141,7 @@ class ChatViewModelsTest {
             msgsFlow,
             headerResult = Result.success(ChatHeader(title = "Devs", subtitle = "3 members", isChannel = true)),
         )
-        val vm = ChatViewModel(repo, SavedStateHandle(mapOf("conversationId" to "chan1")))
+        val vm = chatVm(repo, "chan1")
 
         vm.header.test {
             var header = awaitItem()
@@ -128,7 +156,7 @@ class ChatViewModelsTest {
     @Test
     fun `failed send is retriable with the original text`() = runTest {
         val repo = FakeChatRepo(convosFlow, msgsFlow, sendResult = Result.failure(IllegalStateException("nope")))
-        val vm = ChatViewModel(repo, SavedStateHandle(mapOf("conversationId" to "abc")))
+        val vm = chatVm(repo, "abc")
 
         vm.sendFailures.test {
             vm.send("hi")
@@ -143,7 +171,7 @@ class ChatViewModelsTest {
     @Test
     fun `failed send leaves a failed optimistic bubble`() = runTest {
         val repo = FakeChatRepo(convosFlow, msgsFlow, sendResult = Result.failure(IllegalStateException("nope")))
-        val vm = ChatViewModel(repo, SavedStateHandle(mapOf("conversationId" to "abc")))
+        val vm = chatVm(repo, "abc")
 
         vm.uiState.test {
             var state = awaitItem()
@@ -163,7 +191,7 @@ class ChatViewModelsTest {
     @Test
     fun `successful send leaves no optimistic bubble`() = runTest {
         val repo = FakeChatRepo(convosFlow, msgsFlow)
-        val vm = ChatViewModel(repo, SavedStateHandle(mapOf("conversationId" to "abc")))
+        val vm = chatVm(repo, "abc")
 
         vm.uiState.test {
             var state = awaitItem()
@@ -184,7 +212,7 @@ class ChatViewModelsTest {
             UiConversation("a", "Alice", "hi", false, 10),
             UiConversation("b", "Bob", "yo", false, 9),
         )
-        val vm = ConversationsViewModel(FakeChatRepo(convosFlow, msgsFlow))
+        val vm = conversationsVm(FakeChatRepo(convosFlow, msgsFlow))
 
         vm.uiState.test {
             var state = awaitItem()
@@ -213,7 +241,7 @@ class ChatViewModelsTest {
             msgsFlow,
             olderResult = Result.success(listOf(UiMessage("m0", "earlier", fromMe = false, createdAt = 1))),
         )
-        val vm = ChatViewModel(repo, SavedStateHandle(mapOf("conversationId" to "abc")))
+        val vm = chatVm(repo, "abc")
 
         vm.uiState.test {
             var state = awaitItem()

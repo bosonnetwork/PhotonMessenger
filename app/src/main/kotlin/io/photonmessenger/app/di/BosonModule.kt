@@ -25,7 +25,9 @@ package io.photonmessenger.app.di
 import android.content.Context
 import io.photonmessenger.core.boson.BosonClientFactory
 import io.photonmessenger.core.boson.BosonSessionManager
+import io.photonmessenger.core.boson.DefaultUnreadTracker
 import io.photonmessenger.core.boson.KeyManager
+import io.photonmessenger.core.boson.UnreadTracker
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -60,4 +62,9 @@ object BosonModule {
         keyManager: KeyManager,
         store: MessagingStore,
     ): BosonSessionManager = BosonSessionManager(factory, keyManager, store, context.filesDir)
+
+    @Provides
+    @Singleton
+    fun provideUnreadTracker(session: BosonSessionManager): UnreadTracker =
+        DefaultUnreadTracker(session)
 }

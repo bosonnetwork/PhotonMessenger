@@ -24,10 +24,14 @@ package io.photonmessenger.feature.chat
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.photonmessenger.core.boson.UnreadTracker
+import io.photonmessenger.core.model.ProfileResolver
 import io.photonmessenger.feature.chat.data.ChatRepository
 import io.photonmessenger.feature.chat.model.UiConversation
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -36,6 +40,9 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -50,6 +57,8 @@ data class ConversationsUiState(
 @HiltViewModel
 class ConversationsViewModel @Inject constructor(
     private val repository: ChatRepository,
+    private val profileResolver: ProfileResolver,
+    private val unreadTracker: UnreadTracker,
 ) : ViewModel() {
 
     private val _query = MutableStateFlow("")
@@ -70,16 +79,37 @@ class ConversationsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Conversations with DM titles upgraded from an abbreviated id to the sender's Director-resolved
+     * name. Name preference (matching contacts): remark > library profile name > resolved name >
+     * short id. A conversation title already carrying a remark or library name is left untouched; only
+     * DMs that fall back to a short id are resolved, and only those still awaiting a name refetch.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun namedConversations(): Flow<List<UiConversation>> =
+        repository.conversations().flatMapLatest { conversations ->
+            val needsName = conversations.filter { !it.isChannel && it.peerName == null && it.remark == null }
+            if (needsName.isEmpty()) return@flatMapLatest flowOf(conversations)
+            val nameFlows = needsName.map { convo ->
+                profileResolver.profile(convo.id).map { convo.id to it?.name }
+            }
+            combine(nameFlows) { pairs ->
+                val names = pairs.toMap()
+                conversations.map { convo -> names[convo.id]?.let { convo.copy(title = it) } ?: convo }
+            }
+        }
+
     val uiState: StateFlow<ConversationsUiState> =
-        combine(repository.conversations(), _query) { conversations, query ->
+        combine(namedConversations(), unreadTracker.unread, _query) { conversations, unread, query ->
+            val withUnread = conversations.map { it.copy(unreadCount = unread[it.id] ?: 0) }
             val trimmed = query.trim()
-            val filtered = if (trimmed.isEmpty()) conversations else conversations.filter {
+            val filtered = if (trimmed.isEmpty()) withUnread else withUnread.filter {
                 it.title.contains(trimmed, ignoreCase = true) || it.preview.contains(trimmed, ignoreCase = true)
             }
             ConversationsUiState(
                 loading = false,
                 conversations = filtered,
-                filteredEmpty = filtered.isEmpty() && conversations.isNotEmpty(),
+                filteredEmpty = filtered.isEmpty() && withUnread.isNotEmpty(),
             )
         }
             .catch { emit(ConversationsUiState(loading = false, error = it.message)) }

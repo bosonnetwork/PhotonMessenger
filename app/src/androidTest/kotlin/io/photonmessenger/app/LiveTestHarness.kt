@@ -135,7 +135,7 @@ class LiveTestHarness(
         val mc = factory.createMessagingClient(config)
         val ready = CountDownLatch(1)
         mc.addConnectionListener(object : ConnectionListener {
-            override fun onReady() = ready.countDown()
+            override fun onContactSynced() = ready.countDown()
         })
         mc.start().get(TIMEOUT, TimeUnit.SECONDS)
         assertTrue("${account.name} did not reach READY", ready.await(TIMEOUT, TimeUnit.SECONDS))
