@@ -151,7 +151,13 @@ class ContactRepositoryImpl @Inject constructor(
 
         val listener = object : FriendRequestListener {
             override fun onFriendRequest(userId: Id, hello: String) { launch { refresh() } }
-            override fun onFriendRequestAccepted(userId: Id) { launch { refresh() } }
+            override fun onFriendRequestAccepted(userId: Id) {
+                // On the INITIATOR side, the peer accepting our request auto-adds them as a contact
+                // but fires no ContactListener callback (that addition is a continuation of our own
+                // outbound request), so poke the contacts list too - not just the request list.
+                launch { refresh() }
+                contactsRefresh.tryEmit(Unit)
+            }
         }
         client.addFriendRequestListener(listener)
         val refreshJob = launch { requestsRefresh.collect { refresh() } }

@@ -92,7 +92,7 @@ class ChatViewModelsTest {
         ConversationsViewModel(repo, resolver, FakeUnreadTracker())
 
     private fun chatVm(repo: ChatRepository, conversationId: String) =
-        ChatViewModel(repo, FakeUnreadTracker(), SavedStateHandle(mapOf("conversationId" to conversationId)))
+        ChatViewModel(repo, FakeUnreadTracker(), resolver, SavedStateHandle(mapOf("conversationId" to conversationId)))
 
     @Before
     fun setUp() {

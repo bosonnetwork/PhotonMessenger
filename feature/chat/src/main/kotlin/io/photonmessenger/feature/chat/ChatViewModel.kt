@@ -26,6 +26,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.photonmessenger.core.boson.UnreadTracker
+import io.photonmessenger.core.model.ProfileResolver
 import io.photonmessenger.feature.chat.data.ChatRepository
 import io.photonmessenger.feature.chat.model.AttachmentSource
 import io.photonmessenger.feature.chat.model.ChatHeader
@@ -37,6 +38,7 @@ import io.bosonnetwork.photonmessaging.exceptions.MessageTimeoutException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.File
 import javax.inject.Inject
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -45,6 +47,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -71,6 +75,7 @@ sealed interface AttachmentDownload {
 class ChatViewModel @Inject constructor(
     private val repository: ChatRepository,
     private val unreadTracker: UnreadTracker,
+    private val profileResolver: ProfileResolver,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -78,8 +83,29 @@ class ChatViewModel @Inject constructor(
         "conversationId is required"
     }
 
-    private val _header = MutableStateFlow(ChatHeader(title = shortId(conversationId)))
-    val header: StateFlow<ChatHeader> = _header.asStateFlow()
+    private val _baseHeader = MutableStateFlow(ChatHeader(title = shortId(conversationId)))
+
+    /**
+     * Chat header, upgraded live: when the base header (from the library) is a DM that fell back to
+     * the abbreviated id (no local remark/name), fill in a Director-resolved profile name once it
+     * arrives - mirroring how the conversation list titles resolve (issue: opened chat kept showing
+     * the short id even though the list showed the name).
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val header: StateFlow<ChatHeader> = _baseHeader
+        .flatMapLatest { base ->
+            if (!base.isChannel && base.title == shortId(conversationId))
+                profileResolver.profile(conversationId).map { resolved ->
+                    resolved?.name?.takeIf { it.isNotBlank() }?.let { base.copy(title = it) } ?: base
+                }
+            else
+                flowOf(base)
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = ChatHeader(title = shortId(conversationId)),
+        )
 
     /** Older pages loaded via pagination, merged with the live stream (M3-5). */
     private val olderMessages = MutableStateFlow<List<UiMessage>>(emptyList())
@@ -96,7 +122,7 @@ class ChatViewModel @Inject constructor(
         // Viewing a conversation reads it: clear its badge now and suppress unread while it's open.
         unreadTracker.setActiveConversation(conversationId)
         viewModelScope.launch {
-            repository.header(conversationId).onSuccess { _header.value = it }
+            repository.header(conversationId).onSuccess { _baseHeader.value = it }
         }
     }
 

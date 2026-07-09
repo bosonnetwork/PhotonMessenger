@@ -144,11 +144,17 @@ class ChatRepositoryImpl @Inject constructor(
                 isChannel = true,
             )
         } else {
-            val convoTitle = client.getConversation(id).awaitResult().orElse(null)?.title?.takeIf { it.isNotBlank() }
-            val title = convoTitle
+            // DM: prefer a locally set name (remark) or the library profile name. The library's own
+            // conversation/contact title otherwise falls back to an abbreviated id; we surface our
+            // shortId fallback instead so the ViewModel can recognise the "no local name" case and
+            // upgrade it with a Director-resolved profile name.
+            val localName = contact?.remark?.orElse(null)?.takeIf { it.isNotBlank() }
                 ?: contact?.name?.orElse(null)?.takeIf { it.isNotBlank() }
-                ?: shortId(conversationId)
-            ChatHeader(title = title, isChannel = false, avatarUrl = avatarUrls.forUser(conversationId))
+            ChatHeader(
+                title = localName ?: shortId(conversationId),
+                isChannel = false,
+                avatarUrl = avatarUrls.forUser(conversationId),
+            )
         }
     }
 
