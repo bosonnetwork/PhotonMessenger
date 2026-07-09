@@ -81,4 +81,22 @@ class BosonClientFactory(
             .servicePeerId(Id.of(coords.ionStorePeerId))
             .serviceUrl(coords.ionStoreUrl)
             .build()
+
+    companion object {
+        /**
+         * Creates the shared [Vertx] runtime with Netty's async DNS resolver disabled, so hostname
+         * resolution goes through the JDK and therefore Android's system resolver (getaddrinfo).
+         *
+         * Netty's own resolver is unusable on Android: it cannot discover the device's nameservers
+         * (reading the net.dns* properties is blocked since Android 8), silently falls back to
+         * Google Public DNS (which many networks block), and its strict DNS codec rejects the
+         * lenient/malformed responses some home routers produce - every mqtts/ion-store connect
+         * then fails with "Exceeded max queries per resolve" while OkHttp resolves the same name
+         * fine. Always create client Vertx instances through this helper.
+         */
+        fun newVertx(): Vertx {
+            System.setProperty("vertx.disableDnsResolver", "true")
+            return Vertx.vertx()
+        }
+    }
 }

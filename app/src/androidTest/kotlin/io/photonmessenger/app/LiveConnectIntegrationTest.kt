@@ -134,7 +134,7 @@ class LiveConnectIntegrationTest {
     @Test
     fun registersAndConnectsToLiveNode() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val vertx = Vertx.vertx()
+        val vertx = BosonClientFactory.newVertx()
         var peer: Peer? = null
         try {
             peer = registerAndConnect(context, vertx, "Solo")
@@ -148,7 +148,7 @@ class LiveConnectIntegrationTest {
     @Test
     fun friendRequestAndDirectMessageRoundTrip() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val vertx = Vertx.vertx()
+        val vertx = BosonClientFactory.newVertx()
         val peers = mutableListOf<Peer>()
         try {
             val alice = registerAndConnect(context, vertx, "Alice").also { peers += it }

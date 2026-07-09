@@ -27,6 +27,7 @@ import android.util.Base64
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.photonmessenger.app.LiveTestHarness.Companion.TIMEOUT
+import io.photonmessenger.core.boson.BosonClientFactory
 import io.photonmessenger.core.boson.BosonCrypto
 import io.photonmessenger.core.boson.DevicePairing
 import io.photonmessenger.core.boson.PairingPayload
@@ -95,7 +96,7 @@ class LivePhase3IntegrationTest {
      */
     @Test
     fun multiDevicePairingRoundTrip() {
-        val vertx = Vertx.vertx()
+        val vertx = BosonClientFactory.newVertx()
         val harness = LiveTestHarness(context, vertx)
         try {
             val alice = harness.register("AlicePair")
@@ -176,7 +177,7 @@ class LivePhase3IntegrationTest {
      */
     @Test
     fun mediaUploadDownloadRoundTrip() {
-        val vertx = Vertx.vertx()
+        val vertx = BosonClientFactory.newVertx()
         val harness = LiveTestHarness(context, vertx)
         try {
             val alice = harness.register("AliceMedia")
@@ -211,7 +212,7 @@ class LivePhase3IntegrationTest {
      */
     @Test
     fun channelCreateAndJoinAcrossTwoClients() {
-        val vertx = Vertx.vertx()
+        val vertx = BosonClientFactory.newVertx()
         val harness = LiveTestHarness(context, vertx)
         try {
             val alice = harness.register("AliceChannel")
@@ -273,7 +274,7 @@ class LivePhase3IntegrationTest {
      */
     @Test
     fun historyPersistsAcrossRestart() {
-        val vertx = Vertx.vertx()
+        val vertx = BosonClientFactory.newVertx()
         val harness = LiveTestHarness(context, vertx)
         val dbName = "it-persist-${System.nanoTime()}.db"
         val bobDataDir = File(context.cacheDir, "it-persist-dd-${System.nanoTime()}")

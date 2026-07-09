@@ -46,7 +46,7 @@ import javax.inject.Singleton
 object BosonModule {
     @Provides
     @Singleton
-    fun provideVertx(): Vertx = Vertx.vertx()
+    fun provideVertx(): Vertx = BosonClientFactory.newVertx()
 
     @Provides
     @Singleton
