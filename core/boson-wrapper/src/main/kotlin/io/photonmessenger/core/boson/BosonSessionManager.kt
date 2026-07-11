@@ -60,6 +60,16 @@ class BosonSessionManager(
     var messagingClient: MessagingClient? = null
         private set
 
+    private val _client = MutableStateFlow<MessagingClient?>(null)
+
+    /**
+     * The live messaging client, published once it has started and nulled on disconnect. Repository
+     * flows key off this so they (re)subscribe when the session comes up: a cold start composes the
+     * UI before `connect()` finishes, and a flow that only read [messagingClient] once at collection
+     * time would sit on an empty list until the user navigated away and back.
+     */
+    val client: StateFlow<MessagingClient?> = _client.asStateFlow()
+
     @Volatile
     var ionStore: IonStore? = null
         private set
@@ -137,6 +147,9 @@ class BosonSessionManager(
         shouldStayConnected = true
         _connectionState.value = ConnectionState.CONNECTING
         client.start().awaitResult()
+        // Publish only after start() so subscribers never query a half-initialised client. The
+        // reconnect loop restarts this same instance, so the value doesn't churn on a flaky link.
+        _client.value = client
     }
 
     suspend fun disconnect() {
@@ -146,6 +159,7 @@ class BosonSessionManager(
             runCatching { client.stop().awaitResult() }
         }
         messagingClient = null
+        _client.value = null
         ionStore = null
         _connectionState.value = ConnectionState.DISCONNECTED
     }

@@ -36,10 +36,13 @@ import io.bosonnetwork.photonmessaging.FriendRequestListener
 import io.bosonnetwork.photonmessaging.MessagingClient
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
 /**
@@ -86,14 +89,16 @@ class ContactRepositoryImpl @Inject constructor(
     private fun Contact.toUiWithAvatar(): UiContact =
         toUi(avatarUrl = if (type == Contact.Type.CHANNEL) null else avatarUrls.forUser(id.toString()))
 
-    override fun contacts(): Flow<List<UiContact>> = callbackFlow {
-        val client = session.messagingClient
-        if (client == null) {
-            trySend(emptyList())
-            awaitClose { }
-            return@callbackFlow
+    // Keyed off the session's client flow (not a one-shot read) so a cold start - which composes the
+    // UI before connect() completes - fills the list as soon as the session comes up, instead of
+    // parking on an empty list until the tab is re-subscribed.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override fun contacts(): Flow<List<UiContact>> =
+        session.client.flatMapLatest { client ->
+            if (client == null) flowOf(emptyList()) else contactsOf(client)
         }
 
+    private fun contactsOf(client: MessagingClient): Flow<List<UiContact>> = callbackFlow {
         suspend fun refresh() {
             trySend(client.getContacts().awaitResult().map { it.toUiWithAvatar() })
         }
@@ -133,14 +138,13 @@ class ContactRepositoryImpl @Inject constructor(
         awaitClose { client.removeContactListener(listener); refreshJob.cancel() }
     }
 
-    override fun friendRequests(): Flow<List<UiFriendRequest>> = callbackFlow {
-        val client = session.messagingClient
-        if (client == null) {
-            trySend(emptyList())
-            awaitClose { }
-            return@callbackFlow
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override fun friendRequests(): Flow<List<UiFriendRequest>> =
+        session.client.flatMapLatest { client ->
+            if (client == null) flowOf(emptyList()) else friendRequestsOf(client)
         }
 
+    private fun friendRequestsOf(client: MessagingClient): Flow<List<UiFriendRequest>> = callbackFlow {
         suspend fun refresh() {
             val pending = client.getFriendRequests().awaitResult()
                 .filter { !it.isAccepted }

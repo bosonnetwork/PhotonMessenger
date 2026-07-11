@@ -49,9 +49,12 @@ import io.bosonnetwork.photonmessaging.MessagingClient
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
 /**
@@ -100,14 +103,16 @@ class ChatRepositoryImpl @Inject constructor(
 
     private fun myId(): Id? = session.messagingClient?.userId
 
-    override fun conversations(): Flow<List<UiConversation>> = callbackFlow {
-        val client = session.messagingClient
-        if (client == null) {
-            trySend(emptyList())
-            awaitClose { }
-            return@callbackFlow
+    // Keyed off the session's client flow (not a one-shot read) so a cold start - which composes the
+    // UI before connect() completes - fills the list as soon as the session comes up, instead of
+    // parking on an empty list until the screen is re-subscribed.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override fun conversations(): Flow<List<UiConversation>> =
+        session.client.flatMapLatest { client ->
+            if (client == null) flowOf(emptyList()) else conversationsOf(client)
         }
 
+    private fun conversationsOf(client: MessagingClient): Flow<List<UiConversation>> = callbackFlow {
         suspend fun refresh() {
             val list = client.getConversations().awaitResult()
                 .map { convo ->
@@ -158,13 +163,13 @@ class ChatRepositoryImpl @Inject constructor(
         }
     }
 
-    override fun messages(conversationId: String): Flow<List<UiMessage>> = callbackFlow {
-        val client = session.messagingClient
-        if (client == null) {
-            trySend(emptyList())
-            awaitClose { }
-            return@callbackFlow
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override fun messages(conversationId: String): Flow<List<UiMessage>> =
+        session.client.flatMapLatest { client ->
+            if (client == null) flowOf(emptyList()) else messagesOf(client, conversationId)
         }
+
+    private fun messagesOf(client: MessagingClient, conversationId: String): Flow<List<UiMessage>> = callbackFlow {
         val convo = parseId(conversationId)
         val me = myId()
 

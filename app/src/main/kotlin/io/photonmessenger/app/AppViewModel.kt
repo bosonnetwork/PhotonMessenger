@@ -28,21 +28,16 @@ import io.photonmessenger.app.navigation.Routes
 import io.photonmessenger.app.navigation.TopLevelDestination
 import io.photonmessenger.app.session.SessionController
 import io.photonmessenger.app.session.SessionStatus
-import io.photonmessenger.core.boson.BosonSessionManager
 import io.photonmessenger.core.boson.UnreadTracker
-import io.photonmessenger.core.model.ConnectionState
 import io.photonmessenger.feature.contacts.data.ContactRepository
 import io.photonmessenger.feature.onboarding.data.AuthRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
@@ -58,7 +53,6 @@ data class TabBadges(val chats: Int = 0, val contacts: Int = 0)
 @HiltViewModel
 class AppViewModel @Inject constructor(
     private val sessionController: SessionController,
-    private val sessionManager: BosonSessionManager,
     private val unreadTracker: UnreadTracker,
     private val contactRepository: ContactRepository,
     authRepository: AuthRepository,
@@ -74,16 +68,9 @@ class AppViewModel @Inject constructor(
 
     val sessionStatus: StateFlow<SessionStatus> = sessionController.status
 
-    // Re-subscribe to the pending-request stream whenever the transport connects: the flow reads the
-    // client once at collection time, so it must be (re)started after the client exists.
-    @OptIn(ExperimentalCoroutinesApi::class)
+    // friendRequests() re-subscribes itself when the session's client appears, so this just follows it.
     private val pendingRequestCount: Flow<Int> =
-        sessionManager.connectionState.flatMapLatest { state ->
-            if (state == ConnectionState.CONNECTED || state == ConnectionState.READY)
-                contactRepository.friendRequests().map { it.size }.catch { emit(0) }
-            else
-                flowOf(0)
-        }
+        contactRepository.friendRequests().map { it.size }.catch { emit(0) }
 
     /** Bottom-tab badges: total unread messages (Chats) and pending friend requests (Contacts). */
     val badges: StateFlow<TabBadges> =
