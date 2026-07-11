@@ -172,10 +172,25 @@ fun ChatScreen(
             info.totalItemsCount == 0 || last >= info.totalItemsCount - 3
         }
     }
+    // Initial open: jump straight to the newest message once the list first has content. This must
+    // NOT depend on nearBottom - that reads listState.layoutInfo, which races the first layout: on
+    // some devices the list has already laid out at the top by the time the follow effect below runs,
+    // leaving nearBottom false and the screen stuck at the oldest message. A dedicated one-shot jump
+    // (no animation) positions us reliably regardless of frame timing.
+    var initialized by remember { mutableStateOf(false) }
+    LaunchedEffect(state.messages.isEmpty()) {
+        if (!initialized && state.messages.isNotEmpty()) {
+            listState.scrollToItem(state.messages.lastIndex)
+            initialized = true
+        }
+    }
+
+    // After the initial positioning, follow new messages only when the reader is already at the
+    // bottom (or the new message is our own send); never yank someone who scrolled up into history.
     val newestId = state.messages.lastOrNull()?.id
     val newestFromMe = state.messages.lastOrNull()?.fromMe == true
     LaunchedEffect(newestId) {
-        if (newestId != null && (nearBottom || newestFromMe) && state.messages.isNotEmpty()) {
+        if (initialized && newestId != null && (nearBottom || newestFromMe) && state.messages.isNotEmpty()) {
             listState.animateScrollToItem(state.messages.lastIndex)
         }
     }
