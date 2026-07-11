@@ -22,6 +22,7 @@
 
 package io.photonmessenger.feature.chat.model
 
+import io.photonmessenger.core.model.shortId
 import io.bosonnetwork.Id
 import io.bosonnetwork.photonmessaging.ContentDisposition
 import io.bosonnetwork.photonmessaging.ContentType
@@ -58,10 +59,6 @@ data class ChatHeader(
     /** Fetchable avatar URL for the DM peer, null for channels or when unresolvable. */
     val avatarUrl: String? = null,
 )
-
-/** Compact form of a long Boson id for display (e.g. an untitled conversation). */
-fun shortId(id: String): String =
-    if (id.length <= 14) id else id.take(8) + "..." + id.takeLast(4)
 
 /** Delivery state of an outgoing bubble. Incoming and confirmed messages are always [SENT]. */
 enum class MessageStatus { SENDING, SENT, FAILED }

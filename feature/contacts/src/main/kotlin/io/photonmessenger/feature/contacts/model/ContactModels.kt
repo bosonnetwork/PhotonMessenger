@@ -22,6 +22,7 @@
 
 package io.photonmessenger.feature.contacts.model
 
+import io.photonmessenger.core.model.shortId
 import io.bosonnetwork.photonmessaging.Contact
 import io.bosonnetwork.photonmessaging.FriendRequest
 
@@ -67,6 +68,3 @@ fun Contact.toUi(avatarUrl: String? = null): UiContact {
 
 fun FriendRequest.toUi(): UiFriendRequest =
     UiFriendRequest(userId = getUserId().toString(), hello = getHello() ?: "")
-
-private fun shortId(id: String): String =
-    if (id.length <= 12) id else id.take(6) + "..." + id.takeLast(4)

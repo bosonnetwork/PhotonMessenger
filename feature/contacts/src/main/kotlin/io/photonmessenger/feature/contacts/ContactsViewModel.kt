@@ -25,6 +25,7 @@ package io.photonmessenger.feature.contacts
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.photonmessenger.core.model.ProfileResolver
+import io.photonmessenger.core.model.displayProfile
 import io.photonmessenger.feature.contacts.data.ChannelRepository
 import io.photonmessenger.feature.contacts.data.ContactRepository
 import io.photonmessenger.feature.contacts.model.UiContact
@@ -77,38 +78,49 @@ class ContactsViewModel @Inject constructor(
         )
 
     /**
-     * Contacts with display names upgraded from a short id to the Director-resolved profile name.
-     * Name preference: remark > library profile name > resolved name > short id. Only friends whose
-     * name still falls back to a short id (no remark, no library name) are resolved; channels and
-     * already-named contacts pass through untouched.
+     * Contacts enriched from the shared identity policy ([displayProfile]): every friend gets a
+     * Director-resolved avatar, and one whose name is only a short id (no remark, no library name) is
+     * upgraded to the resolved name. Local names always win, so a named contact keeps its title; the
+     * short-id fallback is only replaced by a genuine resolved name. Channels pass through untouched.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun resolvedContacts(): Flow<List<UiContact>> =
         repository.contacts().flatMapLatest { contacts ->
-            val needsName = contacts.filter { !it.isChannel && it.remark == null && it.name == null }
-            if (needsName.isEmpty()) return@flatMapLatest flowOf(contacts)
-            val nameFlows = needsName.map { contact ->
-                profileResolver.profile(contact.id).map { contact.id to it?.name }
+            val friends = contacts.filter { !it.isChannel }
+            if (friends.isEmpty()) return@flatMapLatest flowOf(contacts)
+            val displayFlows = friends.map { contact ->
+                profileResolver.displayProfile(contact.id, localName = contact.remark ?: contact.name)
+                    .map { contact.id to it }
             }
-            combine(nameFlows) { pairs ->
-                val names = pairs.toMap()
+            combine(displayFlows) { pairs ->
+                val byId = pairs.toMap()
                 contacts.map { contact ->
-                    names[contact.id]?.let { contact.copy(displayName = it) } ?: contact
+                    val display = byId[contact.id] ?: return@map contact
+                    contact.copy(
+                        // Keep the contact's own (local) name unless the Director resolved a real one.
+                        displayName = if (display.nameIsFallback) contact.displayName else display.displayName,
+                        avatarUrl = display.avatarUrl,
+                    )
                 }
             }
         }
 
     /**
-     * Friend requests enriched with the sender's Director-resolved public profile: raw ids become
-     * names + avatars once resolution completes (requests carry nothing but the id + hello).
+     * Friend requests enriched with the sender's Director-resolved public profile ([displayProfile]):
+     * raw ids become names + avatars once resolution completes (requests carry nothing but the id +
+     * hello). [UiFriendRequest.name] stays null until a real name resolves, so the row shows the short
+     * id in the meantime.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun resolvedFriendRequests(): Flow<List<UiFriendRequest>> =
         repository.friendRequests().flatMapLatest { requests ->
             if (requests.isEmpty()) return@flatMapLatest flowOf(emptyList())
             val enriched = requests.map { request ->
-                profileResolver.profile(request.userId).map { profile ->
-                    request.copy(name = profile?.name, avatarUrl = profile?.avatarUrl)
+                profileResolver.displayProfile(request.userId).map { display ->
+                    request.copy(
+                        name = display.displayName.takeUnless { display.nameIsFallback },
+                        avatarUrl = display.avatarUrl,
+                    )
                 }
             }
             combine(enriched) { it.toList() }

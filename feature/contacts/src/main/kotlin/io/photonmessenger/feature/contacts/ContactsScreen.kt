@@ -92,6 +92,7 @@ import io.photonmessenger.core.designsystem.component.ErrorState
 import io.photonmessenger.core.designsystem.component.LoadingState
 import io.photonmessenger.core.designsystem.component.PhotonAvatar
 import io.photonmessenger.core.designsystem.component.ResponsiveContent
+import io.photonmessenger.core.model.shortId
 import io.photonmessenger.core.qr.QrScanner
 import io.photonmessenger.feature.contacts.model.UiContact
 import io.photonmessenger.feature.contacts.model.UiFriendRequest
@@ -427,7 +428,7 @@ private fun RequestList(
                 },
                 headlineContent = {
                     Text(
-                        request.name ?: shortRequestId(request.userId),
+                        request.name ?: shortId(request.userId),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -436,7 +437,7 @@ private fun RequestList(
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (request.name != null) {
                             Text(
-                                shortRequestId(request.userId),
+                                shortId(request.userId),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -458,9 +459,6 @@ private fun RequestList(
         }
     }
 }
-
-private fun shortRequestId(id: String): String =
-    if (id.length <= 16) id else id.take(10) + "..." + id.takeLast(4)
 
 @Composable
 private fun AddFriendDialog(

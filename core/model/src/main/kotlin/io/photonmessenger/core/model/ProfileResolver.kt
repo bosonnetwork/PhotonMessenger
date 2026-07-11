@@ -37,11 +37,13 @@ data class ResolvedProfile(
 
 /**
  * Resolves public profiles (display name, bio, avatar) for ANY user id - local or remote - against
- * the configured Director, with in-memory caching. Lives in core:model (like [AvatarUrls]) so
- * feature modules can enrich raw user ids without a core:network dependency.
+ * the configured Director, with in-memory caching. Lives in core:model so feature modules can enrich
+ * raw user ids without a core:network dependency.
  *
- * Resolved names are a FALLBACK: contact remarks and library-provided profile names always win
- * (preference order: remark > library profile name > resolved name > short id).
+ * This is the raw fetch primitive; the app-wide name/avatar policy is layered on top in
+ * [DisplayProfile] ([displayProfile] / [cachedDisplay] / [toDisplay]). Resolved names are a FALLBACK:
+ * contact remarks and library-provided profile names always win (preference order: remark > library
+ * profile name > resolved name > short id).
  */
 interface ProfileResolver {
     /**

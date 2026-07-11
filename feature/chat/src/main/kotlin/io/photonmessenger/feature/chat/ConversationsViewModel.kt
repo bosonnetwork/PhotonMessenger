@@ -26,6 +26,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.photonmessenger.core.boson.UnreadTracker
 import io.photonmessenger.core.model.ProfileResolver
+import io.photonmessenger.core.model.displayProfile
 import io.photonmessenger.feature.chat.data.ChatRepository
 import io.photonmessenger.feature.chat.model.UiConversation
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -80,22 +81,29 @@ class ConversationsViewModel @Inject constructor(
     }
 
     /**
-     * Conversations with DM titles upgraded from an abbreviated id to the sender's Director-resolved
-     * name. Name preference (matching contacts): remark > library profile name > resolved name >
-     * short id. A conversation title already carrying a remark or library name is left untouched; only
-     * DMs that fall back to a short id are resolved, and only those still awaiting a name refetch.
+     * DM conversations enriched from the shared identity policy ([displayProfile]): each gets a
+     * Director-resolved avatar, and a title still on the abbreviated-id fallback (no remark, no library
+     * name) is upgraded to the resolved name. A title already carrying a remark or library name is left
+     * untouched. Channels pass through unchanged.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun namedConversations(): Flow<List<UiConversation>> =
         repository.conversations().flatMapLatest { conversations ->
-            val needsName = conversations.filter { !it.isChannel && it.peerName == null && it.remark == null }
-            if (needsName.isEmpty()) return@flatMapLatest flowOf(conversations)
-            val nameFlows = needsName.map { convo ->
-                profileResolver.profile(convo.id).map { convo.id to it?.name }
+            val dms = conversations.filter { !it.isChannel }
+            if (dms.isEmpty()) return@flatMapLatest flowOf(conversations)
+            val displayFlows = dms.map { convo ->
+                profileResolver.displayProfile(convo.id, localName = convo.remark ?: convo.peerName)
+                    .map { convo.id to it }
             }
-            combine(nameFlows) { pairs ->
-                val names = pairs.toMap()
-                conversations.map { convo -> names[convo.id]?.let { convo.copy(title = it) } ?: convo }
+            combine(displayFlows) { pairs ->
+                val byId = pairs.toMap()
+                conversations.map { convo ->
+                    val display = byId[convo.id] ?: return@map convo
+                    convo.copy(
+                        title = if (display.nameIsFallback) convo.title else display.displayName,
+                        avatarUrl = display.avatarUrl,
+                    )
+                }
             }
         }
 

@@ -24,6 +24,8 @@ package io.photonmessenger.app.notification
 
 import io.photonmessenger.app.AppForegroundState
 import io.photonmessenger.core.model.ProfileResolver
+import io.photonmessenger.core.model.cachedDisplay
+import io.photonmessenger.core.model.displayProfile
 import io.bosonnetwork.Id
 import io.bosonnetwork.photonmessaging.FriendRequestListener
 import io.bosonnetwork.photonmessaging.MessagingClient
@@ -32,7 +34,6 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -81,22 +82,21 @@ class FriendRequestNotifier @Inject constructor(
         val key = userId.toString()
         val body = hello.takeIf { it.isNotBlank() }?.let { "\"$it\"" } ?: "Wants to connect with you"
 
-        // The sender is not a contact yet, so resolve a Director profile name off the event loop;
-        // bounded so an unknown/slow profile still notifies (falling back to a short id).
+        // The sender is not a contact yet (no local name), so resolve a Director profile name via the
+        // shared identity policy off the event loop; bounded so an unknown/slow profile still notifies
+        // (falling back to the short id).
         scope.launch {
             val id = userId.toString()
-            val name = profileResolver.cached(id)?.name
-                ?: withTimeoutOrNull(PROFILE_RESOLVE_TIMEOUT_MS) {
-                    profileResolver.profile(id).filterNotNull().first().name
-                }
-            val title = name?.takeIf { it.isNotBlank() } ?: shortId(userId)
+            val cached = profileResolver.cachedDisplay(id)
+            val title = if (!cached.nameIsFallback) {
+                cached.displayName
+            } else {
+                withTimeoutOrNull(PROFILE_RESOLVE_TIMEOUT_MS) {
+                    profileResolver.displayProfile(id).first { !it.nameIsFallback }.displayName
+                } ?: cached.displayName
+            }
             gateway.showFriendRequest(key, title, body)
         }
-    }
-
-    private fun shortId(id: Id): String {
-        val s = id.toString()
-        return if (s.length <= 14) s else s.take(8) + "..." + s.takeLast(4)
     }
 
     private companion object {

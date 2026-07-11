@@ -26,6 +26,8 @@ import io.photonmessenger.app.AppForegroundState
 import io.photonmessenger.core.boson.UnreadTracker
 import io.photonmessenger.core.boson.awaitResult
 import io.photonmessenger.core.model.ProfileResolver
+import io.photonmessenger.core.model.cachedDisplay
+import io.photonmessenger.core.model.displayProfile
 import io.bosonnetwork.Id
 import io.bosonnetwork.photonmessaging.Message
 import io.bosonnetwork.photonmessaging.MessageListener
@@ -35,7 +37,6 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -96,22 +97,24 @@ class MessageNotifier @Inject constructor(
     }
 
     /**
-     * Sender display name, matching the app's convention: remark > library profile name >
-     * Director-resolved name > short id. The Director lookup is bounded so a slow or unknown profile
-     * still notifies promptly (falling back to the short id).
+     * Sender display name via the shared identity policy: remark > library profile name >
+     * Director-resolved name > short id. A local name resolves synchronously; otherwise the Director
+     * lookup is bounded so a slow or unknown profile still notifies promptly (falling back to the
+     * short id).
      */
     private suspend fun resolveSenderName(client: MessagingClient, from: Id): String {
         val contact = runCatching { client.getContact(from).awaitResult().orElse(null) }.getOrNull()
-        val local = contact?.remark?.orElse(null)?.takeIf { it.isNotBlank() }
+        val localName = contact?.remark?.orElse(null)?.takeIf { it.isNotBlank() }
             ?: contact?.name?.orElse(null)?.takeIf { it.isNotBlank() }
-        if (local != null) return local
 
         val id = from.toString()
-        val resolved = profileResolver.cached(id)?.name
-            ?: withTimeoutOrNull(PROFILE_RESOLVE_TIMEOUT_MS) {
-                profileResolver.profile(id).filterNotNull().first().name
-            }
-        return resolved?.takeIf { it.isNotBlank() } ?: shortId(from)
+        val cached = profileResolver.cachedDisplay(id, localName)
+        if (!cached.nameIsFallback) return cached.displayName
+
+        // No local or cached name yet: wait briefly for a resolved (non-fallback) name, else short id.
+        return withTimeoutOrNull(PROFILE_RESOLVE_TIMEOUT_MS) {
+            profileResolver.displayProfile(id, localName).first { !it.nameIsFallback }.displayName
+        } ?: cached.displayName
     }
 
     private fun previewOf(message: Message): String {
@@ -119,11 +122,6 @@ class MessageNotifier @Inject constructor(
         val hasAttachment = content.contentDisposition.orElse(null) != null
         if (hasAttachment) return "Sent an attachment"
         return runCatching { content.asText() }.getOrNull()?.takeIf { it.isNotBlank() } ?: "New message"
-    }
-
-    private fun shortId(id: Id): String {
-        val s = id.toString()
-        return if (s.length <= 14) s else s.take(8) + "..." + s.takeLast(4)
     }
 
     private companion object {

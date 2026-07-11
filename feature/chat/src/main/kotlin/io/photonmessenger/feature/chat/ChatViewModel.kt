@@ -27,13 +27,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.photonmessenger.core.boson.UnreadTracker
 import io.photonmessenger.core.model.ProfileResolver
+import io.photonmessenger.core.model.shortId
+import io.photonmessenger.core.model.toDisplay
 import io.photonmessenger.feature.chat.data.ChatRepository
 import io.photonmessenger.feature.chat.model.AttachmentSource
 import io.photonmessenger.feature.chat.model.ChatHeader
 import io.photonmessenger.feature.chat.model.MessageStatus
 import io.photonmessenger.feature.chat.model.UiAttachment
 import io.photonmessenger.feature.chat.model.UiMessage
-import io.photonmessenger.feature.chat.model.shortId
 import io.bosonnetwork.photonmessaging.exceptions.MessageTimeoutException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.File
@@ -86,20 +87,25 @@ class ChatViewModel @Inject constructor(
     private val _baseHeader = MutableStateFlow(ChatHeader(title = shortId(conversationId)))
 
     /**
-     * Chat header, upgraded live: when the base header (from the library) is a DM that fell back to
-     * the abbreviated id (no local remark/name), fill in a Director-resolved profile name once it
-     * arrives - mirroring how the conversation list titles resolve (issue: opened chat kept showing
-     * the short id even though the list showed the name).
+     * Chat header, upgraded live via the shared identity policy: a DM header gets the peer's
+     * Director-resolved avatar, and a title still on the abbreviated-id fallback (no local remark/name)
+     * is upgraded to the resolved name once it arrives - mirroring how the conversation list resolves
+     * (issue: opened chat kept showing the short id even though the list showed the name). Channels are
+     * left untouched.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     val header: StateFlow<ChatHeader> = _baseHeader
         .flatMapLatest { base ->
-            if (!base.isChannel && base.title == shortId(conversationId))
-                profileResolver.profile(conversationId).map { resolved ->
-                    resolved?.name?.takeIf { it.isNotBlank() }?.let { base.copy(title = it) } ?: base
-                }
-            else
-                flowOf(base)
+            if (base.isChannel) return@flatMapLatest flowOf(base)
+            // A base title equal to the short id means the library had no local name for this DM.
+            val localName = base.title.takeUnless { it == shortId(conversationId) }
+            profileResolver.profile(conversationId).map { resolved ->
+                val display = resolved.toDisplay(conversationId, localName = localName)
+                base.copy(
+                    title = if (display.nameIsFallback) base.title else display.displayName,
+                    avatarUrl = display.avatarUrl,
+                )
+            }
         }
         .stateIn(
             scope = viewModelScope,

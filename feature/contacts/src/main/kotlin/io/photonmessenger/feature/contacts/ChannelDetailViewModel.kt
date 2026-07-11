@@ -26,6 +26,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.photonmessenger.core.model.ProfileResolver
+import io.photonmessenger.core.model.toDisplay
 import io.photonmessenger.feature.contacts.data.ChannelRepository
 import io.photonmessenger.feature.contacts.model.UiChannelDetail
 import io.photonmessenger.feature.contacts.model.UiChannelMember
@@ -87,10 +88,15 @@ class ChannelDetailViewModel @Inject constructor(
         val enriched = members.mapIndexed { index, member ->
             if (index >= MAX_RESOLVED_MEMBERS) return@mapIndexed flowOf(member)
             profileResolver.profile(member.id).map { profile ->
-                val resolvedName = profile?.name?.takeIf { member.nameIsFallback && it.isNotBlank() }
+                // One policy for name + avatar: a member's local name wins; only a member still on
+                // the short-id fallback is upgraded to the Director-resolved name.
+                val display = profile.toDisplay(
+                    member.id,
+                    localName = member.displayName.takeUnless { member.nameIsFallback },
+                )
                 member.copy(
-                    avatarUrl = profile?.avatarUrl,
-                    displayName = resolvedName ?: member.displayName,
+                    avatarUrl = display.avatarUrl,
+                    displayName = if (display.nameIsFallback) member.displayName else display.displayName,
                 )
             }
         }

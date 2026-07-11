@@ -25,8 +25,9 @@ package io.photonmessenger.feature.chat.data
 import io.photonmessenger.core.boson.BosonSessionManager
 import io.photonmessenger.core.boson.awaitResult
 import io.photonmessenger.core.model.AppError
-import io.photonmessenger.core.model.AvatarUrls
 import io.photonmessenger.core.model.ProfileResolver
+import io.photonmessenger.core.model.cachedDisplay
+import io.photonmessenger.core.model.shortId
 import io.photonmessenger.feature.chat.model.AttachmentCarrier
 import io.photonmessenger.feature.chat.model.AttachmentSource
 import io.photonmessenger.feature.chat.model.ChatHeader
@@ -36,7 +37,6 @@ import io.photonmessenger.feature.chat.model.UiMessage
 import io.photonmessenger.feature.chat.model.chooseCarrier
 import io.photonmessenger.feature.chat.model.kindOf
 import io.photonmessenger.feature.chat.model.remoteAttachmentToMap
-import io.photonmessenger.feature.chat.model.shortId
 import io.photonmessenger.feature.chat.model.toUi
 import io.bosonnetwork.Id
 import io.bosonnetwork.ionstore.IonStore
@@ -91,7 +91,6 @@ class ChatRepositoryImpl @Inject constructor(
     private val session: BosonSessionManager,
     private val mediaPreparer: MediaPreparer,
     private val cache: AttachmentCache,
-    private val avatarUrls: AvatarUrls,
     private val profileResolver: ProfileResolver,
 ) : ChatRepository {
 
@@ -114,11 +113,10 @@ class ChatRepositoryImpl @Inject constructor(
 
     private fun conversationsOf(client: MessagingClient): Flow<List<UiConversation>> = callbackFlow {
         suspend fun refresh() {
+            // Avatar (and any DM name upgrade) is enriched in the ViewModel via the shared
+            // ProfileResolver; the repository emits the library-provided title only.
             val list = client.getConversations().awaitResult()
-                .map { convo ->
-                    val avatar = if (convo.isChannel) null else avatarUrls.forUser(convo.id.toString())
-                    convo.toUi(avatarUrl = avatar)
-                }
+                .map { convo -> convo.toUi() }
                 .sortedByDescending { it.updatedAt }
             trySend(list)
         }
@@ -152,13 +150,12 @@ class ChatRepositoryImpl @Inject constructor(
             // DM: prefer a locally set name (remark) or the library profile name. The library's own
             // conversation/contact title otherwise falls back to an abbreviated id; we surface our
             // shortId fallback instead so the ViewModel can recognise the "no local name" case and
-            // upgrade it with a Director-resolved profile name.
+            // upgrade it (name + avatar) with the Director-resolved profile.
             val localName = contact?.remark?.orElse(null)?.takeIf { it.isNotBlank() }
                 ?: contact?.name?.orElse(null)?.takeIf { it.isNotBlank() }
             ChatHeader(
                 title = localName ?: shortId(conversationId),
                 isChannel = false,
-                avatarUrl = avatarUrls.forUser(conversationId),
             )
         }
     }
@@ -315,10 +312,10 @@ class ChatRepositoryImpl @Inject constructor(
                 if (name != null) names[member.id] = name
                 else profileResolver.prefetch(member.id.toString())
             }
-            val resolver: (Id) -> String? = { from ->
-                names[from]
-                    ?: profileResolver.cached(from.toString())?.name
-                    ?: shortId(from.toString())
+            // One policy for the sender name: the member's local name wins, else the cached
+            // Director-resolved name, else the short id (all handled by cachedDisplay).
+            val resolver: (Id) -> String = { from ->
+                profileResolver.cachedDisplay(from.toString(), localName = names[from]).displayName
             }
             resolver
         }.getOrNull()

@@ -25,7 +25,6 @@ package io.photonmessenger.feature.contacts.data
 import io.photonmessenger.core.boson.BosonSessionManager
 import io.photonmessenger.core.boson.awaitResult
 import io.photonmessenger.core.model.AppError
-import io.photonmessenger.core.model.AvatarUrls
 import io.photonmessenger.feature.contacts.model.UiContact
 import io.photonmessenger.feature.contacts.model.UiFriendRequest
 import io.photonmessenger.feature.contacts.model.toUi
@@ -73,7 +72,6 @@ interface ContactRepository {
 @Singleton
 class ContactRepositoryImpl @Inject constructor(
     private val session: BosonSessionManager,
-    private val avatarUrls: AvatarUrls,
 ) : ContactRepository {
 
     private fun client(): MessagingClient =
@@ -86,8 +84,9 @@ class ContactRepositoryImpl @Inject constructor(
     private val contactsRefresh = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private val requestsRefresh = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
-    private fun Contact.toUiWithAvatar(): UiContact =
-        toUi(avatarUrl = if (type == Contact.Type.CHANNEL) null else avatarUrls.forUser(id.toString()))
+    // Avatars (and any Director-resolved name upgrade) are enriched in the ViewModel via the shared
+    // ProfileResolver, so the repository emits contacts (via Contact.toUi()) with only their
+    // locally-known name and no avatar.
 
     // Keyed off the session's client flow (not a one-shot read) so a cold start - which composes the
     // UI before connect() completes - fills the list as soon as the session comes up, instead of
@@ -100,7 +99,7 @@ class ContactRepositoryImpl @Inject constructor(
 
     private fun contactsOf(client: MessagingClient): Flow<List<UiContact>> = callbackFlow {
         suspend fun refresh() {
-            trySend(client.getContacts().awaitResult().map { it.toUiWithAvatar() })
+            trySend(client.getContacts().awaitResult().map { it.toUi() })
         }
         refresh()
 
@@ -121,7 +120,7 @@ class ContactRepositoryImpl @Inject constructor(
 
         suspend fun refresh() {
             val contact = client.getContact(id).awaitResult().orElse(null)
-            trySend(contact?.toUiWithAvatar())
+            trySend(contact?.toUi())
         }
         refresh()
 

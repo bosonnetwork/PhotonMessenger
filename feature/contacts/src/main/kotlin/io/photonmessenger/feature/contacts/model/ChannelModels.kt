@@ -22,6 +22,7 @@
 
 package io.photonmessenger.feature.contacts.model
 
+import io.photonmessenger.core.model.shortId
 import io.bosonnetwork.Id
 import io.bosonnetwork.photonmessaging.Channel
 
@@ -91,9 +92,6 @@ fun UiChannelRole.toBoson(): Channel.Role = when (this) {
     UiChannelRole.MEMBER -> Channel.Role.MEMBER
     UiChannelRole.BANNED -> Channel.Role.BANNED
 }
-
-private fun shortId(id: String): String =
-    if (id.length <= 12) id else id.take(6) + "..." + id.takeLast(4)
 
 /** Maps a channel (with its members already loaded) to a UI model for the given current user. */
 fun Channel.toUi(myId: Id): UiChannel {

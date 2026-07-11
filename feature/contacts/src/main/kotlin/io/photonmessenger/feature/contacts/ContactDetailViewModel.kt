@@ -26,6 +26,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.photonmessenger.core.model.ProfileResolver
+import io.photonmessenger.core.model.toDisplay
 import io.photonmessenger.feature.contacts.data.ContactRepository
 import io.photonmessenger.feature.contacts.model.UiContact
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -59,7 +60,14 @@ class ContactDetailViewModel @Inject constructor(
 
     val uiState: StateFlow<ContactDetailUiState> =
         combine(repository.contact(contactId), profileResolver.profile(contactId)) { contact, profile ->
-            ContactDetailUiState(loading = false, contact = contact, bio = profile?.bio)
+            // One policy for name + avatar + bio: keep the local name unless the Director resolved a
+            // real one; always adopt the resolved avatar and bio.
+            val display = profile.toDisplay(contactId, localName = contact?.remark ?: contact?.name)
+            val enriched = contact?.copy(
+                displayName = if (display.nameIsFallback) contact.displayName else display.displayName,
+                avatarUrl = display.avatarUrl,
+            )
+            ContactDetailUiState(loading = false, contact = enriched, bio = display.bio)
         }
             .catch { e -> emit(ContactDetailUiState(loading = false, error = e.message)) }
             .stateIn(
