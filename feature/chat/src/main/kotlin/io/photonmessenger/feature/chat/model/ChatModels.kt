@@ -80,15 +80,20 @@ data class UiMessage(
 fun Conversation.toUi(avatarUrl: String? = null): UiConversation {
     val channel = isChannel()
     val contact = getContact()
+    // The library no longer derives a display title/name (that policy moved to the app). Build the
+    // base title from what the library still owns - the local remark and, for channels, the channel
+    // name - falling back to a short id. DMs are then upgraded to a resolved name in the ViewModel.
+    val remark = contact.getRemark().orElse(null)?.takeIf { it.isNotBlank() }
+    val name = contact.getName().orElse(null)?.takeIf { it.isNotBlank() }
     return UiConversation(
         id = getId().toString(),
-        title = getTitle(),
+        title = remark ?: name ?: shortId(getId().toString()),
         preview = getPreview().orElse(""),
         isChannel = channel,
         updatedAt = getUpdatedAt(),
         avatarUrl = avatarUrl,
-        peerName = if (channel) null else contact.getName().orElse(null)?.takeIf { it.isNotBlank() },
-        remark = if (channel) null else contact.getRemark().orElse(null)?.takeIf { it.isNotBlank() },
+        peerName = if (channel) null else name,
+        remark = if (channel) null else remark,
     )
 }
 

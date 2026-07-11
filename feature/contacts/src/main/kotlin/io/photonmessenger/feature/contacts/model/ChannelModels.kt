@@ -115,12 +115,14 @@ fun Channel.toUi(myId: Id): UiChannel {
 
 fun Channel.Member.toUi(myId: Id): UiChannelMember {
     val idText = id.toString()
-    val name = displayName?.takeIf { it.isNotBlank() }
+    // A channel member carries no local name (the library identifies members by id only); start from
+    // the short-id fallback and let the ChannelDetailViewModel resolve the real name via the profile
+    // resolver.
     return UiChannelMember(
         id = idText,
-        displayName = name ?: shortId(idText),
+        displayName = shortId(idText),
         role = role.toUi(),
         isMe = id == myId,
-        nameIsFallback = name == null,
+        nameIsFallback = true,
     )
 }

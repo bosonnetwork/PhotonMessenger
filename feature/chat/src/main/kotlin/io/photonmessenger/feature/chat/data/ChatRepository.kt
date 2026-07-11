@@ -306,16 +306,12 @@ class ChatRepositoryImpl @Inject constructor(
             val contact = client.getContact(convo).awaitResult().orElse(null) as? Channel
                 ?: return@runCatching null
             contact.loadMembers().awaitResult()
-            val names = mutableMapOf<Id, String>()
-            contact.members.forEach { member ->
-                val name = member.displayName?.takeIf { it.isNotBlank() }
-                if (name != null) names[member.id] = name
-                else profileResolver.prefetch(member.id.toString())
-            }
-            // One policy for the sender name: the member's local name wins, else the cached
-            // Director-resolved name, else the short id (all handled by cachedDisplay).
+            // Members carry no local name (the library identifies them by id only), so prefetch every
+            // member's profile; cachedDisplay then yields the Director-resolved name, or a short id
+            // until it arrives.
+            contact.members.forEach { member -> profileResolver.prefetch(member.id.toString()) }
             val resolver: (Id) -> String = { from ->
-                profileResolver.cachedDisplay(from.toString(), localName = names[from]).displayName
+                profileResolver.cachedDisplay(from.toString()).displayName
             }
             resolver
         }.getOrNull()

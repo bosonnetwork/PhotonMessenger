@@ -218,7 +218,6 @@ class RoomMessagingStore(
         type = c.type(),
         sessionKey = c.sessionKey(),
         name = c.name(),
-        avatar = c.avatar(),
         remark = c.remark(),
         tags = c.tags(),
         muted = c.muted(),
@@ -282,7 +281,7 @@ class RoomMessagingStore(
             null
         }
         return StoredContact(
-            Id.of(e.id), e.type, e.sessionKey, e.name, e.avatar, e.remark, e.tags,
+            Id.of(e.id), e.type, e.sessionKey, e.name, e.remark, e.tags,
             e.muted, e.blocked, e.revision, e.createdAt, e.updatedAt, channel,
         )
     }

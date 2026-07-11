@@ -45,7 +45,6 @@ data class ContactEntity(
     val type: Int,
     val sessionKey: ByteArray?,
     val name: String?,
-    val avatar: String?,
     val remark: String?,
     val tags: String?,
     val muted: Boolean,
