@@ -30,6 +30,7 @@ dependencies {
     implementation(project(":core:designsystem"))
     implementation(project(":core:model"))
     implementation(project(":core:boson-wrapper"))
+    implementation(project(":core:qr"))
 
     implementation(libs.kotlinx.coroutines.android)
 

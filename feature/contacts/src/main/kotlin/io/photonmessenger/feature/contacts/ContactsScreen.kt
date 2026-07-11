@@ -22,6 +22,10 @@
 
 package io.photonmessenger.feature.contacts
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,14 +33,17 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.AddLink
+import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.GroupAdd
 import androidx.compose.material.icons.outlined.PersonAdd
+import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -65,10 +72,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.photonmessenger.core.designsystem.component.ConfirmDialog
@@ -78,6 +92,7 @@ import io.photonmessenger.core.designsystem.component.ErrorState
 import io.photonmessenger.core.designsystem.component.LoadingState
 import io.photonmessenger.core.designsystem.component.PhotonAvatar
 import io.photonmessenger.core.designsystem.component.ResponsiveContent
+import io.photonmessenger.core.qr.QrScanner
 import io.photonmessenger.feature.contacts.model.UiContact
 import io.photonmessenger.feature.contacts.model.UiFriendRequest
 
@@ -452,20 +467,55 @@ private fun AddFriendDialog(
     onDismiss: () -> Unit,
     onSubmit: (String, String) -> Unit,
 ) {
-    var id by remember { mutableStateOf("") }
+    // TextFieldValue (not a plain String) so that after Paste/Scan we can drop the caret at position 0.
+    // A long base58 id (~44 chars) overflows the single-line field; with the caret left at the end only
+    // the tail shows and the recognizable start is scrolled off. Caret-at-start reveals the start, and
+    // the field still scrolls horizontally to reach the rest.
+    var id by remember { mutableStateOf(TextFieldValue("")) }
     var hello by remember { mutableStateOf("") }
+    // The dialog has two modes: the entry form and an in-place QR scanner. Scanning swaps the dialog
+    // body for a camera preview and returns to the form with the id filled in, so the user can still
+    // add a hello and review before sending (no auto-send: preserves the original review-then-send UX).
+    var scanning by remember { mutableStateOf(false) }
+
+    if (scanning) {
+        AddFriendScanDialog(
+            onScanned = { scanned ->
+                id = fieldFromStart(scanned.trim())
+                scanning = false
+            },
+            onCancel = { scanning = false },
+        )
+        return
+    }
+
+    val clipboard = LocalClipboardManager.current
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add friend") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Ask your friend for their user ID (shown in their Settings).")
+                Text("Enter your friend's user ID, or paste/scan it. Their ID and QR are in their Settings.")
                 OutlinedTextField(
                     value = id,
                     onValueChange = { id = it },
                     label = { Text("Boson ID") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = {
+                        // Paste + Scan sit inside the field's trailing area (Telegram-style), keeping the
+                        // primary shortcuts on the ID line without adding a separate button row.
+                        Row {
+                            IconButton(onClick = {
+                                clipboard.getText()?.text?.let { id = fieldFromStart(it.trim()) }
+                            }) {
+                                Icon(Icons.Outlined.ContentPaste, contentDescription = "Paste user ID")
+                            }
+                            IconButton(onClick = { scanning = true }) {
+                                Icon(Icons.Outlined.QrCodeScanner, contentDescription = "Scan QR code")
+                            }
+                        }
+                    },
                 )
                 OutlinedTextField(
                     value = hello,
@@ -476,9 +526,73 @@ private fun AddFriendDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSubmit(id, hello) }, enabled = id.isNotBlank()) { Text("Send") }
+            TextButton(
+                onClick = { onSubmit(id.text, hello) },
+                enabled = id.text.isNotBlank(),
+            ) { Text("Send") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** Wraps [text] in a [TextFieldValue] with the caret at the start, so the field shows the id's head. */
+private fun fieldFromStart(text: String): TextFieldValue =
+    TextFieldValue(text = text, selection = TextRange(0))
+
+/**
+ * The QR-scan mode of [AddFriendDialog]: a camera preview that requests CAMERA inline and reports the
+ * first decoded payload. Kept as a separate dialog so the scanner tears its camera down when dismissed.
+ */
+@Composable
+private fun AddFriendScanDialog(
+    onScanned: (String) -> Unit,
+    onCancel: () -> Unit,
+) {
+    val context = LocalContext.current
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED,
+        )
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted -> hasCameraPermission = granted }
+
+    LaunchedEffect(Unit) {
+        if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Scan QR code") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (hasCameraPermission) {
+                    Text("Point the camera at your friend's user ID QR code.")
+                    QrScanner(
+                        onScanned = onScanned,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(260.dp)
+                            .clip(MaterialTheme.shapes.medium),
+                    )
+                } else {
+                    Text(
+                        "Camera permission is needed to scan a QR code.",
+                        textAlign = TextAlign.Center,
+                    )
+                    TextButton(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
+                        Text("Grant camera access")
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
     )
 }
 
