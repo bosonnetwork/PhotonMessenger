@@ -94,12 +94,18 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import kotlin.math.ceil
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
@@ -353,9 +359,14 @@ private fun MessageBubble(
     val clipboard = LocalClipboardManager.current
     val haptics = LocalHapticFeedback.current
 
+    // Cap the bubble at a share of the window (Telegram-style) rather than a fixed 300.dp, so wide
+    // screens use the available width instead of wrapping text early into a narrow column. Still
+    // wrap-to-content for short messages; the fraction only bounds the growth.
+    val maxBubbleWidth = (LocalConfiguration.current.screenWidthDp * 0.82f).dp
+
     // A sending bubble is slightly muted until it is confirmed on the live stream (M3-4).
     val bubbleModifier = Modifier
-        .widthIn(max = 300.dp)
+        .widthIn(max = maxBubbleWidth)
         .then(if (message.status == MessageStatus.SENDING) Modifier.alpha(0.75f) else Modifier)
 
     Column(modifier = modifier.fillMaxWidth(), horizontalAlignment = alignment) {
@@ -388,19 +399,11 @@ private fun MessageBubble(
                     AttachmentContent(message.attachment, download, onColor, onDownload)
                     BubbleMeta(message, onColor, Modifier.align(Alignment.End))
                 } else {
-                    Row(
-                        verticalAlignment = Alignment.Bottom,
+                    BubbleTextContent(
+                        message = message,
+                        onColor = onColor,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                    ) {
-                        Text(
-                            text = message.text,
-                            color = onColor,
-                            style = MaterialTheme.typography.bodyLarge,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        BubbleMeta(message, onColor)
-                    }
+                    )
                 }
             }
         }
@@ -413,6 +416,52 @@ private fun MessageBubble(
                     .clickable { onRetry(message) }
                     .padding(horizontal = 12.dp, vertical = 2.dp),
             )
+        }
+    }
+}
+
+/**
+ * A text message with its timestamp dropped into the bottom-right corner: the timestamp shares the
+ * last text line when there is room, and wraps onto its own trailing line when there is not. Unlike a
+ * plain [Row] of text + meta (which reserves a full-height strip beside the text for the timestamp,
+ * leaving long messages wrapping early with a blank right margin), the paragraph here lays out at the
+ * full bubble width and only the last line yields space to the timestamp.
+ */
+@Composable
+private fun BubbleTextContent(message: UiMessage, onColor: Color, modifier: Modifier = Modifier) {
+    val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
+    SubcomposeLayout(modifier) { constraints ->
+        val metaPlaceable = subcompose("meta") { BubbleMeta(message, onColor) }
+            .first().measure(Constraints())
+
+        var layout: TextLayoutResult? = null
+        val textPlaceable = subcompose("text") {
+            Text(
+                text = message.text,
+                color = onColor,
+                style = MaterialTheme.typography.bodyLarge,
+                onTextLayout = { layout = it },
+            )
+        }.first().measure(constraints)
+
+        val lastLineWidth = layout?.let { ceil(it.getLineRight(it.lineCount - 1)).toInt() }
+            ?: textPlaceable.width
+        val maxWidth = constraints.maxWidth
+        val fitsInline = lastLineWidth + gap + metaPlaceable.width <= maxWidth
+
+        if (fitsInline) {
+            val width = maxOf(textPlaceable.width, lastLineWidth + gap + metaPlaceable.width)
+                .coerceAtMost(maxWidth)
+            layout(width, textPlaceable.height) {
+                textPlaceable.placeRelative(0, 0)
+                metaPlaceable.placeRelative(width - metaPlaceable.width, textPlaceable.height - metaPlaceable.height)
+            }
+        } else {
+            val width = maxOf(textPlaceable.width, metaPlaceable.width).coerceAtMost(maxWidth)
+            layout(width, textPlaceable.height + metaPlaceable.height) {
+                textPlaceable.placeRelative(0, 0)
+                metaPlaceable.placeRelative(width - metaPlaceable.width, textPlaceable.height)
+            }
         }
     }
 }
