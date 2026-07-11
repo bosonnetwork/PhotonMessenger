@@ -35,6 +35,12 @@ interface NotificationGateway {
     /** The ongoing notification shown while the foreground messaging service holds the connection. */
     fun foregroundNotification(contentText: String): Notification
 
-    /** Posts a local notification for an incoming message (used now; the FCM path reuses this). */
-    fun showMessage(conversationKey: String, title: String, body: String)
+    /**
+     * Posts a local notification for an incoming message (used now; the FCM path reuses this).
+     * [number] is the app-icon badge count to carry (0 = no count, badge dot only).
+     */
+    fun showMessage(conversationKey: String, title: String, body: String, number: Int = 0)
+
+    /** Posts a local notification for an incoming friend request. */
+    fun showFriendRequest(requestKey: String, title: String, body: String)
 }

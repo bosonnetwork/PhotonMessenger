@@ -23,7 +23,9 @@
 package io.photonmessenger.app.notification
 
 import io.photonmessenger.app.AppForegroundState
+import io.photonmessenger.core.boson.UnreadTracker
 import io.photonmessenger.core.boson.awaitResult
+import io.photonmessenger.core.model.ProfileResolver
 import io.bosonnetwork.Id
 import io.bosonnetwork.photonmessaging.Message
 import io.bosonnetwork.photonmessaging.MessageListener
@@ -33,7 +35,10 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Bridges live incoming messages to local notifications (F3 / M6-6). [attach] is called once the
@@ -45,6 +50,8 @@ import kotlinx.coroutines.launch
 class MessageNotifier @Inject constructor(
     private val gateway: NotificationGateway,
     private val foreground: AppForegroundState,
+    private val unreadTracker: UnreadTracker,
+    private val profileResolver: ProfileResolver,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -79,11 +86,32 @@ class MessageNotifier @Inject constructor(
 
         // Resolve a friendly sender name off the event loop; fall back to a short id.
         scope.launch {
-            val name = runCatching { current.getContact(from).awaitResult().orElse(null) }
-                .getOrNull()?.name?.orElse(null)?.takeIf { it.isNotBlank() }
-                ?: shortId(from)
-            gateway.showMessage(conversationKey, name, body)
+            val name = resolveSenderName(current, from)
+            // Badge count from the synchronous unread map (not the async-derived totalUnread, whose
+            // .value can lag). Read here, inside the coroutine: by now every synchronous MessageListener
+            // - including UnreadTracker's, which counts this message - has already run.
+            val badgeCount = unreadTracker.unread.value.values.sum()
+            gateway.showMessage(conversationKey, name, body, badgeCount)
         }
+    }
+
+    /**
+     * Sender display name, matching the app's convention: remark > library profile name >
+     * Director-resolved name > short id. The Director lookup is bounded so a slow or unknown profile
+     * still notifies promptly (falling back to the short id).
+     */
+    private suspend fun resolveSenderName(client: MessagingClient, from: Id): String {
+        val contact = runCatching { client.getContact(from).awaitResult().orElse(null) }.getOrNull()
+        val local = contact?.remark?.orElse(null)?.takeIf { it.isNotBlank() }
+            ?: contact?.name?.orElse(null)?.takeIf { it.isNotBlank() }
+        if (local != null) return local
+
+        val id = from.toString()
+        val resolved = profileResolver.cached(id)?.name
+            ?: withTimeoutOrNull(PROFILE_RESOLVE_TIMEOUT_MS) {
+                profileResolver.profile(id).filterNotNull().first().name
+            }
+        return resolved?.takeIf { it.isNotBlank() } ?: shortId(from)
     }
 
     private fun previewOf(message: Message): String {
@@ -96,5 +124,9 @@ class MessageNotifier @Inject constructor(
     private fun shortId(id: Id): String {
         val s = id.toString()
         return if (s.length <= 14) s else s.take(8) + "..." + s.takeLast(4)
+    }
+
+    private companion object {
+        const val PROFILE_RESOLVE_TIMEOUT_MS = 2_000L
     }
 }

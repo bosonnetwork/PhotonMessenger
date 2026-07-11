@@ -22,11 +22,16 @@
 
 package io.photonmessenger.app
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -49,9 +54,16 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var themeStore: ThemePreferencesStore
 
+    // Registered unconditionally (contract must be created before the activity is STARTED). The result
+    // needs no handling: if the user declines, the OS simply withholds notifications - honouring their
+    // choice - and posting stays a no-op.
+    private val requestNotificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        ensureNotificationPermission()
         handleAuthDeepLink(intent)
         setContent {
             val prefs by themeStore.preferences.collectAsStateWithLifecycle(ThemePreferences())
@@ -70,6 +82,18 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleAuthDeepLink(intent)
+    }
+
+    /**
+     * Asks for POST_NOTIFICATIONS on Android 13+ (the permission does not exist below that, where the
+     * manifest grant suffices). Without it the OS drops every notification - message, friend request,
+     * and the foreground-service banner alike - so this gates all notification delivery.
+     */
+    private fun ensureNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!granted) requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     /** Captures photonmessenger://auth?token=... (or ?error=...) from the OAuth Custom Tab (M1-8). */

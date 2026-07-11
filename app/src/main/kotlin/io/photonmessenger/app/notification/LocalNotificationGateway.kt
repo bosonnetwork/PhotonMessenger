@@ -59,14 +59,30 @@ class LocalNotificationGateway(
             NotificationManager.IMPORTANCE_LOW,
         ).apply { description = "Keeps PhotonMessenger connected for new messages" }
 
+        // IMPORTANCE_HIGH gives the system defaults the request asks for - default sound, heads-up
+        // (floating) banners, and lock-screen display - all still overridable per-channel by the user.
+        // setShowBadge(true) opts the app icon into the launcher badge.
         val messages = NotificationChannel(
             CHANNEL_MESSAGES,
             "Messages",
             NotificationManager.IMPORTANCE_HIGH,
-        ).apply { description = "New message notifications" }
+        ).apply {
+            description = "New message notifications"
+            setShowBadge(true)
+        }
+
+        val requests = NotificationChannel(
+            CHANNEL_REQUESTS,
+            "Friend requests",
+            NotificationManager.IMPORTANCE_HIGH,
+        ).apply {
+            description = "New friend request notifications"
+            setShowBadge(true)
+        }
 
         manager.createNotificationChannel(service)
         manager.createNotificationChannel(messages)
+        manager.createNotificationChannel(requests)
     }
 
     override fun foregroundNotification(contentText: String): Notification =
@@ -79,7 +95,7 @@ class LocalNotificationGateway(
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
-    override fun showMessage(conversationKey: String, title: String, body: String) {
+    override fun showMessage(conversationKey: String, title: String, body: String, number: Int) {
         val prefs = settings.current
         if (!prefs.enabled) return
 
@@ -94,13 +110,36 @@ class LocalNotificationGateway(
             .setAutoCancel(true)
             .setContentIntent(openAppIntent())
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .apply { if (number > 0) setNumber(number) }
             .build()
         manager.notify(conversationKey.hashCode(), notification)
+    }
+
+    override fun showFriendRequest(requestKey: String, title: String, body: String) {
+        val prefs = settings.current
+        if (!prefs.enabled) return
+
+        // Mirror the message path's preview handling: with previews off, hide the sender behind a
+        // generic prompt. Lock-screen visibility of the shown content stays a system-config concern.
+        val shownTitle = if (prefs.showPreview) title else "PhotonMessenger"
+        val shownBody = if (prefs.showPreview) body else "You have a new friend request"
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_REQUESTS)
+            .setSmallIcon(R.drawable.ic_launcher)
+            .setContentTitle(shownTitle)
+            .setContentText(shownBody)
+            .setAutoCancel(true)
+            .setContentIntent(openAppIntent())
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+        // Namespaced key so a request notification never collides with a message notification id.
+        manager.notify(("request:$requestKey").hashCode(), notification)
     }
 
     companion object {
         const val CHANNEL_SERVICE = "connection"
         const val CHANNEL_MESSAGES = "messages"
+        const val CHANNEL_REQUESTS = "friend_requests"
         const val FOREGROUND_NOTIFICATION_ID = 1001
     }
 }
