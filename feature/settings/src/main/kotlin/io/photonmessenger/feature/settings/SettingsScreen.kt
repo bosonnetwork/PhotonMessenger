@@ -88,6 +88,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -282,11 +283,10 @@ private fun UserIdRow(
         modifier = Modifier.clickable(role = Role.Button, onClick = onShowQr),
         headlineContent = { Text("User ID") },
         supportingContent = {
-            Text(
-                userId,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // A full base58 id (~44 chars) wraps onto multiple lines even at a small size, so show an
+            // abbreviated first-8...last-8 form on a single line, in the same style as the other
+            // setting descriptions. The full id stays available via copy and the QR dialog.
+            Text(abbreviateId(userId))
         },
         trailingContent = {
             Row {
@@ -304,11 +304,17 @@ private fun UserIdRow(
     )
 }
 
+/**
+ * Abbreviates a long id to "first8...last8" so it fits on one line; short ids are returned as-is.
+ */
+private fun abbreviateId(id: String): String =
+    if (id.length > 20) "${id.take(8)}...${id.takeLast(8)}" else id
+
 @Composable
 private fun UserIdQrDialog(userId: String, name: String, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("My user ID") },
+        title = { Text("My ID") },
         text = {
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -327,7 +333,14 @@ private fun UserIdQrDialog(userId: String, name: String, onDismiss: () -> Unit) 
                     )
                 }
                 SelectionContainer {
-                    Text(userId, style = MaterialTheme.typography.bodySmall)
+                    // fillMaxWidth so that when the id wraps, every line stays centered within the
+                    // dialog width rather than the wrapped lines collapsing to left-aligned.
+                    Text(
+                        userId,
+                        modifier = Modifier.fillMaxWidth(),
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                    )
                 }
             }
         },

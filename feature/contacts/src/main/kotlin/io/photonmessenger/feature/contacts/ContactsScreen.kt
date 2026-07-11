@@ -81,7 +81,7 @@ import io.photonmessenger.core.designsystem.component.ResponsiveContent
 import io.photonmessenger.feature.contacts.model.UiContact
 import io.photonmessenger.feature.contacts.model.UiFriendRequest
 
-private enum class ContactsTab(val label: String) { FRIENDS("Friends"), REQUESTS("Requests"), CHANNELS("Channels") }
+private enum class ContactsTab(val label: String) { FRIENDS("Friends"), CHANNELS("Channels"), REQUESTS("Requests") }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
