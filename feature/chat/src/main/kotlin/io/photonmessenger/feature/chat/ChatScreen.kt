@@ -32,6 +32,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -52,6 +57,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -77,6 +83,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.FolderZip
+import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
@@ -122,8 +129,10 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
@@ -1109,15 +1118,33 @@ private fun MessageInput(
     val isRecording = recording !is RecordingState.Idle
     val locked = recording is RecordingState.Ready ||
         (recording is RecordingState.Active && recording.locked)
+    // How far the finger has dragged left toward cancel (px, <= 0); drives the "slide to cancel" hint.
+    var slideOffset by remember { mutableStateOf(0f) }
+    // Measured height of the (empty) text field, reused for the recording bar so the composer keeps the
+    // same height across modes. Measured (not hardcoded) so it tracks the user's font scale, not just
+    // screen density. Seeded with the Material default until the first measure.
+    val density = LocalDensity.current
+    var inputHeight by remember { mutableStateOf(56.dp) }
+    // Live mic level (0..1) for the halo behind the mic while held.
+    val micLevel = (recording as? RecordingState.Active)
+        ?.takeIf { !it.locked }
+        ?.let { (it.amplitude / 8000f).coerceIn(0f, 1f) } ?: 0f
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.Bottom,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             if (isRecording) {
-                RecordingBar(recording, locked, modifier = Modifier.weight(1f))
+                // Match the measured text-field height so the composer keeps the same height - and the
+                // centered mic keeps the same position - when switching to recording mode.
+                RecordingBar(
+                    recording,
+                    locked,
+                    slideOffset,
+                    modifier = Modifier.weight(1f).heightIn(min = inputHeight),
+                )
             } else {
                 IconButton(onClick = onAttach) {
                     Icon(
@@ -1129,7 +1156,10 @@ private fun MessageInput(
                 TextField(
                     value = value,
                     onValueChange = onValueChange,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        // Remember the single-line field height (blank draft) to size the recording bar.
+                        .onSizeChanged { if (value.isBlank()) inputHeight = with(density) { it.height.toDp() } },
                     placeholder = { Text("Message") },
                     maxLines = 5,
                     shape = RoundedCornerShape(24.dp),
@@ -1166,8 +1196,10 @@ private fun MessageInput(
                 voiceSupported ->
                     MicButton(
                         hasPermission = hasAudioPermission,
+                        level = micLevel,
                         onRequestPermission = onRequestAudioPermission,
                         onStart = onStartRecord,
+                        onSlide = { slideOffset = it },
                         onLock = onLockRecord,
                         onCancel = onCancelRecord,
                         onSend = onSendRecord,
@@ -1191,8 +1223,10 @@ private fun MessageInput(
 @Composable
 private fun MicButton(
     hasPermission: Boolean,
+    level: Float,
     onRequestPermission: () -> Unit,
     onStart: () -> Unit,
+    onSlide: (Float) -> Unit,
     onLock: () -> Unit,
     onCancel: () -> Unit,
     onSend: () -> Unit,
@@ -1201,77 +1235,105 @@ private fun MicButton(
     val hasPerm by rememberUpdatedState(hasPermission)
     val requestPerm by rememberUpdatedState(onRequestPermission)
     val start by rememberUpdatedState(onStart)
+    val slide by rememberUpdatedState(onSlide)
     val lock by rememberUpdatedState(onLock)
     val cancel by rememberUpdatedState(onCancel)
     val send by rememberUpdatedState(onSend)
     val tooShort by rememberUpdatedState(onTooShort)
     val haptics = LocalHapticFeedback.current
 
-    Box(
-        modifier = Modifier
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primary)
-            .pointerInput(Unit) {
-                val cancelPx = RECORD_CANCEL_SLIDE.toPx()
-                val lockPx = RECORD_LOCK_SLIDE.toPx()
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    if (!hasPerm) {
-                        requestPerm()
-                        // Drain the gesture so releasing after the prompt starts no phantom recording.
-                        do {
-                            val e = awaitPointerEvent()
-                        } while (e.changes.any { it.pressed })
-                        return@awaitEachGesture
+    Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+        // A soft halo that grows with the mic level while recording; kept subtle and scaled via a
+        // graphics layer so it never affects layout.
+        if (level > 0f) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .graphicsLayer {
+                        val s = 1f + level * 0.6f
+                        scaleX = s
+                        scaleY = s
+                        alpha = 0.25f
                     }
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    val startedAt = System.currentTimeMillis()
-                    start()
-                    var isLocked = false
-                    var isCancelled = false
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == down.id } ?: event.changes.first()
-                        if (!isLocked && !isCancelled) {
-                            val dx = change.position.x - down.position.x
-                            val dy = change.position.y - down.position.y
-                            if (dx <= -cancelPx && dx <= dy) {
-                                isCancelled = true
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary)
+                .pointerInput(Unit) {
+                    val cancelPx = RECORD_CANCEL_SLIDE.toPx()
+                    val lockPx = RECORD_LOCK_SLIDE.toPx()
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        if (!hasPerm) {
+                            requestPerm()
+                            // Drain the gesture so releasing after the prompt starts no phantom recording.
+                            do {
+                                val e = awaitPointerEvent()
+                            } while (e.changes.any { it.pressed })
+                            return@awaitEachGesture
+                        }
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        val startedAt = System.currentTimeMillis()
+                        start()
+                        slide(0f)
+                        var isLocked = false
+                        var isCancelled = false
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: event.changes.first()
+                            if (!isLocked && !isCancelled) {
+                                val dx = change.position.x - down.position.x
+                                val dy = change.position.y - down.position.y
+                                // Report leftward drag so the "slide to cancel" hint follows the finger.
+                                slide(dx.coerceAtMost(0f))
+                                if (dx <= -cancelPx && dx <= dy) {
+                                    isCancelled = true
+                                    cancel()
+                                } else if (dy <= -lockPx) {
+                                    isLocked = true
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    lock()
+                                }
+                            }
+                            if (!change.pressed) break
+                        }
+                        slide(0f)
+                        if (!isCancelled && !isLocked) {
+                            if (System.currentTimeMillis() - startedAt < MIN_RECORD_MS) {
                                 cancel()
-                            } else if (dy <= -lockPx) {
-                                isLocked = true
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                lock()
+                                tooShort()
+                            } else {
+                                send()
                             }
                         }
-                        if (!change.pressed) break
                     }
-                    if (!isCancelled && !isLocked) {
-                        if (System.currentTimeMillis() - startedAt < MIN_RECORD_MS) {
-                            cancel()
-                            tooShort()
-                        } else {
-                            send()
-                        }
-                    }
-                }
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            Icons.Filled.Mic,
-            contentDescription = "Record voice message",
-            tint = MaterialTheme.colorScheme.onPrimary,
-        )
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Mic,
+                contentDescription = "Record voice message",
+                tint = MaterialTheme.colorScheme.onPrimary,
+            )
+        }
     }
 }
 
-/** The in-composer recording indicator: a live mic-level red dot, the elapsed time, and a hint. */
+/**
+ * The in-composer recording indicator: a blinking red dot, a running m:ss,cc timer, and a
+ * "Slide to cancel" hint that follows the finger left and fades toward the cancel threshold. When
+ * locked (hands-free), the dot stays lit and the hint is replaced by a lock glyph.
+ */
 @Composable
 private fun RecordingBar(
     recording: RecordingState,
     locked: Boolean,
+    slideOffset: Float,
     modifier: Modifier = Modifier,
 ) {
     val elapsedMs = when (recording) {
@@ -1279,25 +1341,32 @@ private fun RecordingBar(
         is RecordingState.Ready -> recording.durationMs
         RecordingState.Idle -> 0L
     }
-    val amplitude = (recording as? RecordingState.Active)?.amplitude ?: 0
-    val level = (amplitude / 8000f).coerceIn(0f, 1f)
-    val dotSize = (8 + (8 * level)).dp
+    val blink = rememberInfiniteTransition(label = "rec-blink")
+    val dotAlpha by blink.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.2f,
+        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+        label = "rec-dot-alpha",
+    )
+    val cancelPx = with(LocalDensity.current) { RECORD_CANCEL_SLIDE.toPx() }
+    val clamped = slideOffset.coerceIn(-cancelPx, 0f)
+    val cancelFraction = if (cancelPx > 0f) (-clamped / cancelPx).coerceIn(0f, 1f) else 0f
+
     Row(
-        modifier = modifier.padding(start = 6.dp, end = 4.dp),
+        modifier = modifier.padding(start = 8.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(modifier = Modifier.size(16.dp), contentAlignment = Alignment.Center) {
-            Box(
-                modifier = Modifier
-                    .size(dotSize)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.error),
-            )
-        }
-        Spacer(Modifier.width(10.dp))
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .graphicsLayer { alpha = if (locked) 1f else dotAlpha }
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.error),
+        )
+        Spacer(Modifier.width(12.dp))
         Text(
-            formatDuration(elapsedMs.toInt()),
-            style = MaterialTheme.typography.bodyMedium,
+            formatDurationLong(elapsedMs),
+            style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface,
         )
         Spacer(Modifier.weight(1f))
@@ -1309,13 +1378,34 @@ private fun RecordingBar(
                 modifier = Modifier.size(18.dp),
             )
         } else {
-            Text(
-                "< slide to cancel",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(
+                modifier = Modifier.graphicsLayer {
+                    translationX = clamped
+                    alpha = 1f - cancelFraction
+                },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.ChevronLeft,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    "Slide to cancel",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
+        Spacer(Modifier.weight(1f))
     }
+}
+
+/** Formats a recording length as m:ss,cc (centiseconds), e.g. "0:02,40". */
+private fun formatDurationLong(ms: Long): String {
+    val total = ms.coerceAtLeast(0)
+    return "%d:%02d,%02d".format(total / 60000, (total / 1000) % 60, (total % 1000) / 10)
 }

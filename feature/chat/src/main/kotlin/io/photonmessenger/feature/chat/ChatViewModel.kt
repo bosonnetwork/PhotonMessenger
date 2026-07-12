@@ -66,8 +66,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-/** Cadence of the recording-bar timer + mic-level updates. */
-private const val RECORDING_TICK_MS = 100L
+/** Cadence of the recording-bar timer + mic-level updates. Fast enough for a smooth centisecond readout. */
+private const val RECORDING_TICK_MS = 50L
 
 data class ChatUiState(
     val loading: Boolean = true,
