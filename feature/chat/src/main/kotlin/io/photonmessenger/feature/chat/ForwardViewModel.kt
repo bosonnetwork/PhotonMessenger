@@ -22,12 +22,13 @@
 
 package io.photonmessenger.feature.chat
 
-import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.photonmessenger.core.model.ProfileResolver
 import io.photonmessenger.core.model.displayProfile
 import io.photonmessenger.feature.chat.data.ChatRepository
+import io.photonmessenger.feature.chat.data.ForwardPayload
+import io.photonmessenger.feature.chat.data.ForwardPayloadStore
 import io.photonmessenger.feature.chat.model.UiForwardTarget
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -59,20 +60,27 @@ data class ForwardUiState(
 }
 
 /**
- * Picks a destination for a forwarded message (screen: Forward to...). The message [text] rides in on
- * the nav route; tapping a target sends it there and reports the target id back so the caller can open
- * that chat. Targets are loaded once and their DM titles/avatars are enriched live via the shared
+ * Picks a destination for a forwarded message (screen: Forward to...). What to forward - text or an
+ * existing attachment - is handed over via the [ForwardPayloadStore] (an attachment cannot ride a
+ * navigation string). Tapping a target sends it there and reports the target id back so the caller can
+ * open that chat. Targets are loaded once and their DM titles/avatars are enriched live via the shared
  * profile resolver, exactly like the conversation list.
  */
 @HiltViewModel
 class ForwardViewModel @Inject constructor(
     private val repository: ChatRepository,
     private val profileResolver: ProfileResolver,
-    savedStateHandle: SavedStateHandle,
+    private val forwardPayloadStore: ForwardPayloadStore,
 ) : ViewModel() {
 
-    /** The message text to forward (already URL-decoded by the navigation arg). */
-    val text: String = savedStateHandle.get<String>("text").orEmpty()
+    private val payload: ForwardPayload? = forwardPayloadStore.peek()
+
+    /** A short description of what is being forwarded, for the screen header. */
+    val forwardingLabel: String = when (val p = payload) {
+        is ForwardPayload.Attachment -> p.attachment.name.ifBlank { "attachment" }
+        is ForwardPayload.Text -> p.text
+        null -> ""
+    }
 
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
@@ -143,13 +151,21 @@ class ForwardViewModel @Inject constructor(
                 initialValue = ForwardUiState(loading = true),
             )
 
-    /** Sends the forwarded text to [targetId]; on success reports it so the caller can open the chat. */
+    /**
+     * Sends the forwarded payload to [targetId]; on success clears the handoff and reports the target
+     * so the caller can open that chat. A text payload is re-sent as text; an attachment is forwarded
+     * via the repository (remote attachments re-reference the existing IonStore object - no re-upload).
+     */
     fun forward(targetId: String) {
-        val body = text
-        if (body.isBlank()) return
+        val p = payload ?: return
+        if (p is ForwardPayload.Text && p.text.isBlank()) return
         viewModelScope.launch {
-            repository.sendText(targetId, body)
-                .onSuccess { _forwarded.tryEmit(targetId) }
+            val result = when (p) {
+                is ForwardPayload.Text -> repository.sendText(targetId, p.text)
+                is ForwardPayload.Attachment -> repository.forwardAttachment(targetId, p.attachment)
+            }
+            result
+                .onSuccess { forwardPayloadStore.clear(); _forwarded.tryEmit(targetId) }
                 .onFailure { e -> _messages.tryEmit("Couldn't forward: ${e.message ?: "unknown error"}") }
         }
     }

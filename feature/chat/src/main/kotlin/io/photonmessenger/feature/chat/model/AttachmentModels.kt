@@ -52,6 +52,14 @@ sealed interface AttachmentSource {
 
     /** Bytes stored in IonStore; [uri] is `ions://<peerId>/<refId>`, [contentId] is the SHA-256. */
     data class Remote(val uri: String, val contentId: String) : AttachmentSource
+
+    /**
+     * A locally-picked content uri, shown optimistically while the attachment is still being sent
+     * (before it is confirmed on the live stream). [uri] is an Android `content://` uri that Coil can
+     * render directly. A Local attachment is not yet persisted or referenceable, so it is neither
+     * forwardable nor saveable until it settles into an [Inline] or [Remote] confirmed message.
+     */
+    data class Local(val uri: String) : AttachmentSource
 }
 
 /** UI projection of a single attachment on a message bubble. */

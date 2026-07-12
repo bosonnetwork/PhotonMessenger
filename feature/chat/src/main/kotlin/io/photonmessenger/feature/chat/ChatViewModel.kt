@@ -30,6 +30,9 @@ import io.photonmessenger.core.model.ProfileResolver
 import io.photonmessenger.core.model.shortId
 import io.photonmessenger.core.model.toDisplay
 import io.photonmessenger.feature.chat.data.ChatRepository
+import io.photonmessenger.feature.chat.data.ForwardPayload
+import io.photonmessenger.feature.chat.data.ForwardPayloadStore
+import io.photonmessenger.feature.chat.data.MediaSaver
 import io.photonmessenger.feature.chat.model.AttachmentSource
 import io.photonmessenger.feature.chat.model.ChatHeader
 import io.photonmessenger.feature.chat.model.MessageStatus
@@ -38,6 +41,7 @@ import io.photonmessenger.feature.chat.model.UiMessage
 import io.bosonnetwork.photonmessaging.exceptions.MessageTimeoutException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.File
+import java.io.InputStream
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -72,11 +76,16 @@ sealed interface AttachmentDownload {
     data class Failed(val message: String) : AttachmentDownload
 }
 
+/** A resolved local file ready to hand to an external viewer (Open), paired with its mime. */
+data class AttachmentOpen(val file: File, val mime: String)
+
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val repository: ChatRepository,
     private val unreadTracker: UnreadTracker,
     private val profileResolver: ProfileResolver,
+    private val mediaSaver: MediaSaver,
+    private val forwardPayloadStore: ForwardPayloadStore,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -164,6 +173,14 @@ class ChatViewModel @Inject constructor(
     private val _sendFailures = MutableSharedFlow<SendFailure>(extraBufferCapacity = 1)
     val sendFailures = _sendFailures.asSharedFlow()
 
+    /** One-shot files to hand to an external viewer (Open action). */
+    private val _openFile = MutableSharedFlow<AttachmentOpen>(extraBufferCapacity = 1)
+    val openFile = _openFile.asSharedFlow()
+
+    /** One-shot files to hand to a share sheet (Share action). */
+    private val _shareFile = MutableSharedFlow<AttachmentOpen>(extraBufferCapacity = 1)
+    val shareFile = _shareFile.asSharedFlow()
+
     /** Loads an older page when the user scrolls to the top (M3-5). Idempotent + stops at the start. */
     fun loadOlder() {
         if (_loadingOlder.value || reachedStart) return
@@ -245,11 +262,103 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Sends a picked attachment with the same optimistic treatment as text: an immediate outgoing
+     * bubble (rendering the local content uri) shown as SENDING until the confirmed message lands on
+     * the live stream. On failure the bubble settles to FAILED and keeps the picked uri so a tap can
+     * retry the upload.
+     */
     fun sendAttachment(uri: String) {
+        val pendingId = "pending-${System.nanoTime()}"
+        pending.update {
+            it + UiMessage(
+                id = pendingId,
+                text = "",
+                fromMe = true,
+                createdAt = System.currentTimeMillis(),
+                attachment = repository.optimisticAttachment(uri),
+                status = MessageStatus.SENDING,
+            )
+        }
+        launchSendAttachment(pendingId, uri)
+    }
+
+    /** Re-uploads a failed optimistic attachment bubble in place. */
+    fun retryAttachment(message: UiMessage) {
+        val source = message.attachment?.source as? AttachmentSource.Local ?: return
+        pending.update { list ->
+            list.map { if (it.id == message.id) it.copy(status = MessageStatus.SENDING) else it }
+        }
+        launchSendAttachment(message.id, source.uri)
+    }
+
+    private fun launchSendAttachment(pendingId: String, uri: String) {
         viewModelScope.launch {
-            repository.sendAttachment(conversationId, uri).onFailure { e ->
-                _messages.tryEmit("Couldn't send attachment: ${e.message ?: "unknown error"}")
+            repository.sendAttachment(conversationId, uri)
+                // The confirmed message arrives on the live stream, so drop the optimistic bubble.
+                .onSuccess { pending.update { list -> list.filterNot { it.id == pendingId } } }
+                .onFailure { e ->
+                    pending.update { list ->
+                        list.map { if (it.id == pendingId) it.copy(status = MessageStatus.FAILED) else it }
+                    }
+                    _messages.tryEmit("Couldn't send attachment: ${e.message ?: "unknown error"}")
+                }
+        }
+    }
+
+    /** Stashes what to forward (attachment or text) for the forward picker to pick up. */
+    fun prepareForward(message: UiMessage) {
+        val attachment = message.attachment
+        forwardPayloadStore.set(
+            if (attachment != null && attachment.source !is AttachmentSource.Local)
+                ForwardPayload.Attachment(attachment)
+            else ForwardPayload.Text(message.text),
+        )
+    }
+
+    /**
+     * Saves an attachment to public storage (Pictures / Downloads). Remote attachments are downloaded
+     * first (reusing the content-addressed cache); Local (still-sending) attachments are ignored.
+     */
+    fun saveAttachment(message: UiMessage) {
+        val attachment = message.attachment ?: return
+        viewModelScope.launch {
+            val open: () -> InputStream = when (val src = attachment.source) {
+                is AttachmentSource.Inline -> ({ src.bytes.inputStream() })
+                is AttachmentSource.Remote -> {
+                    val file = repository.downloadAttachment(attachment).getOrElse { e ->
+                        _messages.tryEmit("Couldn't save: ${e.message ?: "download failed"}")
+                        return@launch
+                    }
+                    ({ file.inputStream() })
+                }
+                is AttachmentSource.Local -> return@launch
             }
+            mediaSaver.save(attachment.name, attachment.mime, attachment.kind, open)
+                .onSuccess { label -> _messages.tryEmit("Saved to $label") }
+                .onFailure { e -> _messages.tryEmit("Couldn't save: ${e.message ?: "unknown error"}") }
+        }
+    }
+
+    /** Downloads (if needed) then emits the local file so the screen can open it in an external app. */
+    fun openAttachment(message: UiMessage) {
+        val attachment = message.attachment ?: return
+        if (attachment.source is AttachmentSource.Local) return
+        viewModelScope.launch {
+            repository.localFile(attachment)
+                .onSuccess { file -> _openFile.tryEmit(AttachmentOpen(file, attachment.mime)) }
+                .onFailure { e -> _messages.tryEmit("Couldn't open: ${e.message ?: "download failed"}") }
+        }
+    }
+
+    /** Resolves the attachment to a shareable local file, then emits it for the screen to share out. */
+    fun shareAttachment(message: UiMessage) {
+        val attachment = message.attachment ?: return
+        if (attachment.source is AttachmentSource.Local) return
+        viewModelScope.launch {
+            repository.localFile(attachment)
+                .onSuccess { file -> _shareFile.tryEmit(AttachmentOpen(file, attachment.mime)) }
+                .onFailure { e -> _messages.tryEmit("Couldn't share: ${e.message ?: "unknown error"}") }
         }
     }
 

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Cached attachment downloads live under cacheDir/attachments (see AttachmentCache). -->
+    <cache-path name="attachments" path="attachments/" />
+</paths>

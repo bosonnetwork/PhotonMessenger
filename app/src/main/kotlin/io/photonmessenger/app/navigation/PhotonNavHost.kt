@@ -22,7 +22,6 @@
 
 package io.photonmessenger.app.navigation
 
-import android.net.Uri
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -218,20 +217,15 @@ fun PhotonNavHost(
                     onBack = { navController.popBackStack() },
                     onOpenChannelDetail = { id -> navController.navigate("channel/$id") },
                     onOpenContactDetail = { id -> navController.navigate("contact/$id") },
-                    onForwardMessage = { text ->
-                        navController.navigate("${Routes.FORWARD}?text=${Uri.encode(text)}")
-                    },
+                    onForwardMessage = { navController.navigate(Routes.FORWARD) },
                 )
             }
-            composable(
-                route = "${Routes.FORWARD}?text={text}",
-                arguments = listOf(navArgument("text") { type = NavType.StringType; defaultValue = "" }),
-            ) {
+            composable(Routes.FORWARD) {
                 ForwardScreen(
                     onBack = { navController.popBackStack() },
                     onForwarded = { targetId ->
                         navController.navigate("chat/$targetId") {
-                            popUpTo("${Routes.FORWARD}?text={text}") { inclusive = true }
+                            popUpTo(Routes.FORWARD) { inclusive = true }
                             launchSingleTop = true
                         }
                     },

@@ -22,8 +22,15 @@
 
 package io.photonmessenger.feature.chat
 
+import android.Manifest
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -56,13 +63,21 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Forward
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -101,10 +116,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
@@ -136,7 +155,7 @@ fun ChatScreen(
     modifier: Modifier = Modifier,
     onOpenChannelDetail: (String) -> Unit = {},
     onOpenContactDetail: (String) -> Unit = {},
-    onForwardMessage: (String) -> Unit = {},
+    onForwardMessage: () -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -145,15 +164,72 @@ fun ChatScreen(
     val loadingOlder by viewModel.loadingOlder.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
+    val context = LocalContext.current
+    val uiScope = rememberCoroutineScope()
     var draft by remember { mutableStateOf("") }
     // Message pending a delete confirmation (long-press -> Delete). Confirming removes it locally.
     var deleteTarget by remember { mutableStateOf<UiMessage?>(null) }
+    // Image bubble opened full-screen (tap on an image).
+    var viewerTarget by remember { mutableStateOf<UiMessage?>(null) }
+    // Message whose Save-As is waiting on a legacy storage-permission grant (API 26-28).
+    var pendingSave by remember { mutableStateOf<UiMessage?>(null) }
 
     val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) viewModel.sendAttachment(uri.toString())
     }
 
+    // Legacy Save-As (API < 29) needs WRITE_EXTERNAL_STORAGE; 29+ uses MediaStore with no permission.
+    val storagePermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val target = pendingSave
+        pendingSave = null
+        if (granted && target != null) viewModel.saveAttachment(target)
+        else if (!granted) uiScope.launch { snackbar.showSnackbar("Storage permission is needed to save") }
+    }
+
+    fun requestSave(message: UiMessage) {
+        val granted = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            viewModel.saveAttachment(message)
+        } else {
+            pendingSave = message
+            storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+    }
+
     LaunchedEffect(Unit) { viewModel.errors.collect { snackbar.showSnackbar(it) } }
+
+    // Open a resolved attachment file in an external app.
+    LaunchedEffect(Unit) {
+        viewModel.openFile.collect { (file, mime) ->
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mime.ifBlank { "*/*" })
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            try {
+                context.startActivity(intent)
+            } catch (e: ActivityNotFoundException) {
+                snackbar.showSnackbar("No app can open this file")
+            }
+        }
+    }
+
+    // Hand a resolved attachment file to the system share sheet.
+    LaunchedEffect(Unit) {
+        viewModel.shareFile.collect { (file, mime) ->
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = mime.ifBlank { "*/*" }
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            runCatching { context.startActivity(Intent.createChooser(intent, null)) }
+        }
+    }
 
     // Failed text sends offer an inline retry (M3-8).
     LaunchedEffect(Unit) {
@@ -307,9 +383,17 @@ fun ChatScreen(
                                         !sameDay(prev.createdAt, msg.createdAt)),
                                 download = download,
                                 onDownload = { viewModel.download(it) },
-                                onRetry = { viewModel.retrySend(SendFailure("", it.text, it.id)) },
-                                onForward = { onForwardMessage(it.text) },
+                                onRetry = { retryMessage ->
+                                    if (retryMessage.attachment?.source is AttachmentSource.Local)
+                                        viewModel.retryAttachment(retryMessage)
+                                    else
+                                        viewModel.retrySend(SendFailure("", retryMessage.text, retryMessage.id))
+                                },
+                                onForward = { viewModel.prepareForward(it); onForwardMessage() },
                                 onDelete = { deleteTarget = it },
+                                onSaveAs = { requestSave(it) },
+                                onOpen = { viewModel.openAttachment(it) },
+                                onImageClick = { viewerTarget = it },
                             )
                         }
                     }
@@ -347,6 +431,36 @@ fun ChatScreen(
             onDismiss = { deleteTarget = null },
         )
     }
+
+    viewerTarget?.let { target ->
+        val att = target.attachment
+        if (att == null || att.kind != AttachmentKind.IMAGE) {
+            viewerTarget = null
+        } else {
+            // Resolve the image: inline bytes / local uri render immediately; a remote image is fetched
+            // (auto-download) and shows a spinner until it lands in the downloads map.
+            val model: Any? = when (val src = att.source) {
+                is AttachmentSource.Inline -> src.bytes
+                is AttachmentSource.Local -> src.uri
+                is AttachmentSource.Remote -> {
+                    LaunchedEffect(src.contentId) { viewModel.download(att) }
+                    (downloads[src.contentId] as? AttachmentDownload.Ready)?.file
+                }
+            }
+            ImageViewerDialog(
+                attachment = att,
+                model = model,
+                onDismiss = { viewerTarget = null },
+                onSaveAs = { requestSave(target) },
+                onShare = { viewModel.shareAttachment(target) },
+                onForward = {
+                    viewModel.prepareForward(target)
+                    viewerTarget = null
+                    onForwardMessage()
+                },
+            )
+        }
+    }
 }
 
 @Composable
@@ -377,6 +491,9 @@ private fun MessageBubble(
     onRetry: (UiMessage) -> Unit,
     onForward: (UiMessage) -> Unit,
     onDelete: (UiMessage) -> Unit,
+    onSaveAs: (UiMessage) -> Unit,
+    onOpen: (UiMessage) -> Unit,
+    onImageClick: (UiMessage) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val alignment = if (message.fromMe) Alignment.End else Alignment.Start
@@ -389,7 +506,7 @@ private fun MessageBubble(
         message.fromMe -> MaterialTheme.colorScheme.onPrimary
         else -> MaterialTheme.colorScheme.onSurface
     }
-    // Telegram-style asymmetric corners: the corner nearest the sender is tightened.
+    // Asymmetric corners: the corner nearest the sender is tightened.
     val shape = if (message.fromMe) {
         RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomEnd = 6.dp, bottomStart = 18.dp)
     } else {
@@ -397,10 +514,16 @@ private fun MessageBubble(
     }
     val clipboard = LocalClipboardManager.current
     val haptics = LocalHapticFeedback.current
-    // Long-press opens the message action menu (Copy / Forward / Delete). Reset per message id.
+    // Long-press opens the message action menu. Reset per message id.
     var menuOpen by remember(message.id) { mutableStateOf(false) }
+    // Shared long-press handler so the menu opens from anywhere on the bubble - including image and
+    // file content, whose own tap handlers would otherwise swallow the parent's long-press.
+    val openMenu = {
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        menuOpen = true
+    }
 
-    // Cap the bubble at a share of the window (Telegram-style) rather than a fixed 300.dp, so wide
+    // Cap the bubble at a share of the window rather than a fixed 300.dp, so wide
     // screens use the available width instead of wrapping text early into a narrow column. Still
     // wrap-to-content for short messages; the fraction only bounds the growth.
     val maxBubbleWidth = (LocalConfiguration.current.screenWidthDp * 0.82f).dp
@@ -417,10 +540,7 @@ private fun MessageBubble(
                 shape = shape,
                 modifier = bubbleModifier.combinedClickable(
                     onClick = {},
-                    onLongClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        menuOpen = true
-                    },
+                    onLongClick = openMenu,
                 ),
             ) {
                 Column {
@@ -436,7 +556,15 @@ private fun MessageBubble(
                         )
                     }
                     if (message.attachment != null) {
-                        AttachmentContent(message.attachment, download, onColor, onDownload)
+                        AttachmentContent(
+                            attachment = message.attachment,
+                            download = download,
+                            sending = message.status == MessageStatus.SENDING,
+                            onColor = onColor,
+                            onDownload = onDownload,
+                            onImageClick = { onImageClick(message) },
+                            onLongPress = openMenu,
+                        )
                         BubbleMeta(message, onColor, Modifier.align(Alignment.End))
                     } else {
                         BubbleTextContent(
@@ -447,7 +575,7 @@ private fun MessageBubble(
                     }
                 }
             }
-            // Telegram-style selected-state tint while the action menu is open.
+            // Selected-state tint while the action menu is open.
             if (menuOpen) {
                 Box(
                     modifier = Modifier
@@ -456,12 +584,19 @@ private fun MessageBubble(
                         .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
                 )
             }
+            val attachment = message.attachment
+            val isLocal = attachment?.source is AttachmentSource.Local
             MessageActionMenu(
                 expanded = menuOpen,
-                showTextActions = message.text.isNotBlank(),
+                showCopy = message.text.isNotBlank(),
+                showSaveAs = attachment != null && !isLocal,
+                showForward = message.text.isNotBlank() || (attachment != null && !isLocal),
+                showOpen = attachment != null && attachment.kind == AttachmentKind.FILE && !isLocal,
                 onDismiss = { menuOpen = false },
                 onCopy = { clipboard.setText(AnnotatedString(message.text)) },
+                onSaveAs = { onSaveAs(message) },
                 onForward = { onForward(message) },
+                onOpen = { onOpen(message) },
                 onDelete = { onDelete(message) },
             )
         }
@@ -479,30 +614,52 @@ private fun MessageBubble(
 }
 
 /**
- * The long-press action menu for a message bubble (Telegram-style). Anchored to the pressed bubble
- * and intentionally list-driven so future actions (Reply, Select, ...) slot in as extra items.
- * [showTextActions] gates Copy/Forward, which only make sense for a message that carries text.
+ * The long-press action menu for a message bubble. Anchored to the pressed bubble and intentionally
+ * list-driven so future actions (Reply, Select, ...) slot in as extra items. Each action is gated by
+ * a flag so text and attachment bubbles share one menu: Copy (text only), Save As / Open (attachment
+ * only), Forward (text or a sent attachment), and Delete (always).
  */
 @Composable
 private fun MessageActionMenu(
     expanded: Boolean,
-    showTextActions: Boolean,
+    showCopy: Boolean,
+    showSaveAs: Boolean,
+    showForward: Boolean,
+    showOpen: Boolean,
     onDismiss: () -> Unit,
     onCopy: () -> Unit,
+    onSaveAs: () -> Unit,
     onForward: () -> Unit,
+    onOpen: () -> Unit,
     onDelete: () -> Unit,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
-        if (showTextActions) {
+        if (showCopy) {
             DropdownMenuItem(
                 text = { Text("Copy") },
                 leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) },
                 onClick = { onDismiss(); onCopy() },
             )
+        }
+        if (showSaveAs) {
+            DropdownMenuItem(
+                text = { Text("Save As") },
+                leadingIcon = { Icon(Icons.Filled.SaveAlt, contentDescription = null) },
+                onClick = { onDismiss(); onSaveAs() },
+            )
+        }
+        if (showForward) {
             DropdownMenuItem(
                 text = { Text("Forward") },
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.Forward, contentDescription = null) },
                 onClick = { onDismiss(); onForward() },
+            )
+        }
+        if (showOpen) {
+            DropdownMenuItem(
+                text = { Text("Open") },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null) },
+                onClick = { onDismiss(); onOpen() },
             )
         }
         DropdownMenuItem(
@@ -606,50 +763,72 @@ private fun BubbleMeta(message: UiMessage, onColor: Color, modifier: Modifier = 
 private fun AttachmentContent(
     attachment: UiAttachment,
     download: AttachmentDownload?,
+    sending: Boolean,
     onColor: Color,
     onDownload: (UiAttachment) -> Unit,
+    onImageClick: () -> Unit,
+    onLongPress: () -> Unit,
 ) {
     val source = attachment.source
-    when {
-        attachment.kind == AttachmentKind.IMAGE && source is AttachmentSource.Inline ->
-            AttachmentImage(model = source.bytes, attachment = attachment)
+    if (attachment.kind == AttachmentKind.IMAGE) {
+        when (source) {
+            is AttachmentSource.Inline ->
+                AttachmentImage(source.bytes, attachment, sending, onImageClick, onLongPress)
 
-        attachment.kind == AttachmentKind.IMAGE && source is AttachmentSource.Remote -> {
-            // Auto-fetch remote images so they render in place.
-            LaunchedEffect(source.contentId) { onDownload(attachment) }
-            when (download) {
-                is AttachmentDownload.Ready -> AttachmentImage(model = download.file, attachment = attachment)
-                is AttachmentDownload.Failed -> FileChip(attachment, onColor, "Tap to retry") { onDownload(attachment) }
-                else -> ImagePlaceholder()
+            is AttachmentSource.Local ->
+                // Optimistic outgoing image: render the picked content uri directly while it uploads.
+                AttachmentImage(source.uri, attachment, sending, onImageClick, onLongPress)
+
+            is AttachmentSource.Remote -> {
+                // Auto-fetch remote images so they render in place.
+                LaunchedEffect(source.contentId) { onDownload(attachment) }
+                when (download) {
+                    is AttachmentDownload.Ready ->
+                        AttachmentImage(download.file, attachment, false, onImageClick, onLongPress)
+                    is AttachmentDownload.Failed ->
+                        FileAttachment(attachment, onColor, download, sending, onLongPress) { onDownload(attachment) }
+                    else -> ImagePlaceholder()
+                }
             }
         }
-
-        else -> {
-            val label = when (download) {
-                is AttachmentDownload.Loading -> "Downloading..."
-                is AttachmentDownload.Ready -> "Saved to cache"
-                is AttachmentDownload.Failed -> "Tap to retry"
-                else -> formatSize(attachment.size)
-            }
-            FileChip(attachment, onColor, label) {
-                if (source is AttachmentSource.Remote) onDownload(attachment)
-            }
+    } else {
+        FileAttachment(attachment, onColor, download, sending, onLongPress) {
+            if (source is AttachmentSource.Remote) onDownload(attachment)
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AttachmentImage(model: Any, attachment: UiAttachment) {
+private fun AttachmentImage(
+    model: Any,
+    attachment: UiAttachment,
+    sending: Boolean,
+    onClick: () -> Unit,
+    onLongPress: () -> Unit,
+) {
     val ratio = if (attachment.width != null && attachment.height != null && attachment.height > 0)
         attachment.width.toFloat() / attachment.height else 1f
-    AsyncImage(
-        model = model,
-        contentDescription = attachment.name,
-        contentScale = ContentScale.Crop,
-        modifier = Modifier
-            .widthIn(max = 260.dp)
-            .aspectRatio(ratio.coerceIn(0.5f, 2f)),
-    )
+    Box(contentAlignment = Alignment.Center) {
+        AsyncImage(
+            model = model,
+            contentDescription = attachment.name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .widthIn(max = 260.dp)
+                .aspectRatio(ratio.coerceIn(0.5f, 2f))
+                .combinedClickable(onClick = onClick, onLongClick = onLongPress),
+        )
+        // An outgoing image shows an upload spinner over a dim scrim until it is confirmed.
+        if (sending) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color.Black.copy(alpha = 0.25f)),
+            )
+            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(36.dp))
+        }
+    }
 }
 
 @Composable
@@ -662,26 +841,82 @@ private fun ImagePlaceholder() {
     }
 }
 
+/**
+ * A Telegram-style bubble for a non-inline attachment: a circular type glyph (or a download / progress
+ * / retry affordance that folds into the same circle) beside the file name and its size + type. Tapping
+ * downloads-then-opens (files) or retries a failed transfer.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun FileChip(
+private fun FileAttachment(
     attachment: UiAttachment,
     onColor: Color,
-    secondary: String,
+    download: AttachmentDownload?,
+    sending: Boolean,
+    onLongPress: () -> Unit,
     onClick: () -> Unit,
 ) {
+    val isRemote = attachment.source is AttachmentSource.Remote
+    val ready = download is AttachmentDownload.Ready
+    val loading = sending || download is AttachmentDownload.Loading
+    val failed = download is AttachmentDownload.Failed
+    val ext = extLabel(attachment.name, attachment.mime)
+    val secondary = when {
+        sending -> "Sending..."
+        loading -> "Downloading..."
+        failed -> "Tap to retry"
+        else -> if (ext.isEmpty()) formatSize(attachment.size) else "${formatSize(attachment.size)} . $ext"
+    }
     Row(
         modifier = Modifier
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .semantics { contentDescription = "$ext ${attachment.name}, $secondary" },
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null, tint = onColor)
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(onColor.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                loading -> CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    strokeWidth = 2.dp,
+                    color = onColor,
+                )
+                failed -> Icon(Icons.Filled.ErrorOutline, contentDescription = null, tint = onColor)
+                isRemote && !ready -> Icon(Icons.Filled.Download, contentDescription = null, tint = onColor)
+                else -> Icon(fileGlyph(attachment.mime), contentDescription = null, tint = onColor)
+            }
+        }
         Column(modifier = Modifier.widthIn(max = 200.dp)) {
             Text(attachment.name, color = onColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(secondary, color = onColor, style = MaterialTheme.typography.labelSmall)
+            Text(secondary, color = onColor.copy(alpha = 0.75f), style = MaterialTheme.typography.labelSmall)
         }
     }
+}
+
+/** Picks a file-type glyph from the MIME type for the file bubble. */
+private fun fileGlyph(mime: String): ImageVector = when {
+    mime == "application/pdf" -> Icons.Filled.PictureAsPdf
+    mime.startsWith("audio/") -> Icons.Filled.Audiotrack
+    mime.startsWith("video/") -> Icons.Filled.Movie
+    mime.startsWith("text/") || mime.contains("word") || mime.contains("document") -> Icons.Filled.Description
+    mime.contains("zip") || mime.contains("compressed") || mime.contains("tar") ||
+        mime.contains("rar") || mime.contains("7z") -> Icons.Filled.FolderZip
+    else -> Icons.AutoMirrored.Filled.InsertDriveFile
+}
+
+/** A short uppercase type label from the file extension, falling back to the MIME subtype. */
+private fun extLabel(name: String, mime: String): String {
+    val ext = name.substringAfterLast('.', "")
+    if (ext.isNotEmpty() && ext.length <= 5) return ext.uppercase()
+    val sub = mime.substringAfterLast('/', "")
+    return sub.takeIf { it.isNotEmpty() && it.length <= 6 }?.uppercase() ?: ""
 }
 
 private fun formatSize(bytes: Long): String = when {

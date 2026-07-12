@@ -53,6 +53,19 @@ data class PreparedMedia(
 class MediaPreparer @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
+    /**
+     * Cheaply probes a picked content uri for its display name and MIME type without reading or
+     * compressing its bytes - used to build the immediate optimistic outgoing bubble.
+     *
+     * @return (name, mime)
+     */
+    fun probe(uriString: String): Pair<String, String> {
+        val uri = Uri.parse(uriString)
+        val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
+        val name = queryDisplayName(uri) ?: defaultName(mime)
+        return name to mime
+    }
+
     suspend fun prepare(uriString: String): PreparedMedia = withContext(Dispatchers.IO) {
         val uri = Uri.parse(uriString)
         val resolver = context.contentResolver

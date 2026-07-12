@@ -28,8 +28,14 @@ import io.photonmessenger.core.boson.UnreadTracker
 import io.photonmessenger.core.model.ProfileResolver
 import io.photonmessenger.core.model.ResolvedProfile
 import io.photonmessenger.feature.chat.data.ChatRepository
+import io.photonmessenger.feature.chat.data.ForwardPayload
+import io.photonmessenger.feature.chat.data.ForwardPayloadStore
+import io.photonmessenger.feature.chat.data.MediaSaver
+import io.photonmessenger.feature.chat.model.AttachmentKind
+import io.photonmessenger.feature.chat.model.AttachmentSource
 import io.photonmessenger.feature.chat.model.ChatHeader
 import io.photonmessenger.feature.chat.model.MessageStatus
+import io.photonmessenger.feature.chat.model.UiAttachment
 import io.photonmessenger.feature.chat.model.UiConversation
 import io.photonmessenger.feature.chat.model.UiMessage
 import kotlinx.coroutines.Dispatchers
@@ -45,6 +51,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -61,18 +68,48 @@ class ChatViewModelsTest {
         var headerResult: Result<ChatHeader> = Result.success(ChatHeader(title = "Header")),
         var olderResult: Result<List<UiMessage>> = Result.success(emptyList()),
     ) : ChatRepository {
+        /** Records (recipient, text) of every text send. */
+        val sentTexts = mutableListOf<Pair<String, String>>()
+        /** Records (recipient, attachment) of every forwarded attachment. */
+        val forwardedAttachments = mutableListOf<Pair<String, UiAttachment>>()
+
         override fun conversations() = convos
         override suspend fun header(conversationId: String) = headerResult
         override fun messages(conversationId: String) = msgs
-        override suspend fun sendText(recipientId: String, text: String) = sendResult
+        override suspend fun sendText(recipientId: String, text: String): Result<Unit> {
+            sentTexts += recipientId to text
+            return sendResult
+        }
         override suspend fun sendAttachment(recipientId: String, uriString: String) = sendResult
-        override suspend fun downloadAttachment(attachment: io.photonmessenger.feature.chat.model.UiAttachment) =
+        override fun optimisticAttachment(uriString: String) = UiAttachment(
+            kind = AttachmentKind.IMAGE,
+            mime = "image/jpeg",
+            name = "photo.jpg",
+            size = 0L,
+            source = AttachmentSource.Local(uriString),
+        )
+        override suspend fun downloadAttachment(attachment: UiAttachment) =
+            Result.failure<java.io.File>(UnsupportedOperationException("not used"))
+        override suspend fun localFile(attachment: UiAttachment) =
             Result.failure<java.io.File>(UnsupportedOperationException("not used"))
         override suspend fun loadOlder(conversationId: String, before: Long, limit: Int) = olderResult
         override suspend fun removeConversation(conversationId: String) = Result.success(Unit)
         override suspend fun removeMessage(rid: Long) = Result.success(Unit)
+        override suspend fun forwardAttachment(recipientId: String, attachment: UiAttachment): Result<Unit> {
+            forwardedAttachments += recipientId to attachment
+            return Result.success(Unit)
+        }
         override suspend fun forwardTargets() =
             Result.success(emptyList<io.photonmessenger.feature.chat.model.UiForwardTarget>())
+    }
+
+    private val mediaSaver = object : MediaSaver {
+        override suspend fun save(
+            name: String,
+            mime: String,
+            kind: AttachmentKind,
+            open: () -> java.io.InputStream,
+        ) = Result.success("Pictures")
     }
 
     /** No-op resolver: DM titles are already provided by the fakes, so nothing needs resolving. */
@@ -95,7 +132,10 @@ class ChatViewModelsTest {
         ConversationsViewModel(repo, resolver, FakeUnreadTracker())
 
     private fun chatVm(repo: ChatRepository, conversationId: String) =
-        ChatViewModel(repo, FakeUnreadTracker(), resolver, SavedStateHandle(mapOf("conversationId" to conversationId)))
+        ChatViewModel(
+            repo, FakeUnreadTracker(), resolver, mediaSaver, ForwardPayloadStore(),
+            SavedStateHandle(mapOf("conversationId" to conversationId)),
+        )
 
     @Before
     fun setUp() {
@@ -254,6 +294,46 @@ class ChatViewModelsTest {
             vm.loadOlder()
             val paged = awaitItem()
             assertEquals(listOf("m0", "m1"), paged.messages.map { it.id })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `forwarding a remote attachment dispatches via forwardAttachment, not as text`() = runTest {
+        val attachment = UiAttachment(
+            kind = AttachmentKind.FILE,
+            mime = "application/pdf",
+            name = "doc.pdf",
+            size = 1024,
+            source = AttachmentSource.Remote("ions://peer/ref", "cid"),
+        )
+        val repo = FakeChatRepo(convosFlow, msgsFlow)
+        val store = ForwardPayloadStore().apply { set(ForwardPayload.Attachment(attachment)) }
+        val vm = ForwardViewModel(repo, resolver, store)
+
+        vm.forwarded.test {
+            vm.forward("target1")
+            assertEquals("target1", awaitItem())
+            // Remote attachments re-reference the existing IonStore object: forwarded via the
+            // attachment path (no re-upload), never re-sent as text.
+            assertEquals(listOf("target1" to attachment), repo.forwardedAttachments)
+            assertTrue(repo.sentTexts.isEmpty())
+            assertNull(store.peek())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `forwarding text dispatches via sendText`() = runTest {
+        val repo = FakeChatRepo(convosFlow, msgsFlow)
+        val store = ForwardPayloadStore().apply { set(ForwardPayload.Text("hello")) }
+        val vm = ForwardViewModel(repo, resolver, store)
+
+        vm.forwarded.test {
+            vm.forward("target2")
+            assertEquals("target2", awaitItem())
+            assertEquals(listOf("target2" to "hello"), repo.sentTexts)
+            assertTrue(repo.forwardedAttachments.isEmpty())
             cancelAndIgnoreRemainingEvents()
         }
     }

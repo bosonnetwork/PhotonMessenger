@@ -501,7 +501,7 @@ private fun AddFriendDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     trailingIcon = {
-                        // Paste + Scan sit inside the field's trailing area (Telegram-style), keeping the
+                        // Paste + Scan sit inside the field's trailing area, keeping the
                         // primary shortcuts on the ID line without adding a separate button row.
                         Row {
                             IconButton(onClick = {

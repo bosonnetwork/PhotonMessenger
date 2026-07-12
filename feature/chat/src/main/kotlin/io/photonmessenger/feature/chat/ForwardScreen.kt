@@ -89,7 +89,21 @@ fun ForwardScreen(
         modifier = modifier.nestedScroll(topBarScroll.nestedScrollConnection),
         topBar = {
             TopAppBar(
-                title = { Text("Forward to") },
+                title = {
+                    Column {
+                        Text("Forward to")
+                        val label = viewModel.forwardingLabel
+                        if (label.isNotBlank()) {
+                            Text(
+                                label,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Filled.Close, contentDescription = "Close")

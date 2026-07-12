@@ -34,4 +34,8 @@ abstract class ChatModule {
     @Binds
     @Singleton
     abstract fun bindChatRepository(impl: ChatRepositoryImpl): ChatRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindMediaSaver(impl: AndroidMediaSaver): MediaSaver
 }

@@ -76,14 +76,36 @@ interface ChatRepository {
     /** Prepares (compresses) the picked media at [uriString] and sends it inline or via IonStore. */
     suspend fun sendAttachment(recipientId: String, uriString: String): Result<Unit>
 
+    /**
+     * Builds the optimistic UI attachment (name/mime/kind) for a just-picked content uri, without
+     * reading or compressing its bytes - used to render the immediate outgoing bubble while the send
+     * is in flight. The source is [AttachmentSource.Local].
+     */
+    fun optimisticAttachment(uriString: String): UiAttachment
+
     /** Resolves a remote attachment to a local (integrity-verified, cached) file. */
     suspend fun downloadAttachment(attachment: UiAttachment): Result<File>
+
+    /**
+     * Resolves an attachment to a local file usable by an external app (Open / Share): a remote
+     * attachment is downloaded (content-addressed cache), an inline attachment's bytes are
+     * materialized into the same cache. A still-sending [AttachmentSource.Local] cannot be resolved.
+     */
+    suspend fun localFile(attachment: UiAttachment): Result<File>
 
     suspend fun loadOlder(conversationId: String, before: Long, limit: Int): Result<List<UiMessage>>
     suspend fun removeConversation(conversationId: String): Result<Unit>
 
     /** Removes a single message from the local store on this device (by its store-assigned rid). */
     suspend fun removeMessage(rid: Long): Result<Unit>
+
+    /**
+     * Forwards an existing attachment to [recipientId]. A remote (IonStore) attachment re-references
+     * the object already stored there - the same ref is re-sent with NO re-upload, and the recipient
+     * fetches it cross-peer by ref. Only an inline attachment (which has no IonStore object) re-sends
+     * its (small) bytes.
+     */
+    suspend fun forwardAttachment(recipientId: String, attachment: UiAttachment): Result<Unit>
 
     /**
      * Destinations a message can be forwarded to: existing conversations (marked [UiForwardTarget.recent])
@@ -214,6 +236,35 @@ class ChatRepositoryImpl @Inject constructor(
         Unit
     }
 
+    override fun optimisticAttachment(uriString: String): UiAttachment {
+        val (name, mime) = mediaPreparer.probe(uriString)
+        return UiAttachment(
+            kind = kindOf(mime),
+            mime = mime,
+            name = name,
+            size = 0L,
+            source = AttachmentSource.Local(uriString),
+        )
+    }
+
+    override suspend fun localFile(attachment: UiAttachment): Result<File> =
+        when (val source = attachment.source) {
+            is AttachmentSource.Remote -> downloadAttachment(attachment)
+            is AttachmentSource.Inline -> runCatching {
+                // Materialize inline bytes into the shared attachment cache so a FileProvider uri can
+                // be handed to an external viewer / share target.
+                val key = "inline${source.bytes.contentHashCode()}"
+                val file = cache.fileFor(key, attachment.name)
+                if (!(file.exists() && file.length().toInt() == source.bytes.size)) {
+                    file.writeBytes(source.bytes)
+                    cache.trim()
+                }
+                file
+            }
+            is AttachmentSource.Local ->
+                Result.failure(AppError.InvalidInput("Attachment is still sending"))
+        }
+
     override suspend fun sendAttachment(recipientId: String, uriString: String): Result<Unit> = runCatching {
         val to = parseId(recipientId)
         val media = mediaPreparer.prepare(uriString)
@@ -308,6 +359,42 @@ class ChatRepositoryImpl @Inject constructor(
 
     override suspend fun removeMessage(rid: Long): Result<Unit> = runCatching {
         client().removeMessage(rid).awaitResult()
+        Unit
+    }
+
+    override suspend fun forwardAttachment(recipientId: String, attachment: UiAttachment): Result<Unit> = runCatching {
+        val to = parseId(recipientId)
+        when (val source = attachment.source) {
+            is AttachmentSource.Remote -> {
+                // The bytes already live in IonStore; forwarding re-sends the SAME ref (no re-upload).
+                // The new recipient fetches them cross-peer by ref exactly like downloadAttachment does.
+                val ref = remoteAttachmentToMap(
+                    uri = source.uri,
+                    contentId = source.contentId,
+                    mime = attachment.mime,
+                    size = attachment.size,
+                    name = attachment.name,
+                    width = attachment.width,
+                    height = attachment.height,
+                )
+                client().message(to)
+                    .contentObject(ref)
+                    .contentType(attachment.mime)
+                    .contentDisposition(ContentDisposition.attachment(attachment.name))
+                    .send().awaitResult()
+            }
+
+            is AttachmentSource.Inline ->
+                // Inline attachments have no IonStore object to point at, so re-send the bytes.
+                client().message(to)
+                    .contentBinary(source.bytes)
+                    .contentType(attachment.mime)
+                    .contentDisposition(ContentDisposition.inline(attachment.name))
+                    .send().awaitResult()
+
+            is AttachmentSource.Local ->
+                throw AppError.InvalidInput("Attachment is still sending")
+        }
         Unit
     }
 

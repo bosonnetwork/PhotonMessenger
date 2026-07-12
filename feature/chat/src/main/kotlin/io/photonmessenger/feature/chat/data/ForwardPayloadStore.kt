@@ -20,30 +20,32 @@
  * SOFTWARE.
  */
 
-package io.photonmessenger.core.designsystem.component
+package io.photonmessenger.feature.chat.data
 
-import androidx.compose.material3.Badge
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
+import io.photonmessenger.feature.chat.model.UiAttachment
+import javax.inject.Inject
+import javax.inject.Singleton
 
-/** Formats a notification/unread count for a compact badge, capping large values at "99+". */
-fun badgeCount(count: Int): String = if (count > 99) "99+" else count.toString()
+/** What the user chose to forward: plain text or an existing attachment. */
+sealed interface ForwardPayload {
+    data class Text(val text: String) : ForwardPayload
+    data class Attachment(val attachment: UiAttachment) : ForwardPayload
+}
 
 /**
- * A small count pill used for unread and pending-request badges (conversation rows, contact tabs,
- * bottom-navigation items). Renders nothing when [count] is not positive, so callers can place it
- * unconditionally. Defaults to the accent (primary) colour for an unread badge.
+ * Hands a forward payload from the chat screen to the forward picker. An attachment (especially inline
+ * bytes) cannot ride a navigation string route, so the source chat stashes the chosen payload here and
+ * the picker reads it back - a small process-scoped handoff, cleared once consumed.
  */
-@Composable
-fun CountBadge(
-    count: Int,
-    containerColor: Color = MaterialTheme.colorScheme.primary,
-    contentColor: Color = MaterialTheme.colorScheme.onPrimary,
-) {
-    if (count <= 0) return
-    Badge(containerColor = containerColor, contentColor = contentColor) {
-        Text(badgeCount(count))
-    }
+@Singleton
+class ForwardPayloadStore @Inject constructor() {
+    @Volatile
+    private var pending: ForwardPayload? = null
+
+    fun set(payload: ForwardPayload) { pending = payload }
+
+    /** Returns the pending payload without clearing it (the picker may re-read across recompositions). */
+    fun peek(): ForwardPayload? = pending
+
+    fun clear() { pending = null }
 }
