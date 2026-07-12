@@ -40,7 +40,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Saves a received attachment into a public collection so it survives outside the app's cache
- * (Telegram-style "Save As"): images go to `Pictures/PhotonMessenger`, everything else to
+ * (the "Save" action): images go to `Pictures/PhotonMessenger`, everything else to
  * `Downloads`.
  */
 interface MediaSaver {

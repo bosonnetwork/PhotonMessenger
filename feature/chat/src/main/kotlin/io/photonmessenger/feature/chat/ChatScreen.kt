@@ -77,7 +77,6 @@ import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PictureAsPdf
-import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -589,12 +588,12 @@ private fun MessageBubble(
             MessageActionMenu(
                 expanded = menuOpen,
                 showCopy = message.text.isNotBlank(),
-                showSaveAs = attachment != null && !isLocal,
+                showSave = attachment != null && !isLocal,
                 showForward = message.text.isNotBlank() || (attachment != null && !isLocal),
                 showOpen = attachment != null && attachment.kind == AttachmentKind.FILE && !isLocal,
                 onDismiss = { menuOpen = false },
                 onCopy = { clipboard.setText(AnnotatedString(message.text)) },
-                onSaveAs = { onSaveAs(message) },
+                onSave = { onSaveAs(message) },
                 onForward = { onForward(message) },
                 onOpen = { onOpen(message) },
                 onDelete = { onDelete(message) },
@@ -616,19 +615,19 @@ private fun MessageBubble(
 /**
  * The long-press action menu for a message bubble. Anchored to the pressed bubble and intentionally
  * list-driven so future actions (Reply, Select, ...) slot in as extra items. Each action is gated by
- * a flag so text and attachment bubbles share one menu: Copy (text only), Save As / Open (attachment
+ * a flag so text and attachment bubbles share one menu: Copy (text only), Save / Open (attachment
  * only), Forward (text or a sent attachment), and Delete (always).
  */
 @Composable
 private fun MessageActionMenu(
     expanded: Boolean,
     showCopy: Boolean,
-    showSaveAs: Boolean,
+    showSave: Boolean,
     showForward: Boolean,
     showOpen: Boolean,
     onDismiss: () -> Unit,
     onCopy: () -> Unit,
-    onSaveAs: () -> Unit,
+    onSave: () -> Unit,
     onForward: () -> Unit,
     onOpen: () -> Unit,
     onDelete: () -> Unit,
@@ -641,11 +640,11 @@ private fun MessageActionMenu(
                 onClick = { onDismiss(); onCopy() },
             )
         }
-        if (showSaveAs) {
+        if (showSave) {
             DropdownMenuItem(
-                text = { Text("Save As") },
-                leadingIcon = { Icon(Icons.Filled.SaveAlt, contentDescription = null) },
-                onClick = { onDismiss(); onSaveAs() },
+                text = { Text("Save") },
+                leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                onClick = { onDismiss(); onSave() },
             )
         }
         if (showForward) {
@@ -842,7 +841,7 @@ private fun ImagePlaceholder() {
 }
 
 /**
- * A Telegram-style bubble for a non-inline attachment: a circular type glyph (or a download / progress
+ * A file-style bubble for a non-inline attachment: a circular type glyph (or a download / progress
  * / retry affordance that folds into the same circle) beside the file name and its size + type. Tapping
  * downloads-then-opens (files) or retries a failed transfer.
  */
