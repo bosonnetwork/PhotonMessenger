@@ -29,7 +29,10 @@ import io.photonmessenger.core.model.ProfileResolver
 import io.photonmessenger.core.model.cachedDisplay
 import io.photonmessenger.core.model.shortId
 import io.photonmessenger.feature.chat.model.AttachmentCarrier
+import io.photonmessenger.feature.chat.model.AttachmentKind
 import io.photonmessenger.feature.chat.model.AttachmentSource
+import io.photonmessenger.feature.chat.model.VOICE_MIME
+import io.photonmessenger.feature.chat.model.VoiceHeaders
 import io.photonmessenger.feature.chat.model.ChatHeader
 import io.photonmessenger.feature.chat.model.UiAttachment
 import io.photonmessenger.feature.chat.model.UiConversation
@@ -75,6 +78,13 @@ interface ChatRepository {
 
     /** Prepares (compresses) the picked media at [uriString] and sends it inline or via IonStore. */
     suspend fun sendAttachment(recipientId: String, uriString: String): Result<Unit>
+
+    /**
+     * Sends a recorded voice note (the Opus/Ogg file at [filePath], [durationMs] long). It rides
+     * inline in the message body with a duration header; only an oversized note (VBR spike) falls
+     * back to IonStore. See [chooseCarrier] for [AttachmentKind.VOICE].
+     */
+    suspend fun sendVoice(recipientId: String, filePath: String, durationMs: Long): Result<Unit>
 
     /**
      * Builds the optimistic UI attachment (name/mime/kind) for a just-picked content uri, without
@@ -301,6 +311,48 @@ class ChatRepositoryImpl @Inject constructor(
         Unit
     }
 
+    override suspend fun sendVoice(recipientId: String, filePath: String, durationMs: Long): Result<Unit> = runCatching {
+        val to = parseId(recipientId)
+        val file = File(filePath)
+        val bytes = file.readBytes()
+        val size = bytes.size.toLong()
+        val name = file.name
+        when (chooseCarrier(AttachmentKind.VOICE, size)) {
+            AttachmentCarrier.INLINE ->
+                client().message(to)
+                    .contentBinary(bytes)
+                    .contentType(VOICE_MIME)
+                    .contentDisposition(ContentDisposition.inline(name))
+                    .header(VoiceHeaders.DURATION, durationMs)
+                    .send().awaitResult()
+
+            AttachmentCarrier.ION_STORE -> {
+                // Safety net for a VBR spike beyond the inline voice ceiling: store the bytes and send
+                // the ref (with duration) exactly like a large attachment.
+                val store = ionStore()
+                val options = PutOptions.builder().name(name).contentType(VOICE_MIME).build()
+                val obj = store.put(bytes, options).awaitResult()
+                val uri = obj.uri ?: "ions://${store.servicePeerId}/${obj.id}"
+                val ref = remoteAttachmentToMap(
+                    uri = uri,
+                    contentId = obj.contentId.toString(),
+                    mime = VOICE_MIME,
+                    size = size,
+                    name = name,
+                    width = null,
+                    height = null,
+                    durationMs = durationMs,
+                )
+                client().message(to)
+                    .contentObject(ref)
+                    .contentType(VOICE_MIME)
+                    .contentDisposition(ContentDisposition.attachment(name))
+                    .send().awaitResult()
+            }
+        }
+        Unit
+    }
+
     override suspend fun downloadAttachment(attachment: UiAttachment): Result<File> = runCatching {
         val source = attachment.source
         require(source is AttachmentSource.Remote) { "Attachment is inline; nothing to download" }
@@ -368,6 +420,7 @@ class ChatRepositoryImpl @Inject constructor(
             is AttachmentSource.Remote -> {
                 // The bytes already live in IonStore; forwarding re-sends the SAME ref (no re-upload).
                 // The new recipient fetches them cross-peer by ref exactly like downloadAttachment does.
+                // A voice note carries its duration in the ref so it stays a voice bubble downstream.
                 val ref = remoteAttachmentToMap(
                     uri = source.uri,
                     contentId = source.contentId,
@@ -376,6 +429,7 @@ class ChatRepositoryImpl @Inject constructor(
                     name = attachment.name,
                     width = attachment.width,
                     height = attachment.height,
+                    durationMs = attachment.durationMs,
                 )
                 client().message(to)
                     .contentObject(ref)
@@ -385,11 +439,13 @@ class ChatRepositoryImpl @Inject constructor(
             }
 
             is AttachmentSource.Inline ->
-                // Inline attachments have no IonStore object to point at, so re-send the bytes.
+                // Inline attachments have no IonStore object to point at, so re-send the bytes. A voice
+                // note re-sends its duration header so it stays a voice bubble for the new recipient.
                 client().message(to)
                     .contentBinary(source.bytes)
                     .contentType(attachment.mime)
                     .contentDisposition(ContentDisposition.inline(attachment.name))
+                    .apply { attachment.durationMs?.let { header(VoiceHeaders.DURATION, it) } }
                     .send().awaitResult()
 
             is AttachmentSource.Local ->

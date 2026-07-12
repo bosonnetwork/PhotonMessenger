@@ -149,11 +149,15 @@ private fun Message.extractAttachment(): UiAttachment? {
         }
         disposition.isInline && mime != ContentType.TEXT -> {
             val bytes = content.asBinary() ?: return null
+            // Voice notes ride inline as raw Opus/Ogg bytes with a "dur" header carrying the length;
+            // its presence + an audio MIME distinguishes a recorded note from any other inline binary.
+            val durationMs = (content.headers[VoiceHeaders.DURATION] as? Number)?.toLong()
             UiAttachment(
-                kind = kindOf(mime),
+                kind = if (isVoice(mime, durationMs != null)) AttachmentKind.VOICE else kindOf(mime),
                 mime = mime,
                 name = disposition.filename ?: "attachment",
                 size = bytes.size.toLong(),
+                durationMs = durationMs,
                 source = AttachmentSource.Inline(bytes),
             )
         }

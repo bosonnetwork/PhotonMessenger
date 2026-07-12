@@ -40,6 +40,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,6 +51,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -75,8 +78,12 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -104,11 +111,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -140,6 +149,7 @@ import io.photonmessenger.core.designsystem.component.formatBubbleTime
 import io.photonmessenger.core.designsystem.component.formatDayHeader
 import io.photonmessenger.core.designsystem.component.identityColor
 import io.photonmessenger.core.designsystem.component.sameDay
+import io.photonmessenger.feature.chat.data.VoicePlayer
 import io.photonmessenger.feature.chat.model.AttachmentKind
 import io.photonmessenger.feature.chat.model.AttachmentSource
 import io.photonmessenger.feature.chat.model.MessageStatus
@@ -161,6 +171,8 @@ fun ChatScreen(
     val header by viewModel.header.collectAsStateWithLifecycle()
     val downloads by viewModel.downloads.collectAsStateWithLifecycle()
     val loadingOlder by viewModel.loadingOlder.collectAsStateWithLifecycle()
+    val recording by viewModel.recording.collectAsStateWithLifecycle()
+    val voicePlayback by viewModel.voicePlayback.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
     val context = LocalContext.current
@@ -196,6 +208,23 @@ fun ChatScreen(
         } else {
             pendingSave = message
             storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+    }
+
+    // Voice recording needs the microphone. We check-then-request; recording starts on the next mic
+    // press once granted (the user releases and holds again), so the gesture never races the prompt.
+    var hasAudioPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED,
+        )
+    }
+    val audioPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        hasAudioPermission = granted
+        if (!granted) uiScope.launch {
+            snackbar.showSnackbar("Microphone permission is needed to record voice messages")
         }
     }
 
@@ -339,6 +368,17 @@ fun ChatScreen(
                     draft = ""
                 },
                 onAttach = { pickMedia.launch("*/*") },
+                voiceSupported = viewModel.voiceSupported,
+                hasAudioPermission = hasAudioPermission,
+                recording = recording,
+                onRequestAudioPermission = { audioPermission.launch(Manifest.permission.RECORD_AUDIO) },
+                onStartRecord = viewModel::startRecording,
+                onLockRecord = viewModel::lockRecording,
+                onCancelRecord = viewModel::cancelRecording,
+                onSendRecord = viewModel::stopAndSendRecording,
+                onRecordTooShort = {
+                    uiScope.launch { snackbar.showSnackbar("Hold to record, release to send") }
+                },
             )
         },
     ) { padding ->
@@ -381,18 +421,25 @@ fun ChatScreen(
                                     (prev == null || prev.senderId != msg.senderId ||
                                         !sameDay(prev.createdAt, msg.createdAt)),
                                 download = download,
+                                playback = voicePlayback,
                                 onDownload = { viewModel.download(it) },
                                 onRetry = { retryMessage ->
-                                    if (retryMessage.attachment?.source is AttachmentSource.Local)
-                                        viewModel.retryAttachment(retryMessage)
-                                    else
-                                        viewModel.retrySend(SendFailure("", retryMessage.text, retryMessage.id))
+                                    val att = retryMessage.attachment
+                                    when {
+                                        att?.kind == AttachmentKind.VOICE && att.source is AttachmentSource.Local ->
+                                            viewModel.retryVoice(retryMessage)
+                                        att?.source is AttachmentSource.Local ->
+                                            viewModel.retryAttachment(retryMessage)
+                                        else ->
+                                            viewModel.retrySend(SendFailure("", retryMessage.text, retryMessage.id))
+                                    }
                                 },
                                 onForward = { viewModel.prepareForward(it); onForwardMessage() },
                                 onDelete = { deleteTarget = it },
                                 onSaveAs = { requestSave(it) },
                                 onOpen = { viewModel.openAttachment(it) },
                                 onImageClick = { viewerTarget = it },
+                                onToggleVoice = { viewModel.toggleVoice(it) },
                             )
                         }
                     }
@@ -486,6 +533,7 @@ private fun MessageBubble(
     isChannel: Boolean,
     showSender: Boolean,
     download: AttachmentDownload?,
+    playback: VoicePlayer.Playback,
     onDownload: (UiAttachment) -> Unit,
     onRetry: (UiMessage) -> Unit,
     onForward: (UiMessage) -> Unit,
@@ -493,6 +541,7 @@ private fun MessageBubble(
     onSaveAs: (UiMessage) -> Unit,
     onOpen: (UiMessage) -> Unit,
     onImageClick: (UiMessage) -> Unit,
+    onToggleVoice: (UiMessage) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val alignment = if (message.fromMe) Alignment.End else Alignment.Start
@@ -555,13 +604,25 @@ private fun MessageBubble(
                         )
                     }
                     if (message.attachment != null) {
+                        // Voice playback state for this bubble: the player reports a single active note,
+                        // so a note that isn't the active one shows its length and a play affordance.
+                        val voiceActive = playback.messageId == message.id
+                        val voice = VoiceBubbleState(
+                            playing = voiceActive && playback.isPlaying,
+                            preparing = voiceActive && playback.preparing,
+                            positionMs = if (voiceActive) playback.positionMs else 0,
+                            durationMs = if (voiceActive && playback.durationMs > 0) playback.durationMs
+                            else (message.attachment.durationMs?.toInt() ?: 0),
+                        )
                         AttachmentContent(
                             attachment = message.attachment,
                             download = download,
                             sending = message.status == MessageStatus.SENDING,
                             onColor = onColor,
+                            voice = voice,
                             onDownload = onDownload,
                             onImageClick = { onImageClick(message) },
+                            onToggleVoice = { onToggleVoice(message) },
                             onLongPress = openMenu,
                         )
                         BubbleMeta(message, onColor, Modifier.align(Alignment.End))
@@ -758,19 +819,29 @@ private fun BubbleMeta(message: UiMessage, onColor: Color, modifier: Modifier = 
     }
 }
 
+/** Voice-note playback state projected onto a single bubble (see [MessageBubble]). */
+private data class VoiceBubbleState(
+    val playing: Boolean,
+    val preparing: Boolean,
+    val positionMs: Int,
+    val durationMs: Int,
+)
+
 @Composable
 private fun AttachmentContent(
     attachment: UiAttachment,
     download: AttachmentDownload?,
     sending: Boolean,
     onColor: Color,
+    voice: VoiceBubbleState,
     onDownload: (UiAttachment) -> Unit,
     onImageClick: () -> Unit,
+    onToggleVoice: () -> Unit,
     onLongPress: () -> Unit,
 ) {
     val source = attachment.source
-    if (attachment.kind == AttachmentKind.IMAGE) {
-        when (source) {
+    when (attachment.kind) {
+        AttachmentKind.IMAGE -> when (source) {
             is AttachmentSource.Inline ->
                 AttachmentImage(source.bytes, attachment, sending, onImageClick, onLongPress)
 
@@ -790,11 +861,94 @@ private fun AttachmentContent(
                 }
             }
         }
-    } else {
-        FileAttachment(attachment, onColor, download, sending, onLongPress) {
-            if (source is AttachmentSource.Remote) onDownload(attachment)
+
+        AttachmentKind.VOICE ->
+            VoiceAttachment(attachment, voice, sending, onColor, onToggleVoice, onLongPress)
+
+        AttachmentKind.FILE ->
+            FileAttachment(attachment, onColor, download, sending, onLongPress) {
+                if (source is AttachmentSource.Remote) onDownload(attachment)
+            }
+    }
+}
+
+/**
+ * A voice-note bubble: a circular play/pause button beside a progress track and elapsed/total time.
+ * Structurally mirrors [FileAttachment]; a real waveform is deferred, so the track is a plain bar.
+ * Tapping toggles playback; long-press opens the message menu.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun VoiceAttachment(
+    attachment: UiAttachment,
+    voice: VoiceBubbleState,
+    sending: Boolean,
+    onColor: Color,
+    onToggle: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    val totalMs = if (voice.durationMs > 0) voice.durationMs else (attachment.durationMs?.toInt() ?: 0)
+    val progress = if (totalMs > 0) (voice.positionMs.toFloat() / totalMs).coerceIn(0f, 1f) else 0f
+    // Show elapsed while a play position exists, otherwise the full length.
+    val timeLabel = formatDuration(if (voice.positionMs in 1 until totalMs) voice.positionMs else totalMs)
+    val a11y = "Voice message, ${formatDuration(totalMs)}, " +
+        if (voice.playing) "playing, tap to pause" else "tap to play"
+    Row(
+        modifier = Modifier
+            .combinedClickable(onClick = onToggle, onLongClick = onLongPress)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .semantics { contentDescription = a11y },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(onColor.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                sending || voice.preparing -> CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    strokeWidth = 2.dp,
+                    color = onColor,
+                )
+                voice.playing -> Icon(Icons.Filled.Pause, contentDescription = null, tint = onColor)
+                else -> Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = onColor)
+            }
+        }
+        Column(modifier = Modifier.widthIn(min = 140.dp, max = 200.dp)) {
+            // A minimal progress track; the filled portion tracks playback position.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(onColor.copy(alpha = 0.25f)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(progress)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(onColor),
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                timeLabel,
+                color = onColor.copy(alpha = 0.75f),
+                style = MaterialTheme.typography.labelSmall,
+            )
         }
     }
+}
+
+/** Formats a millisecond length/position as m:ss for a voice bubble. */
+private fun formatDuration(ms: Int): String {
+    val totalSeconds = (ms.coerceAtLeast(0)) / 1000
+    return "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -924,13 +1078,37 @@ private fun formatSize(bytes: Long): String = when {
     else -> "$bytes B"
 }
 
+// Voice-recording gesture thresholds (from the mic-button down point) and the minimum hold that
+// counts as a real recording rather than an accidental tap.
+private val RECORD_CANCEL_SLIDE = 72.dp
+private val RECORD_LOCK_SLIDE = 72.dp
+private const val MIN_RECORD_MS = 800L
+
+/**
+ * The composer. When idle it is the familiar attach + text field + send row; when the field is empty
+ * (and the device can record) the trailing button becomes a press-and-hold mic. While recording, the
+ * text field is replaced by a recording bar (elapsed time + mic level) and the trailing area offers
+ * release-to-send / slide-to-cancel / slide-up-to-lock, then Delete + Send once locked.
+ */
 @Composable
 private fun MessageInput(
     value: String,
     onValueChange: (String) -> Unit,
     onSend: () -> Unit,
     onAttach: () -> Unit,
+    voiceSupported: Boolean,
+    hasAudioPermission: Boolean,
+    recording: RecordingState,
+    onRequestAudioPermission: () -> Unit,
+    onStartRecord: () -> Unit,
+    onLockRecord: () -> Unit,
+    onCancelRecord: () -> Unit,
+    onSendRecord: () -> Unit,
+    onRecordTooShort: () -> Unit,
 ) {
+    val isRecording = recording !is RecordingState.Idle
+    val locked = recording is RecordingState.Ready ||
+        (recording is RecordingState.Active && recording.locked)
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
         Row(
             modifier = Modifier
@@ -938,36 +1116,206 @@ private fun MessageInput(
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
-            IconButton(onClick = onAttach) {
-                Icon(
-                    Icons.Default.AttachFile,
-                    contentDescription = "Attach",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            if (isRecording) {
+                RecordingBar(recording, locked, modifier = Modifier.weight(1f))
+            } else {
+                IconButton(onClick = onAttach) {
+                    Icon(
+                        Icons.Default.AttachFile,
+                        contentDescription = "Attach",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Message") },
+                    maxLines = 5,
+                    shape = RoundedCornerShape(24.dp),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent,
+                    ),
                 )
             }
-            TextField(
-                value = value,
-                onValueChange = onValueChange,
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Message") },
-                maxLines = 5,
-                shape = RoundedCornerShape(24.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    disabledIndicatorColor = Color.Transparent,
-                ),
-            )
             Spacer(Modifier.width(6.dp))
-            FilledIconButton(
-                onClick = onSend,
-                enabled = value.isNotBlank(),
-                shape = CircleShape,
-            ) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+            // Trailing slot. Kept a single structural position so the mic button preserves its
+            // press-and-hold gesture across the idle -> recording transition.
+            when {
+                locked -> {
+                    IconButton(onClick = onCancelRecord) {
+                        Icon(
+                            Icons.Filled.Delete,
+                            contentDescription = "Delete recording",
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    FilledIconButton(onClick = onSendRecord, shape = CircleShape) {
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send voice message")
+                    }
+                }
+                value.isNotBlank() && !isRecording ->
+                    FilledIconButton(onClick = onSend, shape = CircleShape) {
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                    }
+                voiceSupported ->
+                    MicButton(
+                        hasPermission = hasAudioPermission,
+                        onRequestPermission = onRequestAudioPermission,
+                        onStart = onStartRecord,
+                        onLock = onLockRecord,
+                        onCancel = onCancelRecord,
+                        onSend = onSendRecord,
+                        onTooShort = onRecordTooShort,
+                    )
+                else ->
+                    FilledIconButton(onClick = onSend, enabled = false, shape = CircleShape) {
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                    }
             }
+        }
+    }
+}
+
+/**
+ * The press-and-hold mic button. Down begins recording (after a one-time permission prompt); a drag
+ * left past [RECORD_CANCEL_SLIDE] cancels, a drag up past [RECORD_LOCK_SLIDE] locks for hands-free,
+ * and release sends (unless it was a too-short accidental tap). The gesture lives in a
+ * [pointerInput] keyed on Unit so it survives recomposition while the finger is down.
+ */
+@Composable
+private fun MicButton(
+    hasPermission: Boolean,
+    onRequestPermission: () -> Unit,
+    onStart: () -> Unit,
+    onLock: () -> Unit,
+    onCancel: () -> Unit,
+    onSend: () -> Unit,
+    onTooShort: () -> Unit,
+) {
+    val hasPerm by rememberUpdatedState(hasPermission)
+    val requestPerm by rememberUpdatedState(onRequestPermission)
+    val start by rememberUpdatedState(onStart)
+    val lock by rememberUpdatedState(onLock)
+    val cancel by rememberUpdatedState(onCancel)
+    val send by rememberUpdatedState(onSend)
+    val tooShort by rememberUpdatedState(onTooShort)
+    val haptics = LocalHapticFeedback.current
+
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary)
+            .pointerInput(Unit) {
+                val cancelPx = RECORD_CANCEL_SLIDE.toPx()
+                val lockPx = RECORD_LOCK_SLIDE.toPx()
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    if (!hasPerm) {
+                        requestPerm()
+                        // Drain the gesture so releasing after the prompt starts no phantom recording.
+                        do {
+                            val e = awaitPointerEvent()
+                        } while (e.changes.any { it.pressed })
+                        return@awaitEachGesture
+                    }
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    val startedAt = System.currentTimeMillis()
+                    start()
+                    var isLocked = false
+                    var isCancelled = false
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: event.changes.first()
+                        if (!isLocked && !isCancelled) {
+                            val dx = change.position.x - down.position.x
+                            val dy = change.position.y - down.position.y
+                            if (dx <= -cancelPx && dx <= dy) {
+                                isCancelled = true
+                                cancel()
+                            } else if (dy <= -lockPx) {
+                                isLocked = true
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                lock()
+                            }
+                        }
+                        if (!change.pressed) break
+                    }
+                    if (!isCancelled && !isLocked) {
+                        if (System.currentTimeMillis() - startedAt < MIN_RECORD_MS) {
+                            cancel()
+                            tooShort()
+                        } else {
+                            send()
+                        }
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Filled.Mic,
+            contentDescription = "Record voice message",
+            tint = MaterialTheme.colorScheme.onPrimary,
+        )
+    }
+}
+
+/** The in-composer recording indicator: a live mic-level red dot, the elapsed time, and a hint. */
+@Composable
+private fun RecordingBar(
+    recording: RecordingState,
+    locked: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val elapsedMs = when (recording) {
+        is RecordingState.Active -> recording.elapsedMs
+        is RecordingState.Ready -> recording.durationMs
+        RecordingState.Idle -> 0L
+    }
+    val amplitude = (recording as? RecordingState.Active)?.amplitude ?: 0
+    val level = (amplitude / 8000f).coerceIn(0f, 1f)
+    val dotSize = (8 + (8 * level)).dp
+    Row(
+        modifier = modifier.padding(start = 6.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(modifier = Modifier.size(16.dp), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .size(dotSize)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.error),
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+            formatDuration(elapsedMs.toInt()),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.weight(1f))
+        if (locked) {
+            Icon(
+                Icons.Filled.Lock,
+                contentDescription = "Recording locked",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+        } else {
+            Text(
+                "< slide to cancel",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

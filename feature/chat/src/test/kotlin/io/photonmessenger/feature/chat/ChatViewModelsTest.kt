@@ -31,6 +31,9 @@ import io.photonmessenger.feature.chat.data.ChatRepository
 import io.photonmessenger.feature.chat.data.ForwardPayload
 import io.photonmessenger.feature.chat.data.ForwardPayloadStore
 import io.photonmessenger.feature.chat.data.MediaSaver
+import io.photonmessenger.feature.chat.data.VoicePlayer
+import io.photonmessenger.feature.chat.data.VoiceRecorder
+import io.photonmessenger.feature.chat.model.AttachmentCarrier
 import io.photonmessenger.feature.chat.model.AttachmentKind
 import io.photonmessenger.feature.chat.model.AttachmentSource
 import io.photonmessenger.feature.chat.model.ChatHeader
@@ -38,6 +41,11 @@ import io.photonmessenger.feature.chat.model.MessageStatus
 import io.photonmessenger.feature.chat.model.UiAttachment
 import io.photonmessenger.feature.chat.model.UiConversation
 import io.photonmessenger.feature.chat.model.UiMessage
+import io.photonmessenger.feature.chat.model.VOICE_MIME
+import io.photonmessenger.feature.chat.model.chooseCarrier
+import io.photonmessenger.feature.chat.model.remoteAttachmentFromMap
+import io.photonmessenger.feature.chat.model.remoteAttachmentToMap
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -72,6 +80,8 @@ class ChatViewModelsTest {
         val sentTexts = mutableListOf<Pair<String, String>>()
         /** Records (recipient, attachment) of every forwarded attachment. */
         val forwardedAttachments = mutableListOf<Pair<String, UiAttachment>>()
+        /** Records (recipient, filePath, durationMs) of every voice send. */
+        val sentVoices = mutableListOf<Triple<String, String, Long>>()
 
         override fun conversations() = convos
         override suspend fun header(conversationId: String) = headerResult
@@ -81,6 +91,10 @@ class ChatViewModelsTest {
             return sendResult
         }
         override suspend fun sendAttachment(recipientId: String, uriString: String) = sendResult
+        override suspend fun sendVoice(recipientId: String, filePath: String, durationMs: Long): Result<Unit> {
+            sentVoices += Triple(recipientId, filePath, durationMs)
+            return sendResult
+        }
         override fun optimisticAttachment(uriString: String) = UiAttachment(
             kind = AttachmentKind.IMAGE,
             mime = "image/jpeg",
@@ -112,6 +126,17 @@ class ChatViewModelsTest {
         ) = Result.success("Pictures")
     }
 
+    /** Fake recorder that yields a fixed temp file + duration; no real audio hardware. */
+    private class FakeVoiceRecorder(override val isSupported: Boolean = true) : VoiceRecorder {
+        override var onMaxDuration: (() -> Unit)? = null
+        override val isRecording: Boolean get() = false
+        private val file = File.createTempFile("voice", ".ogg").apply { deleteOnExit() }
+        override fun start(): File = file
+        override fun stop(): VoiceRecorder.Recording? = VoiceRecorder.Recording(file, 2500L)
+        override fun cancel() = Unit
+        override fun maxAmplitude(): Int = 0
+    }
+
     /** No-op resolver: DM titles are already provided by the fakes, so nothing needs resolving. */
     private val resolver = object : ProfileResolver {
         override fun profile(userId: String): Flow<ResolvedProfile?> = flowOf(null)
@@ -131,9 +156,14 @@ class ChatViewModelsTest {
     private fun conversationsVm(repo: ChatRepository) =
         ConversationsViewModel(repo, resolver, FakeUnreadTracker())
 
-    private fun chatVm(repo: ChatRepository, conversationId: String) =
+    private fun chatVm(
+        repo: ChatRepository,
+        conversationId: String,
+        recorder: VoiceRecorder = FakeVoiceRecorder(),
+    ) =
         ChatViewModel(
             repo, FakeUnreadTracker(), resolver, mediaSaver, ForwardPayloadStore(),
+            recorder, VoicePlayer(),
             SavedStateHandle(mapOf("conversationId" to conversationId)),
         )
 
@@ -336,5 +366,51 @@ class ChatViewModelsTest {
             assertTrue(repo.forwardedAttachments.isEmpty())
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `recording and sending dispatches a voice note with its duration`() = runTest {
+        val repo = FakeChatRepo(convosFlow, msgsFlow)
+        val vm = chatVm(repo, "abc")
+
+        vm.startRecording()
+        vm.stopAndSendRecording()
+
+        assertEquals(1, repo.sentVoices.size)
+        val (recipient, _, duration) = repo.sentVoices.first()
+        assertEquals("abc", recipient)
+        assertEquals(2500L, duration)
+        // The optimistic bubble is dropped once the (successful) send confirms.
+        assertTrue(vm.uiState.value.messages.isEmpty())
+    }
+
+    @Test
+    fun `voice is unsupported when the recorder cannot record`() {
+        val repo = FakeChatRepo(convosFlow, msgsFlow)
+        val vm = chatVm(repo, "abc", recorder = FakeVoiceRecorder(isSupported = false))
+        assertFalse(vm.voiceSupported)
+    }
+
+    @Test
+    fun `voice carrier is inline under the ceiling and IonStore beyond it`() {
+        assertEquals(AttachmentCarrier.INLINE, chooseCarrier(AttachmentKind.VOICE, 120L * 1024))
+        assertEquals(AttachmentCarrier.ION_STORE, chooseCarrier(AttachmentKind.VOICE, 300L * 1024))
+    }
+
+    @Test
+    fun `a remote ref with an audio mime and duration decodes as a voice note`() {
+        val map = remoteAttachmentToMap(
+            uri = "ions://peer/ref",
+            contentId = "cid",
+            mime = VOICE_MIME,
+            size = 4096,
+            name = "voice-1.ogg",
+            width = null,
+            height = null,
+            durationMs = 4200L,
+        )
+        val ui = remoteAttachmentFromMap(map)!!
+        assertEquals(AttachmentKind.VOICE, ui.kind)
+        assertEquals(4200L, ui.durationMs)
     }
 }

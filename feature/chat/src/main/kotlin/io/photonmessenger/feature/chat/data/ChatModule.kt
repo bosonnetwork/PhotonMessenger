@@ -38,4 +38,8 @@ abstract class ChatModule {
     @Binds
     @Singleton
     abstract fun bindMediaSaver(impl: AndroidMediaSaver): MediaSaver
+
+    @Binds
+    @Singleton
+    abstract fun bindVoiceRecorder(impl: AndroidVoiceRecorder): VoiceRecorder
 }

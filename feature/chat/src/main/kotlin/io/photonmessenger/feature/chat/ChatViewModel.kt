@@ -33,17 +33,23 @@ import io.photonmessenger.feature.chat.data.ChatRepository
 import io.photonmessenger.feature.chat.data.ForwardPayload
 import io.photonmessenger.feature.chat.data.ForwardPayloadStore
 import io.photonmessenger.feature.chat.data.MediaSaver
+import io.photonmessenger.feature.chat.data.VoicePlayer
+import io.photonmessenger.feature.chat.data.VoiceRecorder
+import io.photonmessenger.feature.chat.model.AttachmentKind
 import io.photonmessenger.feature.chat.model.AttachmentSource
 import io.photonmessenger.feature.chat.model.ChatHeader
 import io.photonmessenger.feature.chat.model.MessageStatus
 import io.photonmessenger.feature.chat.model.UiAttachment
 import io.photonmessenger.feature.chat.model.UiMessage
+import io.photonmessenger.feature.chat.model.VOICE_MIME
 import io.bosonnetwork.photonmessaging.exceptions.MessageTimeoutException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.File
 import java.io.InputStream
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -57,7 +63,11 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+
+/** Cadence of the recording-bar timer + mic-level updates. */
+private const val RECORDING_TICK_MS = 100L
 
 data class ChatUiState(
     val loading: Boolean = true,
@@ -79,6 +89,17 @@ sealed interface AttachmentDownload {
 /** A resolved local file ready to hand to an external viewer (Open), paired with its mime. */
 data class AttachmentOpen(val file: File, val mime: String)
 
+/** Composer voice-recording state driving the recording bar (Idle -> Active -> sent/cancelled). */
+sealed interface RecordingState {
+    data object Idle : RecordingState
+
+    /** Actively recording. [locked] means hands-free (finger lifted); [amplitude] drives the level. */
+    data class Active(val elapsedMs: Long, val amplitude: Int, val locked: Boolean) : RecordingState
+
+    /** Recorder auto-stopped at the max duration; the note is captured and awaits Send/Delete. */
+    data class Ready(val durationMs: Long) : RecordingState
+}
+
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val repository: ChatRepository,
@@ -86,6 +107,8 @@ class ChatViewModel @Inject constructor(
     private val profileResolver: ProfileResolver,
     private val mediaSaver: MediaSaver,
     private val forwardPayloadStore: ForwardPayloadStore,
+    private val voiceRecorder: VoiceRecorder,
+    private val voicePlayer: VoicePlayer,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -137,6 +160,20 @@ class ChatViewModel @Inject constructor(
      *  the live stream would keep re-emitting the message; filtering it here hides it immediately. */
     private val removedIds = MutableStateFlow<Set<String>>(emptySet())
 
+    /** Whether this device can record voice (needs the OGG/OPUS encoder, API 29+); gates the mic button. */
+    val voiceSupported: Boolean = voiceRecorder.isSupported
+
+    private val _recording = MutableStateFlow<RecordingState>(RecordingState.Idle)
+    val recording: StateFlow<RecordingState> = _recording.asStateFlow()
+
+    /** Single-active voice-note playback state (which note, position, playing) for the bubbles. */
+    val voicePlayback: StateFlow<VoicePlayer.Playback> = voicePlayer.state
+
+    private var recordingStartedAt = 0L
+    private var recordingTicker: Job? = null
+    // The captured file once the recorder auto-stops at the max duration (RecordingState.Ready).
+    private var recordedReady: VoiceRecorder.Recording? = null
+
     init {
         // Viewing a conversation reads it: clear its badge now and suppress unread while it's open.
         unreadTracker.setActiveConversation(conversationId)
@@ -147,6 +184,9 @@ class ChatViewModel @Inject constructor(
 
     override fun onCleared() {
         unreadTracker.setActiveConversation(null)
+        recordingTicker?.cancel()
+        voiceRecorder.cancel()
+        voicePlayer.stop()
         super.onCleared()
     }
 
@@ -305,6 +345,149 @@ class ChatViewModel @Inject constructor(
                 }
         }
     }
+
+    // --- Voice messages -----------------------------------------------------------------------
+
+    /**
+     * Begins recording a voice note (caller must have RECORD_AUDIO). Drives [recording] to Active and
+     * ticks the elapsed time + mic level for the recording bar. On any recorder error the attempt is
+     * abandoned back to Idle with a message.
+     */
+    fun startRecording() {
+        if (_recording.value != RecordingState.Idle) return
+        recordedReady = null
+        voiceRecorder.onMaxDuration = { onMaxDurationReached() }
+        val started = runCatching { voiceRecorder.start() }.isSuccess
+        if (!started) {
+            voiceRecorder.onMaxDuration = null
+            _messages.tryEmit("Couldn't start recording")
+            return
+        }
+        recordingStartedAt = System.currentTimeMillis()
+        _recording.value = RecordingState.Active(elapsedMs = 0, amplitude = 0, locked = false)
+        recordingTicker?.cancel()
+        recordingTicker = viewModelScope.launch {
+            while (isActive) {
+                val current = _recording.value
+                if (current !is RecordingState.Active) break
+                _recording.value = current.copy(
+                    elapsedMs = System.currentTimeMillis() - recordingStartedAt,
+                    amplitude = voiceRecorder.maxAmplitude(),
+                )
+                delay(RECORDING_TICK_MS)
+            }
+        }
+    }
+
+    /** Switches the in-progress recording to hands-free (finger lifted); recording continues. */
+    fun lockRecording() {
+        val current = _recording.value
+        if (current is RecordingState.Active) _recording.value = current.copy(locked = true)
+    }
+
+    private fun onMaxDurationReached() {
+        // Fired on the recorder thread; hop to the main scope to finalize safely.
+        viewModelScope.launch {
+            if (_recording.value !is RecordingState.Active) return@launch
+            recordingTicker?.cancel()
+            val rec = voiceRecorder.stop()
+            if (rec == null) {
+                _recording.value = RecordingState.Idle
+                _messages.tryEmit("Recording failed")
+                return@launch
+            }
+            recordedReady = rec
+            _recording.value = RecordingState.Ready(rec.durationMs)
+        }
+    }
+
+    /** Discards the current recording (slide-to-cancel / delete). */
+    fun cancelRecording() {
+        recordingTicker?.cancel()
+        voiceRecorder.cancel()
+        recordedReady?.file?.delete()
+        recordedReady = null
+        _recording.value = RecordingState.Idle
+    }
+
+    /**
+     * Stops recording and sends the note with the same optimistic treatment as other attachments: an
+     * immediate SENDING bubble that plays from the local file, dropped once the confirmed message lands
+     * (or settled to FAILED, keeping the file for retry). A note too short to have captured audio is
+     * discarded silently.
+     */
+    fun stopAndSendRecording() {
+        recordingTicker?.cancel()
+        val rec = when (_recording.value) {
+            is RecordingState.Ready -> recordedReady
+            is RecordingState.Active -> voiceRecorder.stop()
+            RecordingState.Idle -> null
+        }
+        recordedReady = null
+        _recording.value = RecordingState.Idle
+        if (rec == null) return
+        sendVoiceFile(rec.file, rec.durationMs)
+    }
+
+    private fun sendVoiceFile(file: File, durationMs: Long) {
+        val pendingId = "pending-${System.nanoTime()}"
+        pending.update {
+            it + UiMessage(
+                id = pendingId,
+                text = "",
+                fromMe = true,
+                createdAt = System.currentTimeMillis(),
+                attachment = UiAttachment(
+                    kind = AttachmentKind.VOICE,
+                    mime = VOICE_MIME,
+                    name = file.name,
+                    size = file.length(),
+                    durationMs = durationMs,
+                    source = AttachmentSource.Local(file.absolutePath),
+                ),
+                status = MessageStatus.SENDING,
+            )
+        }
+        launchSendVoice(pendingId, file.absolutePath, durationMs)
+    }
+
+    /** Re-sends a failed optimistic voice bubble in place. */
+    fun retryVoice(message: UiMessage) {
+        val attachment = message.attachment ?: return
+        val source = attachment.source as? AttachmentSource.Local ?: return
+        pending.update { list ->
+            list.map { if (it.id == message.id) it.copy(status = MessageStatus.SENDING) else it }
+        }
+        launchSendVoice(message.id, source.uri, attachment.durationMs ?: 0L)
+    }
+
+    private fun launchSendVoice(pendingId: String, filePath: String, durationMs: Long) {
+        viewModelScope.launch {
+            repository.sendVoice(conversationId, filePath, durationMs)
+                .onSuccess { pending.update { list -> list.filterNot { it.id == pendingId } } }
+                .onFailure { e ->
+                    pending.update { list ->
+                        list.map { if (it.id == pendingId) it.copy(status = MessageStatus.FAILED) else it }
+                    }
+                    _messages.tryEmit("Couldn't send voice message: ${e.message ?: "unknown error"}")
+                }
+        }
+    }
+
+    /** Play/pause a voice note, resolving it to a local file first (inline/remote materialized; local direct). */
+    fun toggleVoice(message: UiMessage) {
+        val attachment = message.attachment ?: return
+        when (val source = attachment.source) {
+            is AttachmentSource.Local -> voicePlayer.toggle(message.id, File(source.uri))
+            else -> viewModelScope.launch {
+                repository.localFile(attachment)
+                    .onSuccess { file -> voicePlayer.toggle(message.id, file) }
+                    .onFailure { e -> _messages.tryEmit("Couldn't play: ${e.message ?: "unavailable"}") }
+            }
+        }
+    }
+
+    fun seekVoice(positionMs: Int) = voicePlayer.seekTo(positionMs)
 
     /** Stashes what to forward (attachment or text) for the forward picker to pick up. */
     fun prepareForward(message: UiMessage) {

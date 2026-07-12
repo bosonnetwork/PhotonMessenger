@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Recording voice messages (mic button in the composer; recording requires API 29+). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Save-As on API 26-28 writes to public storage directly; API 29+ uses MediaStore (no permission). -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"

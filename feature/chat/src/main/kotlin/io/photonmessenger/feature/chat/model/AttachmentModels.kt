@@ -38,7 +38,7 @@ package io.photonmessenger.feature.chat.model
  */
 
 /** Broad rendering category derived from the MIME type. */
-enum class AttachmentKind { IMAGE, FILE }
+enum class AttachmentKind { IMAGE, FILE, VOICE }
 
 /** Where the attachment bytes live. */
 sealed interface AttachmentSource {
@@ -70,6 +70,8 @@ data class UiAttachment(
     val size: Long,
     val width: Int? = null,
     val height: Int? = null,
+    /** Playback length in milliseconds for a [AttachmentKind.VOICE] note; null otherwise. */
+    val durationMs: Long? = null,
     val source: AttachmentSource,
 )
 
@@ -77,18 +79,44 @@ data class UiAttachment(
 enum class AttachmentCarrier { INLINE, ION_STORE }
 
 /**
- * Picks the carrier: only small images go inline; everything else (larger images, files, video)
- * goes to IonStore. The inline target is kept well under the 32 KB MQTT payload cap (spec 4.6).
+ * Picks the carrier. Small images go inline; voice notes go inline up to a larger, voice-specific
+ * ceiling (so a full one-minute Opus note travels in the message body); everything else (larger
+ * images, files, video) goes to IonStore. Inline ceilings are kept under the client's MQTT message
+ * cap (see PhotonMessagingClient); the IonStore branch is only a safety net for oversized voice.
  */
-fun chooseCarrier(kind: AttachmentKind, size: Long): AttachmentCarrier =
-    if (kind == AttachmentKind.IMAGE && size <= INLINE_MAX_BYTES) AttachmentCarrier.INLINE
-    else AttachmentCarrier.ION_STORE
+fun chooseCarrier(kind: AttachmentKind, size: Long): AttachmentCarrier = when (kind) {
+    AttachmentKind.IMAGE -> if (size <= INLINE_MAX_BYTES) AttachmentCarrier.INLINE else AttachmentCarrier.ION_STORE
+    AttachmentKind.VOICE -> if (size <= INLINE_VOICE_MAX_BYTES) AttachmentCarrier.INLINE else AttachmentCarrier.ION_STORE
+    AttachmentKind.FILE -> AttachmentCarrier.ION_STORE
+}
 
-/** Inline payload ceiling (~20 KB), safely below the MQTT 32 KB envelope cap. */
+/** Inline image payload ceiling (~20 KB). */
 const val INLINE_MAX_BYTES: Long = 20 * 1024
+
+/**
+ * Inline voice payload ceiling (~200 KB). A one-minute Opus note is ~120-150 KB, so voice notes ride
+ * inline in practice; the ION_STORE fallback only triggers on a VBR spike beyond this. Stays under
+ * the client's 256 KB MQTT message cap with envelope headroom.
+ */
+const val INLINE_VOICE_MAX_BYTES: Long = 200 * 1024
+
+/** Wire content type for a recorded voice note (Opus in an Ogg container). */
+const val VOICE_MIME: String = "audio/ogg; codecs=opus"
+
+/** Message header names for voice metadata carried alongside an inline note. */
+object VoiceHeaders {
+    /** Playback length in milliseconds (Long). Mirrors [AttachmentRefKeys.DURATION] on the IonStore path. */
+    const val DURATION = "dur"
+}
 
 fun kindOf(mime: String): AttachmentKind =
     if (mime.startsWith("image/")) AttachmentKind.IMAGE else AttachmentKind.FILE
+
+/**
+ * A received attachment is a voice note when it carries a duration and an audio MIME type. This
+ * distinguishes a recorded note from an audio *file* shared via the picker (which has no duration).
+ */
+fun isVoice(mime: String, hasDuration: Boolean): Boolean = hasDuration && mime.startsWith("audio/")
 
 /** Wire keys for the IonStore [AttachmentRef] CBOR object. Kept short for compact CBOR. */
 object AttachmentRefKeys {
@@ -99,6 +127,7 @@ object AttachmentRefKeys {
     const val NAME = "name"
     const val WIDTH = "w"
     const val HEIGHT = "h"
+    const val DURATION = "dur"
 }
 
 /** Encodes a remote attachment as the CBOR object map sent in the message body. */
@@ -110,6 +139,7 @@ fun remoteAttachmentToMap(
     name: String,
     width: Int?,
     height: Int?,
+    durationMs: Long? = null,
 ): Map<String, Any> = buildMap {
     put(AttachmentRefKeys.URI, uri)
     put(AttachmentRefKeys.CONTENT_ID, contentId)
@@ -118,6 +148,7 @@ fun remoteAttachmentToMap(
     put(AttachmentRefKeys.NAME, name)
     width?.let { put(AttachmentRefKeys.WIDTH, it) }
     height?.let { put(AttachmentRefKeys.HEIGHT, it) }
+    durationMs?.let { put(AttachmentRefKeys.DURATION, it) }
 }
 
 /** Decodes the CBOR object map from a received message body into a [UiAttachment]. */
@@ -129,13 +160,15 @@ fun remoteAttachmentFromMap(map: Map<*, *>): UiAttachment? {
     val name = map[AttachmentRefKeys.NAME] as? String ?: "attachment"
     val width = (map[AttachmentRefKeys.WIDTH] as? Number)?.toInt()
     val height = (map[AttachmentRefKeys.HEIGHT] as? Number)?.toInt()
+    val durationMs = (map[AttachmentRefKeys.DURATION] as? Number)?.toLong()
     return UiAttachment(
-        kind = kindOf(mime),
+        kind = if (isVoice(mime, durationMs != null)) AttachmentKind.VOICE else kindOf(mime),
         mime = mime,
         name = name,
         size = size,
         width = width,
         height = height,
+        durationMs = durationMs,
         source = AttachmentSource.Remote(uri, contentId),
     )
 }
