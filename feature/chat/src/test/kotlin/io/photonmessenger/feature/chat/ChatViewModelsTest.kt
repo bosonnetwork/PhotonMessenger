@@ -70,6 +70,9 @@ class ChatViewModelsTest {
             Result.failure<java.io.File>(UnsupportedOperationException("not used"))
         override suspend fun loadOlder(conversationId: String, before: Long, limit: Int) = olderResult
         override suspend fun removeConversation(conversationId: String) = Result.success(Unit)
+        override suspend fun removeMessage(rid: Long) = Result.success(Unit)
+        override suspend fun forwardTargets() =
+            Result.success(emptyList<io.photonmessenger.feature.chat.model.UiForwardTarget>())
     }
 
     /** No-op resolver: DM titles are already provided by the fakes, so nothing needs resolving. */

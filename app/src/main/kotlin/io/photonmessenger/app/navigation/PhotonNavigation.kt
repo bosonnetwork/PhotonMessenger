@@ -47,4 +47,5 @@ object Routes {
     const val ADD_DEVICE = "addDevice"
     const val APPROVE_DEVICE = "approveDevice"
     const val SHOW_KEY = "showKey"
+    const val FORWARD = "forward"
 }

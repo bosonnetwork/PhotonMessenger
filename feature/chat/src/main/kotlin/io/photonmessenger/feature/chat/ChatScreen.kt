@@ -54,14 +54,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Forward
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -92,6 +97,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.SubcomposeLayout
@@ -109,6 +115,7 @@ import kotlin.math.ceil
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import io.photonmessenger.core.designsystem.component.ConfirmDialog
 import io.photonmessenger.core.designsystem.component.PhotonAvatar
 import io.photonmessenger.core.designsystem.component.ResponsiveContent
 import io.photonmessenger.core.designsystem.component.formatBubbleTime
@@ -129,6 +136,7 @@ fun ChatScreen(
     modifier: Modifier = Modifier,
     onOpenChannelDetail: (String) -> Unit = {},
     onOpenContactDetail: (String) -> Unit = {},
+    onForwardMessage: (String) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -138,6 +146,8 @@ fun ChatScreen(
     val snackbar = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
     var draft by remember { mutableStateOf("") }
+    // Message pending a delete confirmation (long-press -> Delete). Confirming removes it locally.
+    var deleteTarget by remember { mutableStateOf<UiMessage?>(null) }
 
     val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) viewModel.sendAttachment(uri.toString())
@@ -298,6 +308,8 @@ fun ChatScreen(
                                 download = download,
                                 onDownload = { viewModel.download(it) },
                                 onRetry = { viewModel.retrySend(SendFailure("", it.text, it.id)) },
+                                onForward = { onForwardMessage(it.text) },
+                                onDelete = { deleteTarget = it },
                             )
                         }
                     }
@@ -324,6 +336,16 @@ fun ChatScreen(
                 }
             }
         }
+    }
+
+    deleteTarget?.let { target ->
+        ConfirmDialog(
+            title = "Delete message?",
+            text = "This removes the message from this device only.",
+            confirmLabel = "Delete",
+            onConfirm = { viewModel.deleteMessage(target) },
+            onDismiss = { deleteTarget = null },
+        )
     }
 }
 
@@ -353,6 +375,8 @@ private fun MessageBubble(
     download: AttachmentDownload?,
     onDownload: (UiAttachment) -> Unit,
     onRetry: (UiMessage) -> Unit,
+    onForward: (UiMessage) -> Unit,
+    onDelete: (UiMessage) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val alignment = if (message.fromMe) Alignment.End else Alignment.Start
@@ -373,6 +397,8 @@ private fun MessageBubble(
     }
     val clipboard = LocalClipboardManager.current
     val haptics = LocalHapticFeedback.current
+    // Long-press opens the message action menu (Copy / Forward / Delete). Reset per message id.
+    var menuOpen by remember(message.id) { mutableStateOf(false) }
 
     // Cap the bubble at a share of the window (Telegram-style) rather than a fixed 300.dp, so wide
     // screens use the available width instead of wrapping text early into a narrow column. Still
@@ -385,42 +411,59 @@ private fun MessageBubble(
         .then(if (message.status == MessageStatus.SENDING) Modifier.alpha(0.75f) else Modifier)
 
     Column(modifier = modifier.fillMaxWidth(), horizontalAlignment = alignment) {
-        Surface(
-            color = color,
-            shape = shape,
-            modifier = bubbleModifier.combinedClickable(
-                onClick = {},
-                onLongClick = {
-                    if (message.text.isNotBlank()) {
+        Box {
+            Surface(
+                color = color,
+                shape = shape,
+                modifier = bubbleModifier.combinedClickable(
+                    onClick = {},
+                    onLongClick = {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        clipboard.setText(AnnotatedString(message.text))
+                        menuOpen = true
+                    },
+                ),
+            ) {
+                Column {
+                    if (isChannel && showSender && !message.fromMe && message.senderName != null) {
+                        Text(
+                            text = message.senderName,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = identityColor(message.senderId),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 6.dp),
+                        )
                     }
-                },
-            ),
-        ) {
-            Column {
-                if (isChannel && showSender && !message.fromMe && message.senderName != null) {
-                    Text(
-                        text = message.senderName,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = identityColor(message.senderId),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 6.dp),
-                    )
-                }
-                if (message.attachment != null) {
-                    AttachmentContent(message.attachment, download, onColor, onDownload)
-                    BubbleMeta(message, onColor, Modifier.align(Alignment.End))
-                } else {
-                    BubbleTextContent(
-                        message = message,
-                        onColor = onColor,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                    )
+                    if (message.attachment != null) {
+                        AttachmentContent(message.attachment, download, onColor, onDownload)
+                        BubbleMeta(message, onColor, Modifier.align(Alignment.End))
+                    } else {
+                        BubbleTextContent(
+                            message = message,
+                            onColor = onColor,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                        )
+                    }
                 }
             }
+            // Telegram-style selected-state tint while the action menu is open.
+            if (menuOpen) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clip(shape)
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
+                )
+            }
+            MessageActionMenu(
+                expanded = menuOpen,
+                showTextActions = message.text.isNotBlank(),
+                onDismiss = { menuOpen = false },
+                onCopy = { clipboard.setText(AnnotatedString(message.text)) },
+                onForward = { onForward(message) },
+                onDelete = { onDelete(message) },
+            )
         }
         if (failed) {
             Text(
@@ -432,6 +475,47 @@ private fun MessageBubble(
                     .padding(horizontal = 12.dp, vertical = 2.dp),
             )
         }
+    }
+}
+
+/**
+ * The long-press action menu for a message bubble (Telegram-style). Anchored to the pressed bubble
+ * and intentionally list-driven so future actions (Reply, Select, ...) slot in as extra items.
+ * [showTextActions] gates Copy/Forward, which only make sense for a message that carries text.
+ */
+@Composable
+private fun MessageActionMenu(
+    expanded: Boolean,
+    showTextActions: Boolean,
+    onDismiss: () -> Unit,
+    onCopy: () -> Unit,
+    onForward: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        if (showTextActions) {
+            DropdownMenuItem(
+                text = { Text("Copy") },
+                leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) },
+                onClick = { onDismiss(); onCopy() },
+            )
+            DropdownMenuItem(
+                text = { Text("Forward") },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Forward, contentDescription = null) },
+                onClick = { onDismiss(); onForward() },
+            )
+        }
+        DropdownMenuItem(
+            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+            leadingIcon = {
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                )
+            },
+            onClick = { onDismiss(); onDelete() },
+        )
     }
 }
 

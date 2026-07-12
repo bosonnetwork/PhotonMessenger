@@ -33,6 +33,7 @@ import io.photonmessenger.feature.chat.model.AttachmentSource
 import io.photonmessenger.feature.chat.model.ChatHeader
 import io.photonmessenger.feature.chat.model.UiAttachment
 import io.photonmessenger.feature.chat.model.UiConversation
+import io.photonmessenger.feature.chat.model.UiForwardTarget
 import io.photonmessenger.feature.chat.model.UiMessage
 import io.photonmessenger.feature.chat.model.chooseCarrier
 import io.photonmessenger.feature.chat.model.kindOf
@@ -80,6 +81,16 @@ interface ChatRepository {
 
     suspend fun loadOlder(conversationId: String, before: Long, limit: Int): Result<List<UiMessage>>
     suspend fun removeConversation(conversationId: String): Result<Unit>
+
+    /** Removes a single message from the local store on this device (by its store-assigned rid). */
+    suspend fun removeMessage(rid: Long): Result<Unit>
+
+    /**
+     * Destinations a message can be forwarded to: existing conversations (marked [UiForwardTarget.recent])
+     * followed by any other non-blocked contacts. Titles/avatars are enriched in the ViewModel via the
+     * shared profile resolver, mirroring the conversation list.
+     */
+    suspend fun forwardTargets(): Result<List<UiForwardTarget>>
 
     companion object {
         const val PAGE_SIZE = 50
@@ -293,6 +304,55 @@ class ChatRepositoryImpl @Inject constructor(
     override suspend fun removeConversation(conversationId: String): Result<Unit> = runCatching {
         client().removeConversation(parseId(conversationId)).awaitResult()
         Unit
+    }
+
+    override suspend fun removeMessage(rid: Long): Result<Unit> = runCatching {
+        client().removeMessage(rid).awaitResult()
+        Unit
+    }
+
+    override suspend fun forwardTargets(): Result<List<UiForwardTarget>> = runCatching {
+        val client = client()
+        val conversations = client.getConversations().awaitResult()
+        val contacts = client.getContacts().awaitResult()
+
+        // Existing conversations first (most-recent first); the library-provided title is enriched in
+        // the ViewModel just like the chat list.
+        val recent = conversations.map { it.toUi() }.map { c ->
+            UiForwardTarget(
+                id = c.id,
+                title = c.title,
+                isChannel = c.isChannel,
+                recent = true,
+                updatedAt = c.updatedAt,
+                peerName = c.peerName,
+                remark = c.remark,
+            )
+        }.sortedByDescending { it.updatedAt }
+
+        val recentIds = recent.mapTo(HashSet()) { it.id }
+
+        // Remaining contacts (and channels) the user hasn't opened a conversation with yet; blocked
+        // contacts are never a forward destination.
+        val others = contacts
+            .filter { !it.isBlocked && it.getId().toString() !in recentIds }
+            .map { contact ->
+                val id = contact.getId().toString()
+                val isChannel = contact is Channel
+                val remark = contact.getRemark().orElse(null)?.takeIf { it.isNotBlank() }
+                val name = contact.getName().orElse(null)?.takeIf { it.isNotBlank() }
+                UiForwardTarget(
+                    id = id,
+                    title = remark ?: name ?: shortId(id),
+                    isChannel = isChannel,
+                    recent = false,
+                    peerName = if (isChannel) null else name,
+                    remark = if (isChannel) null else remark,
+                )
+            }
+            .sortedBy { it.title.lowercase() }
+
+        recent + others
     }
 
     /**

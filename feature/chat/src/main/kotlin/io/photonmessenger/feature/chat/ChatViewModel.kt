@@ -124,6 +124,10 @@ class ChatViewModel @Inject constructor(
     /** Optimistic outgoing bubbles shown immediately on send, dropped once confirmed (M3-4). */
     private val pending = MutableStateFlow<List<UiMessage>>(emptyList())
 
+    /** Ids of messages deleted locally on this device. A local remove fires no listener callback, so
+     *  the live stream would keep re-emitting the message; filtering it here hides it immediately. */
+    private val removedIds = MutableStateFlow<Set<String>>(emptySet())
+
     init {
         // Viewing a conversation reads it: clear its badge now and suppress unread while it's open.
         unreadTracker.setActiveConversation(conversationId)
@@ -138,10 +142,13 @@ class ChatViewModel @Inject constructor(
     }
 
     val uiState: StateFlow<ChatUiState> =
-        combine(repository.messages(conversationId), olderMessages, pending) { live, older, sending ->
+        combine(repository.messages(conversationId), olderMessages, pending, removedIds) { live, older, sending, removed ->
             // De-duplicate the pagination boundary by id, then order oldest -> newest. Pending
-            // bubbles carry temp ids so they never collide with confirmed messages.
-            val merged = (older + live + sending).associateBy { it.id }.values.sortedBy { it.createdAt }
+            // bubbles carry temp ids so they never collide with confirmed messages. Locally deleted
+            // ids are filtered out (a local remove fires no callback to drop them from the stream).
+            val merged = (older + live + sending).associateBy { it.id }.values
+                .filterNot { it.id in removed }
+                .sortedBy { it.createdAt }
             ChatUiState(loading = false, messages = merged)
         }
             .catch { emit(ChatUiState(loading = false, error = it.message)) }
@@ -219,6 +226,23 @@ class ChatViewModel @Inject constructor(
     private fun sendErrorMessage(e: Throwable): String = when (e) {
         is MessageTimeoutException -> "Message timed out"
         else -> "Couldn't send: ${e.message ?: "unknown error"}"
+    }
+
+    /**
+     * Deletes a message locally on this device. Hides it immediately (optimistically) and, when the
+     * message is backed by a stored row, removes it from the local store; if that fails the bubble is
+     * restored and an error is surfaced. Optimistic bubbles (no [UiMessage.rid]) are simply dropped.
+     */
+    fun deleteMessage(message: UiMessage) {
+        removedIds.update { it + message.id }
+        pending.update { list -> list.filterNot { it.id == message.id } }
+        val rid = message.rid ?: return
+        viewModelScope.launch {
+            repository.removeMessage(rid).onFailure { e ->
+                removedIds.update { it - message.id }
+                _messages.tryEmit("Couldn't delete message: ${e.message ?: "unknown error"}")
+            }
+        }
     }
 
     fun sendAttachment(uri: String) {

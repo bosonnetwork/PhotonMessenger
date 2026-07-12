@@ -48,6 +48,23 @@ data class UiConversation(
 )
 
 /**
+ * A destination the user can forward a message to: an existing DM/channel conversation or any
+ * contact. [recent] marks targets that already have a conversation, so the picker can surface them
+ * first; [peerName]/[remark] let the ViewModel upgrade a short-id title the same way the chat list
+ * does.
+ */
+data class UiForwardTarget(
+    val id: String,
+    val title: String,
+    val isChannel: Boolean,
+    val recent: Boolean,
+    val updatedAt: Long = 0L,
+    val avatarUrl: String? = null,
+    val peerName: String? = null,
+    val remark: String? = null,
+)
+
+/**
  * Header shown at the top of a chat (M4-3). For a channel [isChannel] is true and [subtitle] carries
  * the member count so the same chat screen serves DMs and channels; the title links to the channel
  * detail/roster (channels) or the contact profile (DMs).
@@ -75,6 +92,9 @@ data class UiMessage(
     val senderId: String? = null,
     /** Sender display name; shown above incoming bubbles in channels (M4). */
     val senderName: String? = null,
+    /** Store-assigned numeric id used to remove this message locally; null for optimistic bubbles
+     *  (M3-4) that are not yet persisted. */
+    val rid: Long? = null,
 )
 
 fun Conversation.toUi(avatarUrl: String? = null): UiConversation {
@@ -109,6 +129,7 @@ fun Message.toUi(myUserId: Id?, resolveSenderName: ((Id) -> String?)? = null): U
         attachment = attachment,
         senderId = from?.toString(),
         senderName = if (!fromMe && from != null) resolveSenderName?.invoke(from) else null,
+        rid = getRid().takeIf { it > 0 },
     )
 }
 
