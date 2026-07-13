@@ -331,7 +331,7 @@ class AuthRepository @Inject constructor(
     }
 
     private companion object {
-        const val APP_NAME = "PhotonMessenger"
+        const val APP_NAME = "Photon"
         const val DEFAULT_DEVICE_NAME = "Android device"
         const val NONCE_BYTES = 32
         val B64URL: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()

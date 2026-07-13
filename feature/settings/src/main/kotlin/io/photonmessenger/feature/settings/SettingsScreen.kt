@@ -358,7 +358,7 @@ private fun AboutSection() {
     }
     SectionTitle("About")
     ListItem(
-        headlineContent = { Text("PhotonMessenger") },
+        headlineContent = { Text("Photon") },
         supportingContent = { Text("Version $version - decentralized messaging on Boson") },
     )
 }
@@ -568,7 +568,7 @@ private fun NotificationSettings(
         if (!notificationsAllowed) {
             GuidanceCard(
                 title = "Notifications are turned off",
-                body = "Allow notifications so PhotonMessenger can alert you to new messages.",
+                body = "Allow notifications so Photon can alert you to new messages.",
                 action = "Allow",
                 onClick = { requestPermission.launch(Manifest.permission.POST_NOTIFICATIONS) },
             )
@@ -576,7 +576,7 @@ private fun NotificationSettings(
         if (!batteryUnrestricted) {
             GuidanceCard(
                 title = "Allow background activity",
-                body = "Exempt PhotonMessenger from battery optimization so it stays connected and " +
+                body = "Exempt Photon from battery optimization so it stays connected and " +
                     "delivers messages reliably.",
                 action = "Open settings",
                 onClick = {

@@ -40,7 +40,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Saves a received attachment into a public collection so it survives outside the app's cache
- * (the "Save" action): images go to `Pictures/PhotonMessenger`, everything else to
+ * (the "Save" action): images go to `Pictures/Photon`, everything else to
  * `Downloads`.
  */
 interface MediaSaver {
@@ -133,6 +133,6 @@ class AndroidMediaSaver @Inject constructor(
     }
 
     private companion object {
-        const val IMAGE_SUBDIR = "PhotonMessenger"
+        const val IMAGE_SUBDIR = "Photon"
     }
 }

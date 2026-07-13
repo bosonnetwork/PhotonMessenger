@@ -119,7 +119,7 @@ fun OnboardingScreen(
             }
         }
         Spacer(Modifier.height(16.dp))
-        Text(text = "PhotonMessenger", style = MaterialTheme.typography.headlineMedium)
+        Text(text = "Photon", style = MaterialTheme.typography.headlineMedium)
         Text(
             text = "Decentralized messaging on Boson",
             style = MaterialTheme.typography.bodyMedium,

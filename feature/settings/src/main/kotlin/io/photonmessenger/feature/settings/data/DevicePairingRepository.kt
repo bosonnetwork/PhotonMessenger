@@ -227,7 +227,7 @@ class DevicePairingRepositoryImpl @Inject constructor(
     }
 
     private fun decodePayload(qrText: String): PairingPayload =
-        PairingPayload.decode(qrText) ?: throw AppError.InvalidInput("Not a PhotonMessenger pairing code")
+        PairingPayload.decode(qrText) ?: throw AppError.InvalidInput("Not a Photon pairing code")
 
     private fun newNonce(): ByteArray = ByteArray(NONCE_BYTES).also { RANDOM.nextBytes(it) }
 
@@ -240,7 +240,7 @@ class DevicePairingRepositoryImpl @Inject constructor(
         recoverCatching { throw it.toDirectorError() }
 
     private companion object {
-        const val APP_NAME = "PhotonMessenger"
+        const val APP_NAME = "Photon"
         const val DEFAULT_DEVICE_NAME = "New device"
         const val NONCE_BYTES = 32
         val RANDOM = SecureRandom()

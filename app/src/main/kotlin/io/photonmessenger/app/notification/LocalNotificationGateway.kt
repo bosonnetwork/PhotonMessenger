@@ -57,7 +57,7 @@ class LocalNotificationGateway(
             CHANNEL_SERVICE,
             "Connection",
             NotificationManager.IMPORTANCE_LOW,
-        ).apply { description = "Keeps PhotonMessenger connected for new messages" }
+        ).apply { description = "Keeps Photon connected for new messages" }
 
         // IMPORTANCE_HIGH gives the system defaults the request asks for - default sound, heads-up
         // (floating) banners, and lock-screen display - all still overridable per-channel by the user.
@@ -88,7 +88,7 @@ class LocalNotificationGateway(
     override fun foregroundNotification(contentText: String): Notification =
         NotificationCompat.Builder(context, CHANNEL_SERVICE)
             .setSmallIcon(R.drawable.ic_launcher)
-            .setContentTitle("PhotonMessenger")
+            .setContentTitle("Photon")
             .setContentText(contentText)
             .setOngoing(true)
             .setContentIntent(openAppIntent())
@@ -100,7 +100,7 @@ class LocalNotificationGateway(
         if (!prefs.enabled) return
 
         // When previews are off, hide the sender and content behind a generic message.
-        val shownTitle = if (prefs.showPreview) title else "PhotonMessenger"
+        val shownTitle = if (prefs.showPreview) title else "Photon"
         val shownBody = if (prefs.showPreview) body else "You have a new message"
 
         val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
@@ -121,7 +121,7 @@ class LocalNotificationGateway(
 
         // Mirror the message path's preview handling: with previews off, hide the sender behind a
         // generic prompt. Lock-screen visibility of the shown content stays a system-config concern.
-        val shownTitle = if (prefs.showPreview) title else "PhotonMessenger"
+        val shownTitle = if (prefs.showPreview) title else "Photon"
         val shownBody = if (prefs.showPreview) body else "You have a new friend request"
 
         val notification = NotificationCompat.Builder(context, CHANNEL_REQUESTS)
