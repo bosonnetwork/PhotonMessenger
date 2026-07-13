@@ -22,42 +22,49 @@
 
 package io.photonmessenger.core.boson
 
+import io.bosonnetwork.json.Json
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChannelInviteTest {
     @Test
-    fun `round-trips through json`() {
+    fun `round-trips the ticket bytes and metadata through cbor`() {
+        val ticketBytes = byteArrayOf(1, 2, 3, 4, 5, 0, -7, 42)
         val invite = ChannelInvite(
-            ticket = "{\"c\":\"abc\",\"sig\":\"xyz\"}",
-            channelId = "channel123",
+            ticket = ticketBytes,
             channelName = "Design Team",
-            inviter = "alice456",
             expiresAt = 1_750_000_000_000L,
         )
 
-        val decoded = ChannelInvite.fromJson(invite.toJson())
+        val decoded = ChannelInvite.fromBytes(invite.toBytes())!!
 
+        // The ticket must survive as raw bytes (a CBOR byte string), not base64 text.
+        assertArrayEquals(ticketBytes, decoded.ticket)
+        assertEquals("Design Team", decoded.channelName)
+        assertEquals(1_750_000_000_000L, decoded.expiresAt)
         assertEquals(invite, decoded)
     }
 
     @Test
     fun `rejects a body missing the ticket`() {
-        val json = "{\"channelId\":\"c\",\"inviter\":\"a\",\"channelName\":\"X\"}"
-        assertNull(ChannelInvite.fromJson(json))
+        val bytes = Json.toBytes(linkedMapOf("n" to "X", "e" to 1L))
+        assertNull(ChannelInvite.fromBytes(bytes))
     }
 
     @Test
-    fun `rejects a non-json body`() {
-        assertNull(ChannelInvite.fromJson("not json at all"))
+    fun `rejects a non-cbor body`() {
+        assertNull(ChannelInvite.fromBytes(byteArrayOf(0x7b, 0x7d)))
     }
 
     @Test
     fun `tolerates a missing channel name and expiry`() {
-        val json = "{\"ticket\":\"t\",\"channelId\":\"c\",\"inviter\":\"a\"}"
-        val decoded = ChannelInvite.fromJson(json)
-        assertEquals("", decoded?.channelName)
-        assertEquals(0L, decoded?.expiresAt)
+        val bytes = Json.toBytes(linkedMapOf("t" to byteArrayOf(9, 9)))
+        val decoded = ChannelInvite.fromBytes(bytes)!!
+        assertTrue(decoded.ticket.isNotEmpty())
+        assertEquals("", decoded.channelName)
+        assertEquals(0L, decoded.expiresAt)
     }
 }

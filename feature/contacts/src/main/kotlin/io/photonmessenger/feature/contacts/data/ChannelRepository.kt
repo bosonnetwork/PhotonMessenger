@@ -186,16 +186,15 @@ class ChannelRepositoryImpl @Inject constructor(
         // The ticket API mints with the default expiration; mirror it for the display-only expiry (the
         // recipient still gates joining on the ticket's own validity).
         val invite = ChannelInvite(
-            ticket = ticket.toString(),
-            channelId = channelId,
+            ticket = ticket.toBytes(),
             channelName = channel.name.orElse(null)?.takeIf { it.isNotBlank() } ?: shortId(channelId),
-            inviter = client.userId.toString(),
             expiresAt = System.currentTimeMillis() + InviteTicket.DEFAULT_EXPIRATION,
         )
+        // A dedicated content type identifies the invite; the CBOR body carries the ticket + display
+        // metadata. No custom header is needed.
         client.message(invitee)
-            .contentText(invite.toJson())
-            .contentType(ChannelInvite.INVITE_CONTENT_TYPE)
-            .header(ChannelInvite.INVITE_HEADER, ChannelInvite.INVITE_TYPE)
+            .contentType(ChannelInvite.CONTENT_TYPE)
+            .contentBinary(invite.toBytes())
             .send().awaitResult()
         Unit
     }

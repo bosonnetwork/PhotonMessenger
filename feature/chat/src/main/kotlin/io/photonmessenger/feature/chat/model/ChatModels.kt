@@ -142,16 +142,15 @@ fun Message.toUi(myUserId: Id?, resolveSenderName: ((Id) -> String?)? = null): U
 }
 
 /**
- * Reads a channel-invite payload out of a message, discriminating on the message-type header (see
+ * Reads a channel-invite payload out of a message, discriminating on its dedicated content type (see
  * [ChannelInvite]); returns null for any other message. A malformed invite body also yields null, so
  * it degrades to a plain (empty) message rather than crashing the stream.
  */
 private fun Message.extractInvite(): ChannelInvite? {
     val content = getPayloadAsContent()
-    val type = content.headers[ChannelInvite.INVITE_HEADER] as? String ?: return null
-    if (type != ChannelInvite.INVITE_TYPE) return null
-    val json = runCatching { content.asText() }.getOrNull() ?: return null
-    return ChannelInvite.fromJson(json)
+    if (!content.contentType.startsWith(ChannelInvite.CONTENT_TYPE)) return null
+    val bytes = runCatching { content.asBinary() }.getOrNull() ?: return null
+    return ChannelInvite.fromBytes(bytes)
 }
 
 /**

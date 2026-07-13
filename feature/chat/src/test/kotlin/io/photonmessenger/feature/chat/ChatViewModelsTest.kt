@@ -60,6 +60,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -93,10 +94,10 @@ class ChatViewModelsTest {
             sentTexts += recipientId to text
             return sendResult
         }
-        /** Records every invite ticket a Join tried to consume. */
-        val joinedTickets = mutableListOf<String>()
+        /** Records every invite ticket (CBOR bytes) a Join tried to consume. */
+        val joinedTickets = mutableListOf<ByteArray>()
         var joinResult: Result<String> = Result.success("joined-channel")
-        override suspend fun joinChannel(ticket: String): Result<String> {
+        override suspend fun joinChannel(ticket: ByteArray): Result<String> {
             joinedTickets += ticket
             return joinResult
         }
@@ -439,11 +440,10 @@ class ChatViewModelsTest {
         val repo = FakeChatRepo(convosFlow, msgsFlow).apply { joinResult = Result.success("chan-9") }
         val store = FakeChannelInviteStore()
         val vm = chatVm(repo, "abc", inviteStore = store)
+        val ticketBytes = byteArrayOf(7, 7, 7, 1, 2)
         val invite = ChannelInvite(
-            ticket = "ticket-xyz",
-            channelId = "chan-9",
+            ticket = ticketBytes,
             channelName = "Design",
-            inviter = "alice",
             expiresAt = System.currentTimeMillis() + 60_000,
         )
         val message = UiMessage("inv1", "", fromMe = false, createdAt = 1, invite = invite)
@@ -453,7 +453,8 @@ class ChatViewModelsTest {
             assertEquals("chan-9", awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
-        assertEquals(listOf("ticket-xyz"), repo.joinedTickets)
+        assertEquals(1, repo.joinedTickets.size)
+        assertArrayEquals(ticketBytes, repo.joinedTickets.first())
         assertEquals(InviteAction.JOINED, store.state.value["inv1"])
     }
 
@@ -463,10 +464,8 @@ class ChatViewModelsTest {
         val store = FakeChannelInviteStore()
         val vm = chatVm(repo, "abc", inviteStore = store)
         val invite = ChannelInvite(
-            ticket = "t",
-            channelId = "c",
+            ticket = byteArrayOf(1),
             channelName = "X",
-            inviter = "a",
             expiresAt = System.currentTimeMillis() + 60_000,
         )
         val message = UiMessage("inv2", "", fromMe = false, createdAt = 1, invite = invite)

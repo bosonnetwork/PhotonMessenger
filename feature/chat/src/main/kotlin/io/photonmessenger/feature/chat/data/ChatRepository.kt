@@ -78,11 +78,11 @@ interface ChatRepository {
     suspend fun sendText(recipientId: String, text: String): Result<Unit>
 
     /**
-     * Joins a channel from the invite-ticket string carried in a received channel-invite message;
+     * Joins a channel from the (CBOR) invite-ticket bytes carried in a received channel-invite message;
      * returns the joined channel id so the caller can open it. Runs entirely over the messaging client,
      * so the chat feature needs no dependency on the channels feature.
      */
-    suspend fun joinChannel(ticket: String): Result<String>
+    suspend fun joinChannel(ticket: ByteArray): Result<String>
 
     /** Prepares (compresses) the picked media at [uriString] and sends it inline or via IonStore. */
     suspend fun sendAttachment(recipientId: String, uriString: String): Result<Unit>
@@ -254,9 +254,9 @@ class ChatRepositoryImpl @Inject constructor(
         Unit
     }
 
-    override suspend fun joinChannel(ticket: String): Result<String> = runCatching {
+    override suspend fun joinChannel(ticket: ByteArray): Result<String> = runCatching {
         val parsed = try {
-            InviteTicket.fromString(ticket.trim())
+            InviteTicket.fromBytes(ticket)
         } catch (e: Exception) {
             throw AppError.InvalidInput("Invalid invite ticket", e)
         }

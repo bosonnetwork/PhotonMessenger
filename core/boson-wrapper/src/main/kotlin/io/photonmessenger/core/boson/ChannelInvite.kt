@@ -23,71 +23,69 @@
 package io.photonmessenger.core.boson
 
 import io.bosonnetwork.json.Json
+import io.bosonnetwork.photonmessaging.InviteTicket
 
 /**
  * The payload of a channel-invite chat message. A named invite ticket is delivered to its invitee as
- * an ordinary message whose body is this JSON object, tagged with content type [INVITE_CONTENT_TYPE]
- * and the [INVITE_HEADER]=[INVITE_TYPE] header so the recipient's chat can recognise it and render an
- * actionable invitation instead of an opaque ticket string.
+ * a message whose {@code Content-Type} is [InviteTicket.CONTENT_TYPE]; the dedicated content type lets
+ * the recipient recognize it (and preview it) without a custom header. The body is this payload,
+ * CBOR-encoded ([toBytes]).
  *
- * [ticket] is the serialized invite ticket used to join; the remaining fields let the recipient render
- * the card (and a future richer invite surface) without parsing the ticket or performing a lookup.
+ * [ticket] is the serialized invite ticket (its own CBOR form, [InviteTicket.toBytes]) kept opaque
+ * here and parsed only when joining. [channelName] and [expiresAt] are carried alongside so the
+ * recipient's card renders (and shows its expiry) without parsing the ticket.
  */
 data class ChannelInvite(
-    /** The serialized invite ticket string (as produced by the messaging client) used to join. */
-    val ticket: String,
-    val channelId: String,
+    /** The serialized invite ticket ([InviteTicket.toBytes]); opaque here, parsed only to join. */
+    val ticket: ByteArray,
     val channelName: String,
-    /** The inviter's user id (base58). */
-    val inviter: String,
     /** Ticket expiration time in epoch milliseconds; drives the "expired" state on the card. */
     val expiresAt: Long,
 ) {
-    /** Serializes this invite to the JSON string carried in the message body. */
-    fun toJson(): String = Json.toString(
+    /** CBOR-encodes this invite for the message body. */
+    fun toBytes(): ByteArray = Json.toBytes(
         linkedMapOf(
             KEY_TICKET to ticket,
-            KEY_CHANNEL_ID to channelId,
             KEY_CHANNEL_NAME to channelName,
-            KEY_INVITER to inviter,
             KEY_EXPIRES_AT to expiresAt,
         )
     )
 
+    // ByteArray fields are excluded from the generated equals/hashCode (reference-based). Equality is
+    // not relied upon in production; tests compare fields explicitly.
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is ChannelInvite) return false
+        return ticket.contentEquals(other.ticket) &&
+            channelName == other.channelName &&
+            expiresAt == other.expiresAt
+    }
+
+    override fun hashCode(): Int {
+        var result = ticket.contentHashCode()
+        result = 31 * result + channelName.hashCode()
+        result = 31 * result + expiresAt.hashCode()
+        return result
+    }
+
     companion object {
-        /** Content type marking a message body as a channel invite (see also [INVITE_HEADER]). */
-        const val INVITE_CONTENT_TYPE: String = "application/json"
+        /** Content type marking a message body as a channel invite. */
+        const val CONTENT_TYPE: String = InviteTicket.CONTENT_TYPE
 
-        /** Message header key whose value identifies the message type. */
-        const val INVITE_HEADER: String = "mt"
-
-        /** [INVITE_HEADER] value that identifies a channel-invite message. */
-        const val INVITE_TYPE: String = "channel-invite"
-
-        private const val KEY_TICKET = "ticket"
-        private const val KEY_CHANNEL_ID = "channelId"
-        private const val KEY_CHANNEL_NAME = "channelName"
-        private const val KEY_INVITER = "inviter"
-        private const val KEY_EXPIRES_AT = "expiresAt"
+        private const val KEY_TICKET = "t"
+        private const val KEY_CHANNEL_NAME = "n"
+        private const val KEY_EXPIRES_AT = "e"
 
         /**
-         * Parses a channel-invite JSON body, or returns null if it is missing required fields (a
-         * malformed or partial payload is treated as "not an invite" rather than crashing the chat).
+         * Parses a CBOR invite body, or returns null if it is missing the ticket (a malformed or
+         * partial payload is treated as "not an invite" rather than crashing the chat).
          */
-        fun fromJson(json: String): ChannelInvite? {
-            val map = runCatching { Json.parse(json) }.getOrNull() ?: return null
-            val ticket = (map[KEY_TICKET] as? String)?.takeIf { it.isNotBlank() } ?: return null
-            val channelId = (map[KEY_CHANNEL_ID] as? String)?.takeIf { it.isNotBlank() } ?: return null
-            val inviter = (map[KEY_INVITER] as? String)?.takeIf { it.isNotBlank() } ?: return null
+        fun fromBytes(bytes: ByteArray): ChannelInvite? {
+            val map = runCatching { Json.parse(bytes) }.getOrNull() ?: return null
+            val ticket = map[KEY_TICKET] as? ByteArray ?: return null
             val channelName = (map[KEY_CHANNEL_NAME] as? String).orEmpty()
             val expiresAt = (map[KEY_EXPIRES_AT] as? Number)?.toLong() ?: 0L
-            return ChannelInvite(
-                ticket = ticket,
-                channelId = channelId,
-                channelName = channelName,
-                inviter = inviter,
-                expiresAt = expiresAt,
-            )
+            return ChannelInvite(ticket = ticket, channelName = channelName, expiresAt = expiresAt)
         }
     }
 }
