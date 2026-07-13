@@ -23,6 +23,7 @@
 package io.photonmessenger.feature.contacts
 
 import android.content.Intent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -102,6 +103,7 @@ private sealed interface MemberAction {
 fun ChannelDetailScreen(
     onBack: () -> Unit,
     onOpenChat: (String) -> Unit = {},
+    onInviteContact: (String) -> Unit = {},
     viewModel: ChannelDetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -110,6 +112,7 @@ fun ChannelDetailScreen(
     var confirmLeave by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var inviteTicket by remember { mutableStateOf<String?>(null) }
+    var showInviteChooser by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.messages.collect { snackbar.showSnackbar(it) }
@@ -136,7 +139,7 @@ fun ChannelDetailScreen(
                     state.detail?.channel?.let { channel ->
                         ChannelOverflow(
                             channel = channel,
-                            onInvite = { viewModel.invite(null) },
+                            onInvite = { showInviteChooser = true },
                             onRotateKey = viewModel::rotateSessionKey,
                             onLeave = { confirmLeave = true },
                             onDelete = { confirmDelete = true },
@@ -154,7 +157,7 @@ fun ChannelDetailScreen(
                 state.error != null -> ErrorState(state.error ?: "Error")
                 detail == null -> EmptyState("Channel not found")
                 else -> LazyColumn(Modifier.fillMaxSize()) {
-                    item { ChannelHeader(detail.channel, onInvite = { viewModel.invite(null) }) }
+                    item { ChannelHeader(detail.channel, onInvite = { showInviteChooser = true }) }
                     item {
                         Text(
                             "${detail.members.size} MEMBERS",
@@ -226,12 +229,59 @@ fun ChannelDetailScreen(
         )
     }
 
+    if (showInviteChooser) {
+        InviteTypeDialog(
+            onInviteContact = {
+                showInviteChooser = false
+                onInviteContact(viewModel.channelId)
+            },
+            onShareableLink = {
+                showInviteChooser = false
+                viewModel.invite(null)
+            },
+            onDismiss = { showInviteChooser = false },
+        )
+    }
+
     inviteTicket?.let { ticket ->
         InviteTicketDialog(
             ticket = ticket,
             onDismiss = { inviteTicket = null },
         )
     }
+}
+
+/**
+ * Chooses how to invite to a channel: a named invite (default, most convenient) sends the ticket
+ * straight to a contact as an in-chat invitation; a shareable link mints a bearer ticket the user can
+ * copy/share anywhere.
+ */
+@Composable
+private fun InviteTypeDialog(
+    onInviteContact: () -> Unit,
+    onShareableLink: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Create invite") },
+        text = {
+            Column {
+                ListItem(
+                    modifier = Modifier.clickable(onClick = onInviteContact),
+                    headlineContent = { Text("Invite a contact") },
+                    supportingContent = { Text("Send an invitation straight to someone in your contacts") },
+                )
+                ListItem(
+                    modifier = Modifier.clickable(onClick = onShareableLink),
+                    headlineContent = { Text("Create a shareable link") },
+                    supportingContent = { Text("Anyone with the link can join") },
+                )
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 private class ConfirmSpec(

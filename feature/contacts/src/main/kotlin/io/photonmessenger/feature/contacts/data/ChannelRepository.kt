@@ -23,8 +23,10 @@
 package io.photonmessenger.feature.contacts.data
 
 import io.photonmessenger.core.boson.BosonSessionManager
+import io.photonmessenger.core.boson.ChannelInvite
 import io.photonmessenger.core.boson.awaitResult
 import io.photonmessenger.core.model.AppError
+import io.photonmessenger.core.model.shortId
 import io.photonmessenger.feature.contacts.model.UiChannel
 import io.photonmessenger.feature.contacts.model.UiChannelDetail
 import io.photonmessenger.feature.contacts.model.UiChannelMember
@@ -70,6 +72,13 @@ interface ChannelRepository {
 
     /** Invites [inviteeId] (when non-null) and returns the resulting shareable ticket string. */
     suspend fun invite(channelId: String, inviteeId: String?): Result<String>
+
+    /**
+     * Creates a NAMED invite ticket for [inviteeId] on [channelId] and delivers it to that contact as
+     * a channel-invite chat message so they can accept it inline (no copy/share step). The channel name
+     * is resolved here and carried in the message purely for display on the recipient's card.
+     */
+    suspend fun inviteContact(channelId: String, inviteeId: String): Result<Unit>
 
     /** Joins a channel from a shareable invite-ticket string; returns the joined channel id. */
     suspend fun joinChannel(ticket: String): Result<String>
@@ -165,6 +174,30 @@ class ChannelRepositoryImpl @Inject constructor(
     override suspend fun invite(channelId: String, inviteeId: String?): Result<String> = runCatching {
         val invitee = inviteeId?.let { parseId(it) }
         client().createInviteTicket(parseId(channelId), invitee).awaitResult().toString()
+    }
+
+    override suspend fun inviteContact(channelId: String, inviteeId: String): Result<Unit> = runCatching {
+        val client = client()
+        val cid = parseId(channelId)
+        val invitee = parseId(inviteeId)
+        val channel = client.getContact(cid).awaitResult().orElse(null) as? Channel
+            ?: throw AppError.NotFound("Channel not found")
+        val ticket = client.createInviteTicket(cid, invitee).awaitResult()
+        // The ticket API mints with the default expiration; mirror it for the display-only expiry (the
+        // recipient still gates joining on the ticket's own validity).
+        val invite = ChannelInvite(
+            ticket = ticket.toString(),
+            channelId = channelId,
+            channelName = channel.name.orElse(null)?.takeIf { it.isNotBlank() } ?: shortId(channelId),
+            inviter = client.userId.toString(),
+            expiresAt = System.currentTimeMillis() + InviteTicket.DEFAULT_EXPIRATION,
+        )
+        client.message(invitee)
+            .contentText(invite.toJson())
+            .contentType(ChannelInvite.INVITE_CONTENT_TYPE)
+            .header(ChannelInvite.INVITE_HEADER, ChannelInvite.INVITE_TYPE)
+            .send().awaitResult()
+        Unit
     }
 
     override suspend fun joinChannel(ticket: String): Result<String> = runCatching {

@@ -55,6 +55,7 @@ import io.photonmessenger.feature.chat.ChatScreen
 import io.photonmessenger.feature.chat.ConversationsScreen
 import io.photonmessenger.feature.chat.ForwardScreen
 import io.photonmessenger.feature.contacts.ChannelDetailScreen
+import io.photonmessenger.feature.contacts.InviteContactPickerScreen
 import io.photonmessenger.feature.contacts.ContactDetailScreen
 import io.photonmessenger.feature.contacts.ContactsScreen
 import io.photonmessenger.feature.contacts.CreateChannelScreen
@@ -218,6 +219,9 @@ fun PhotonNavHost(
                     onOpenChannelDetail = { id -> navController.navigate("channel/$id") },
                     onOpenContactDetail = { id -> navController.navigate("contact/$id") },
                     onForwardMessage = { navController.navigate(Routes.FORWARD) },
+                    onOpenChannel = { id ->
+                        navController.navigate("chat/$id") { launchSingleTop = true }
+                    },
                 )
             }
             composable(Routes.FORWARD) {
@@ -266,6 +270,16 @@ fun PhotonNavHost(
                             launchSingleTop = true
                         }
                     },
+                    onInviteContact = { id -> navController.navigate("inviteContact/$id") },
+                )
+            }
+            composable(
+                route = "inviteContact/{channelId}",
+                arguments = listOf(navArgument("channelId") { type = NavType.StringType }),
+            ) {
+                InviteContactPickerScreen(
+                    onBack = { navController.popBackStack() },
+                    onInvited = { navController.popBackStack() },
                 )
             }
         }

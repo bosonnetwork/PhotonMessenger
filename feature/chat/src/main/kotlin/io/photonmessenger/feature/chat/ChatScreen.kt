@@ -92,6 +92,8 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -107,6 +109,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
@@ -151,6 +154,8 @@ import kotlin.math.ceil
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import io.photonmessenger.core.boson.ChannelInvite
+import io.photonmessenger.core.model.InviteAction
 import io.photonmessenger.core.designsystem.component.ConfirmDialog
 import io.photonmessenger.core.designsystem.component.PhotonAvatar
 import io.photonmessenger.core.designsystem.component.ResponsiveContent
@@ -174,6 +179,7 @@ fun ChatScreen(
     onOpenChannelDetail: (String) -> Unit = {},
     onOpenContactDetail: (String) -> Unit = {},
     onForwardMessage: () -> Unit = {},
+    onOpenChannel: (String) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -182,6 +188,7 @@ fun ChatScreen(
     val loadingOlder by viewModel.loadingOlder.collectAsStateWithLifecycle()
     val recording by viewModel.recording.collectAsStateWithLifecycle()
     val voicePlayback by viewModel.voicePlayback.collectAsStateWithLifecycle()
+    val inviteActions by viewModel.inviteActions.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
     val context = LocalContext.current
@@ -238,6 +245,9 @@ fun ChatScreen(
     }
 
     LaunchedEffect(Unit) { viewModel.errors.collect { snackbar.showSnackbar(it) } }
+
+    // Accepting a channel invitation joins and then opens that channel's conversation.
+    LaunchedEffect(Unit) { viewModel.joinedChannel.collect { onOpenChannel(it) } }
 
     // Open a resolved attachment file in an external app.
     LaunchedEffect(Unit) {
@@ -431,7 +441,10 @@ fun ChatScreen(
                                         !sameDay(prev.createdAt, msg.createdAt)),
                                 download = download,
                                 playback = voicePlayback,
+                                inviteAction = inviteActions[msg.id],
                                 onDownload = { viewModel.download(it) },
+                                onJoinInvite = { viewModel.joinInvite(it) },
+                                onIgnoreInvite = { viewModel.ignoreInvite(it) },
                                 onRetry = { retryMessage ->
                                     val att = retryMessage.attachment
                                     when {
@@ -543,7 +556,10 @@ private fun MessageBubble(
     showSender: Boolean,
     download: AttachmentDownload?,
     playback: VoicePlayer.Playback,
+    inviteAction: InviteAction?,
     onDownload: (UiAttachment) -> Unit,
+    onJoinInvite: (UiMessage) -> Unit,
+    onIgnoreInvite: (UiMessage) -> Unit,
     onRetry: (UiMessage) -> Unit,
     onForward: (UiMessage) -> Unit,
     onDelete: (UiMessage) -> Unit,
@@ -612,7 +628,17 @@ private fun MessageBubble(
                             modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 6.dp),
                         )
                     }
-                    if (message.attachment != null) {
+                    if (message.invite != null) {
+                        InviteCard(
+                            invite = message.invite,
+                            fromMe = message.fromMe,
+                            action = inviteAction,
+                            onColor = onColor,
+                            onJoin = { onJoinInvite(message) },
+                            onIgnore = { onIgnoreInvite(message) },
+                        )
+                        BubbleMeta(message, onColor, Modifier.align(Alignment.End))
+                    } else if (message.attachment != null) {
                         // Voice playback state for this bubble: the player reports a single active note,
                         // so a note that isn't the active one shows its length and a play affordance.
                         val voiceActive = playback.messageId == message.id
@@ -743,6 +769,82 @@ private fun MessageActionMenu(
             onClick = { onDismiss(); onDelete() },
         )
     }
+}
+
+/**
+ * A channel-invite bubble. The recipient sees the channel name and, while the invite is actionable,
+ * inline Join / Ignore controls (the discoverable primary path - deliberately not buried in the
+ * long-press menu). Ignore is a soft dismiss: the card collapses but stays joinable until it expires.
+ * The sender's own copy is passive ("Invitation sent"); joined / expired invites drop their buttons.
+ */
+@Composable
+private fun InviteCard(
+    invite: ChannelInvite,
+    fromMe: Boolean,
+    action: InviteAction?,
+    onColor: Color,
+    onJoin: () -> Unit,
+    onIgnore: () -> Unit,
+) {
+    val expired = invite.expiresAt in 1 until System.currentTimeMillis()
+    val mutedColor = onColor.copy(alpha = 0.7f)
+    Column(
+        modifier = Modifier
+            .widthIn(min = 208.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Outlined.Groups,
+                contentDescription = null,
+                tint = mutedColor,
+                modifier = Modifier.size(22.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text(
+                    "Channel invitation",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = mutedColor,
+                )
+                Text(
+                    invite.channelName.ifBlank { "Channel" },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = onColor,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        when {
+            fromMe -> InviteStatus("Invitation sent", mutedColor)
+            action == InviteAction.JOINED -> InviteStatus("Joined", mutedColor)
+            expired -> InviteStatus("Invitation expired", mutedColor)
+            action == InviteAction.IGNORED ->
+                // Soft dismiss: the prompt collapses but joining stays available until the ticket expires.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Invitation dismissed",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = mutedColor,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = onJoin) { Text("Join") }
+                }
+            else ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onJoin) { Text("Join") }
+                    TextButton(onClick = onIgnore) { Text("Ignore") }
+                }
+        }
+    }
+}
+
+@Composable
+private fun InviteStatus(text: String, color: Color) {
+    Text(text = text, style = MaterialTheme.typography.bodySmall, color = color)
 }
 
 /**

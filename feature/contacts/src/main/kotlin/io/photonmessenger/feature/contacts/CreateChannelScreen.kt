@@ -132,7 +132,14 @@ fun CreateChannelScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("Announce membership changes")
+                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                    Text("Announce channel publicly")
+                    Text(
+                        "Publish the channel profile to the network so others can discover and join it.",
+                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Switch(checked = state.announce, onCheckedChange = viewModel::setAnnounce)
             }
 

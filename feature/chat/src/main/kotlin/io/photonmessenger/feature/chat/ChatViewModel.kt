@@ -26,6 +26,8 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.photonmessenger.core.boson.UnreadTracker
+import io.photonmessenger.core.model.ChannelInviteStore
+import io.photonmessenger.core.model.InviteAction
 import io.photonmessenger.core.model.ProfileResolver
 import io.photonmessenger.core.model.shortId
 import io.photonmessenger.core.model.toDisplay
@@ -109,6 +111,7 @@ class ChatViewModel @Inject constructor(
     private val forwardPayloadStore: ForwardPayloadStore,
     private val voiceRecorder: VoiceRecorder,
     private val voicePlayer: VoicePlayer,
+    private val channelInviteStore: ChannelInviteStore,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -168,6 +171,18 @@ class ChatViewModel @Inject constructor(
 
     /** Single-active voice-note playback state (which note, position, playing) for the bubbles. */
     val voicePlayback: StateFlow<VoicePlayer.Playback> = voicePlayer.state
+
+    /** Persisted per-message action (joined/ignored) for channel-invite cards; absent id = pending. */
+    val inviteActions: StateFlow<Map<String, InviteAction>> =
+        channelInviteStore.actions().stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyMap(),
+        )
+
+    /** Emits the id of a channel just joined from an invite card, so the screen can open it. */
+    private val _joinedChannel = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val joinedChannel = _joinedChannel.asSharedFlow()
 
     private var recordingStartedAt = 0L
     private var recordingTicker: Job? = null
@@ -300,6 +315,30 @@ class ChatViewModel @Inject constructor(
                 _messages.tryEmit("Couldn't delete message: ${e.message ?: "unknown error"}")
             }
         }
+    }
+
+    // --- Channel invites ----------------------------------------------------------------------
+
+    /**
+     * Accepts a channel invitation: joins from the ticket and, on success, persists the JOINED state
+     * (so the card stays "joined" across restarts) and emits the channel id so the screen can open it.
+     */
+    fun joinInvite(message: UiMessage) {
+        val invite = message.invite ?: return
+        viewModelScope.launch {
+            repository.joinChannel(invite.ticket)
+                .onSuccess {
+                    channelInviteStore.setAction(message.id, InviteAction.JOINED)
+                    _joinedChannel.tryEmit(it)
+                }
+                .onFailure { e -> _messages.tryEmit("Couldn't join channel: ${e.message ?: "unknown error"}") }
+        }
+    }
+
+    /** Dismisses a channel invitation locally (soft): the card collapses but can still be joined until it expires. */
+    fun ignoreInvite(message: UiMessage) {
+        if (message.invite == null) return
+        viewModelScope.launch { channelInviteStore.setAction(message.id, InviteAction.IGNORED) }
     }
 
     /**

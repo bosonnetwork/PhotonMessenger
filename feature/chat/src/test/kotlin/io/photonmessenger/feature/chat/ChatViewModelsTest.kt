@@ -24,7 +24,10 @@ package io.photonmessenger.feature.chat
 
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
+import io.photonmessenger.core.boson.ChannelInvite
 import io.photonmessenger.core.boson.UnreadTracker
+import io.photonmessenger.core.model.ChannelInviteStore
+import io.photonmessenger.core.model.InviteAction
 import io.photonmessenger.core.model.ProfileResolver
 import io.photonmessenger.core.model.ResolvedProfile
 import io.photonmessenger.feature.chat.data.ChatRepository
@@ -89,6 +92,13 @@ class ChatViewModelsTest {
         override suspend fun sendText(recipientId: String, text: String): Result<Unit> {
             sentTexts += recipientId to text
             return sendResult
+        }
+        /** Records every invite ticket a Join tried to consume. */
+        val joinedTickets = mutableListOf<String>()
+        var joinResult: Result<String> = Result.success("joined-channel")
+        override suspend fun joinChannel(ticket: String): Result<String> {
+            joinedTickets += ticket
+            return joinResult
         }
         override suspend fun sendAttachment(recipientId: String, uriString: String) = sendResult
         override suspend fun sendVoice(recipientId: String, filePath: String, durationMs: Long): Result<Unit> {
@@ -156,14 +166,24 @@ class ChatViewModelsTest {
     private fun conversationsVm(repo: ChatRepository) =
         ConversationsViewModel(repo, resolver, FakeUnreadTracker())
 
+    /** In-memory invite-state store; records joined/ignored per message id. */
+    private class FakeChannelInviteStore : ChannelInviteStore {
+        val state = MutableStateFlow<Map<String, InviteAction>>(emptyMap())
+        override fun actions() = state
+        override suspend fun setAction(messageId: String, action: InviteAction) {
+            state.update { it + (messageId to action) }
+        }
+    }
+
     private fun chatVm(
         repo: ChatRepository,
         conversationId: String,
         recorder: VoiceRecorder = FakeVoiceRecorder(),
+        inviteStore: ChannelInviteStore = FakeChannelInviteStore(),
     ) =
         ChatViewModel(
             repo, FakeUnreadTracker(), resolver, mediaSaver, ForwardPayloadStore(),
-            recorder, VoicePlayer(),
+            recorder, VoicePlayer(), inviteStore,
             SavedStateHandle(mapOf("conversationId" to conversationId)),
         )
 
@@ -412,5 +432,48 @@ class ChatViewModelsTest {
         val ui = remoteAttachmentFromMap(map)!!
         assertEquals(AttachmentKind.VOICE, ui.kind)
         assertEquals(4200L, ui.durationMs)
+    }
+
+    @Test
+    fun `joining an invite consumes the ticket, persists JOINED, and opens the channel`() = runTest {
+        val repo = FakeChatRepo(convosFlow, msgsFlow).apply { joinResult = Result.success("chan-9") }
+        val store = FakeChannelInviteStore()
+        val vm = chatVm(repo, "abc", inviteStore = store)
+        val invite = ChannelInvite(
+            ticket = "ticket-xyz",
+            channelId = "chan-9",
+            channelName = "Design",
+            inviter = "alice",
+            expiresAt = System.currentTimeMillis() + 60_000,
+        )
+        val message = UiMessage("inv1", "", fromMe = false, createdAt = 1, invite = invite)
+
+        vm.joinedChannel.test {
+            vm.joinInvite(message)
+            assertEquals("chan-9", awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(listOf("ticket-xyz"), repo.joinedTickets)
+        assertEquals(InviteAction.JOINED, store.state.value["inv1"])
+    }
+
+    @Test
+    fun `ignoring an invite persists IGNORED without joining`() = runTest {
+        val repo = FakeChatRepo(convosFlow, msgsFlow)
+        val store = FakeChannelInviteStore()
+        val vm = chatVm(repo, "abc", inviteStore = store)
+        val invite = ChannelInvite(
+            ticket = "t",
+            channelId = "c",
+            channelName = "X",
+            inviter = "a",
+            expiresAt = System.currentTimeMillis() + 60_000,
+        )
+        val message = UiMessage("inv2", "", fromMe = false, createdAt = 1, invite = invite)
+
+        vm.ignoreInvite(message)
+
+        assertEquals(InviteAction.IGNORED, store.state.value["inv2"])
+        assertTrue(repo.joinedTickets.isEmpty())
     }
 }

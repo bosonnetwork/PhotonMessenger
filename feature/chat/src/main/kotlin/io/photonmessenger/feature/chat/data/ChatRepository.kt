@@ -47,6 +47,7 @@ import io.bosonnetwork.ionstore.IonStore
 import io.bosonnetwork.ionstore.PutOptions
 import io.bosonnetwork.photonmessaging.Channel
 import io.bosonnetwork.photonmessaging.ContentDisposition
+import io.bosonnetwork.photonmessaging.InviteTicket
 import io.bosonnetwork.photonmessaging.Message
 import io.bosonnetwork.photonmessaging.MessageListener
 import io.bosonnetwork.photonmessaging.MessagingClient
@@ -75,6 +76,13 @@ interface ChatRepository {
     fun messages(conversationId: String): Flow<List<UiMessage>>
 
     suspend fun sendText(recipientId: String, text: String): Result<Unit>
+
+    /**
+     * Joins a channel from the invite-ticket string carried in a received channel-invite message;
+     * returns the joined channel id so the caller can open it. Runs entirely over the messaging client,
+     * so the chat feature needs no dependency on the channels feature.
+     */
+    suspend fun joinChannel(ticket: String): Result<String>
 
     /** Prepares (compresses) the picked media at [uriString] and sends it inline or via IonStore. */
     suspend fun sendAttachment(recipientId: String, uriString: String): Result<Unit>
@@ -244,6 +252,15 @@ class ChatRepositoryImpl @Inject constructor(
     override suspend fun sendText(recipientId: String, text: String): Result<Unit> = runCatching {
         client().message(parseId(recipientId)).contentText(text).send().awaitResult()
         Unit
+    }
+
+    override suspend fun joinChannel(ticket: String): Result<String> = runCatching {
+        val parsed = try {
+            InviteTicket.fromString(ticket.trim())
+        } catch (e: Exception) {
+            throw AppError.InvalidInput("Invalid invite ticket", e)
+        }
+        client().joinChannel(parsed).awaitResult().id.toString()
     }
 
     override fun optimisticAttachment(uriString: String): UiAttachment {

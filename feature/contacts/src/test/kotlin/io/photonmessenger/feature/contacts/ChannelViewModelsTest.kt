@@ -60,6 +60,11 @@ class ChannelViewModelsTest {
             announce: Boolean,
         ): Result<String> = createResult
         override suspend fun invite(channelId: String, inviteeId: String?): Result<String> = Result.success("ticket")
+        val invitedContacts = mutableListOf<Pair<String, String>>()
+        override suspend fun inviteContact(channelId: String, inviteeId: String): Result<Unit> {
+            invitedContacts += channelId to inviteeId
+            return actionResult
+        }
         override suspend fun joinChannel(ticket: String): Result<String> = joinResult
         override suspend fun leave(channelId: String): Result<Unit> = actionResult
         override suspend fun remove(channelId: String): Result<Unit> = actionResult

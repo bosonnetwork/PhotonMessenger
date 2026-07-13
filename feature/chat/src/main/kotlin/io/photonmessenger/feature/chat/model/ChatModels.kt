@@ -22,6 +22,7 @@
 
 package io.photonmessenger.feature.chat.model
 
+import io.photonmessenger.core.boson.ChannelInvite
 import io.photonmessenger.core.model.shortId
 import io.bosonnetwork.Id
 import io.bosonnetwork.photonmessaging.ContentDisposition
@@ -87,6 +88,8 @@ data class UiMessage(
     val fromMe: Boolean,
     val createdAt: Long,
     val attachment: UiAttachment? = null,
+    /** Present when this message is a channel invitation, rendered as an actionable invite card. */
+    val invite: ChannelInvite? = null,
     val status: MessageStatus = MessageStatus.SENT,
     /** Sender's user id (base58), when known. */
     val senderId: String? = null,
@@ -119,18 +122,36 @@ fun Conversation.toUi(avatarUrl: String? = null): UiConversation {
 
 fun Message.toUi(myUserId: Id?, resolveSenderName: ((Id) -> String?)? = null): UiMessage {
     val from = getFrom().orElse(null)
-    val attachment = runCatching { extractAttachment() }.getOrNull()
+    // A channel invite takes precedence: it carries a JSON body that must render as an invite card,
+    // never as text or an attachment.
+    val invite = runCatching { extractInvite() }.getOrNull()
+    val attachment = if (invite != null) null else runCatching { extractAttachment() }.getOrNull()
     val fromMe = from != null && from == myUserId
     return UiMessage(
         id = getId().toString(),
-        text = if (attachment != null) "" else runCatching { getPayloadAsContent().asText() }.getOrDefault(""),
+        text = if (invite != null || attachment != null) ""
+        else runCatching { getPayloadAsContent().asText() }.getOrDefault(""),
         fromMe = fromMe,
         createdAt = getCreatedAt(),
         attachment = attachment,
+        invite = invite,
         senderId = from?.toString(),
         senderName = if (!fromMe && from != null) resolveSenderName?.invoke(from) else null,
         rid = getRid().takeIf { it > 0 },
     )
+}
+
+/**
+ * Reads a channel-invite payload out of a message, discriminating on the message-type header (see
+ * [ChannelInvite]); returns null for any other message. A malformed invite body also yields null, so
+ * it degrades to a plain (empty) message rather than crashing the stream.
+ */
+private fun Message.extractInvite(): ChannelInvite? {
+    val content = getPayloadAsContent()
+    val type = content.headers[ChannelInvite.INVITE_HEADER] as? String ?: return null
+    if (type != ChannelInvite.INVITE_TYPE) return null
+    val json = runCatching { content.asText() }.getOrNull() ?: return null
+    return ChannelInvite.fromJson(json)
 }
 
 /**

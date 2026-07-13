@@ -22,6 +22,7 @@
 
 package io.photonmessenger.feature.contacts
 
+import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import io.photonmessenger.core.model.ResolvedProfile
 import io.photonmessenger.feature.contacts.data.ChannelRepository
@@ -81,6 +82,12 @@ class ContactsViewModelTest {
             announce: Boolean,
         ): Result<String> = Result.success("CHAN1")
         override suspend fun invite(channelId: String, inviteeId: String?): Result<String> = Result.success("ticket")
+        val invitedContacts = mutableListOf<Pair<String, String>>()
+        var inviteContactResult: Result<Unit> = Result.success(Unit)
+        override suspend fun inviteContact(channelId: String, inviteeId: String): Result<Unit> {
+            invitedContacts += channelId to inviteeId
+            return inviteContactResult
+        }
         override suspend fun joinChannel(ticket: String): Result<String> = joinResult
         override suspend fun leave(channelId: String): Result<Unit> = Result.success(Unit)
         override suspend fun remove(channelId: String): Result<Unit> = Result.success(Unit)
@@ -199,6 +206,37 @@ class ContactsViewModelTest {
             assert(awaitItem().contains("bad ticket"))
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `invite picker lists only contacts and sends a named invite`() = runTest {
+        contactsFlow.value = listOf(
+            UiContact("a", "Alice", isChannel = false, muted = false, blocked = false),
+            UiContact("b", "Blocked", isChannel = false, muted = false, blocked = true),
+            UiContact("c", "Team", isChannel = true, muted = false, blocked = false),
+        )
+        val channelRepo = FakeChannelRepo()
+        val vm = InviteContactPickerViewModel(
+            FakeRepo(contactsFlow, requestsFlow),
+            channelRepo,
+            FakeProfileResolver(),
+            SavedStateHandle(mapOf("channelId" to "CHAN1")),
+        )
+
+        vm.uiState.test {
+            var state = awaitItem()
+            while (state.loading) state = awaitItem()
+            // Only the non-blocked friend is offered - no channels, no blocked contacts.
+            assertEquals(listOf("a"), state.contacts.map { it.id })
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        vm.events.test {
+            vm.invite(UiContact("a", "Alice", isChannel = false, muted = false, blocked = false))
+            assertEquals(InvitePickerEvent.Sent("Alice"), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(listOf("CHAN1" to "a"), channelRepo.invitedContacts)
     }
 
     private companion object {
