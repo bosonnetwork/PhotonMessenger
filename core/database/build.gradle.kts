@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "io.photonmessenger.core.database"
+    namespace = "io.bosonnetwork.photon.core.database"
     compileSdk = 36
 
     defaultConfig {

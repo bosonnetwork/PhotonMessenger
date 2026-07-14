@@ -28,7 +28,7 @@
 }
 
 # Keep the generated $serializer classes and the DTO members they read/write by name.
--keep,includedescriptorclasses class io.photonmessenger.core.network.model.**$$serializer { *; }
--keepclassmembers class io.photonmessenger.core.network.model.** { *; }
+-keep,includedescriptorclasses class io.bosonnetwork.photon.core.network.model.**$$serializer { *; }
+-keepclassmembers class io.bosonnetwork.photon.core.network.model.** { *; }
 
 -dontwarn kotlinx.serialization.**

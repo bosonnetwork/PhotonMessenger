@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "io.photonmessenger.core.qr"
+    namespace = "io.bosonnetwork.photon.core.qr"
     compileSdk = 36
 
     defaultConfig {

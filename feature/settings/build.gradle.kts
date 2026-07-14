@@ -7,7 +7,7 @@ plugins {
 }
 
 android {
-    namespace = "io.photonmessenger.feature.settings"
+    namespace = "io.bosonnetwork.photon.feature.settings"
     compileSdk = 36
 
     defaultConfig {

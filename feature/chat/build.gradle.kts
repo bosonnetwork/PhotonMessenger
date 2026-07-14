@@ -7,7 +7,7 @@ plugins {
 }
 
 android {
-    namespace = "io.photonmessenger.feature.chat"
+    namespace = "io.bosonnetwork.photon.feature.chat"
     compileSdk = 36
 
     defaultConfig {

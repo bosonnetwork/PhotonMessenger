@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "io.photonmessenger.core.security"
+    namespace = "io.bosonnetwork.photon.core.security"
     compileSdk = 36
 
     defaultConfig {

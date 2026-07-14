@@ -7,7 +7,7 @@ plugins {
 }
 
 android {
-    namespace = "io.photonmessenger.feature.onboarding"
+    namespace = "io.bosonnetwork.photon.feature.onboarding"
     compileSdk = 36
 
     defaultConfig {

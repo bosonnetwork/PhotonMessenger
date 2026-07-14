@@ -8,11 +8,11 @@ plugins {
 }
 
 android {
-    namespace = "io.photonmessenger.app"
+    namespace = "io.bosonnetwork.photon.app"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "io.photonmessenger.app"
+        applicationId = "io.bosonnetwork.photon"
         minSdk = 26
         targetSdk = 36
         versionCode = 1

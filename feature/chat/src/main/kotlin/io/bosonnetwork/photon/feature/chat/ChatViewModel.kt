@@ -1,0 +1,604 @@
+/*
+ * Copyright (c) 2023 -      bosonnetwork.io
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+package io.bosonnetwork.photon.feature.chat
+
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import io.bosonnetwork.photon.core.boson.UnreadTracker
+import io.bosonnetwork.photon.core.model.ChannelInviteStore
+import io.bosonnetwork.photon.core.model.InviteAction
+import io.bosonnetwork.photon.core.model.ProfileResolver
+import io.bosonnetwork.photon.core.model.shortId
+import io.bosonnetwork.photon.core.model.toDisplay
+import io.bosonnetwork.photon.feature.chat.data.ChatRepository
+import io.bosonnetwork.photon.feature.chat.data.ForwardPayload
+import io.bosonnetwork.photon.feature.chat.data.ForwardPayloadStore
+import io.bosonnetwork.photon.feature.chat.data.MediaSaver
+import io.bosonnetwork.photon.feature.chat.data.VoicePlayer
+import io.bosonnetwork.photon.feature.chat.data.VoiceRecorder
+import io.bosonnetwork.photon.feature.chat.model.AttachmentKind
+import io.bosonnetwork.photon.feature.chat.model.AttachmentSource
+import io.bosonnetwork.photon.feature.chat.model.ChatHeader
+import io.bosonnetwork.photon.feature.chat.model.MessageStatus
+import io.bosonnetwork.photon.feature.chat.model.UiAttachment
+import io.bosonnetwork.photon.feature.chat.model.UiMessage
+import io.bosonnetwork.photon.feature.chat.model.VOICE_MIME
+import io.bosonnetwork.photonmessaging.exceptions.MessageTimeoutException
+import dagger.hilt.android.lifecycle.HiltViewModel
+import java.io.File
+import java.io.InputStream
+import javax.inject.Inject
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+
+/** Cadence of the recording-bar timer + mic-level updates. Fast enough for a smooth centisecond readout. */
+private const val RECORDING_TICK_MS = 50L
+
+data class ChatUiState(
+    val loading: Boolean = true,
+    val messages: List<UiMessage> = emptyList(),
+    val error: String? = null,
+)
+
+/** A failed text send that can be retried with the same [text] (M3-8). [pendingId] identifies the
+ *  optimistic bubble (M3-4) so a retry replays it in place instead of stacking a new one. */
+data class SendFailure(val message: String, val text: String, val pendingId: String)
+
+/** Per-attachment download state, keyed by content id. */
+sealed interface AttachmentDownload {
+    data object Loading : AttachmentDownload
+    data class Ready(val file: File) : AttachmentDownload
+    data class Failed(val message: String) : AttachmentDownload
+}
+
+/** A resolved local file ready to hand to an external viewer (Open), paired with its mime. */
+data class AttachmentOpen(val file: File, val mime: String)
+
+/** Composer voice-recording state driving the recording bar (Idle -> Active -> sent/cancelled). */
+sealed interface RecordingState {
+    data object Idle : RecordingState
+
+    /** Actively recording. [locked] means hands-free (finger lifted); [amplitude] drives the level. */
+    data class Active(val elapsedMs: Long, val amplitude: Int, val locked: Boolean) : RecordingState
+
+    /** Recorder auto-stopped at the max duration; the note is captured and awaits Send/Delete. */
+    data class Ready(val durationMs: Long) : RecordingState
+}
+
+@HiltViewModel
+class ChatViewModel @Inject constructor(
+    private val repository: ChatRepository,
+    private val unreadTracker: UnreadTracker,
+    private val profileResolver: ProfileResolver,
+    private val mediaSaver: MediaSaver,
+    private val forwardPayloadStore: ForwardPayloadStore,
+    private val voiceRecorder: VoiceRecorder,
+    private val voicePlayer: VoicePlayer,
+    private val channelInviteStore: ChannelInviteStore,
+    savedStateHandle: SavedStateHandle,
+) : ViewModel() {
+
+    val conversationId: String = checkNotNull(savedStateHandle["conversationId"]) {
+        "conversationId is required"
+    }
+
+    private val _baseHeader = MutableStateFlow(ChatHeader(title = shortId(conversationId)))
+
+    /**
+     * Chat header, upgraded live via the shared identity policy: a DM header gets the peer's
+     * Director-resolved avatar, and a title still on the abbreviated-id fallback (no local remark/name)
+     * is upgraded to the resolved name once it arrives - mirroring how the conversation list resolves
+     * (issue: opened chat kept showing the short id even though the list showed the name). Channels are
+     * left untouched.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val header: StateFlow<ChatHeader> = _baseHeader
+        .flatMapLatest { base ->
+            if (base.isChannel) return@flatMapLatest flowOf(base)
+            // A base title equal to the short id means the library had no local name for this DM.
+            val localName = base.title.takeUnless { it == shortId(conversationId) }
+            profileResolver.profile(conversationId).map { resolved ->
+                val display = resolved.toDisplay(conversationId, localName = localName)
+                base.copy(
+                    title = if (display.nameIsFallback) base.title else display.displayName,
+                    avatarUrl = display.avatarUrl,
+                )
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = ChatHeader(title = shortId(conversationId)),
+        )
+
+    /** Older pages loaded via pagination, merged with the live stream (M3-5). */
+    private val olderMessages = MutableStateFlow<List<UiMessage>>(emptyList())
+    private val _loadingOlder = MutableStateFlow(false)
+    val loadingOlder: StateFlow<Boolean> = _loadingOlder.asStateFlow()
+
+    @Volatile
+    private var reachedStart = false
+
+    /** Optimistic outgoing bubbles shown immediately on send, dropped once confirmed (M3-4). */
+    private val pending = MutableStateFlow<List<UiMessage>>(emptyList())
+
+    /** Ids of messages deleted locally on this device. A local remove fires no listener callback, so
+     *  the live stream would keep re-emitting the message; filtering it here hides it immediately. */
+    private val removedIds = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Whether this device can record voice (needs the OGG/OPUS encoder, API 29+); gates the mic button. */
+    val voiceSupported: Boolean = voiceRecorder.isSupported
+
+    private val _recording = MutableStateFlow<RecordingState>(RecordingState.Idle)
+    val recording: StateFlow<RecordingState> = _recording.asStateFlow()
+
+    /** Single-active voice-note playback state (which note, position, playing) for the bubbles. */
+    val voicePlayback: StateFlow<VoicePlayer.Playback> = voicePlayer.state
+
+    /** Persisted per-message action (joined/ignored) for channel-invite cards; absent id = pending. */
+    val inviteActions: StateFlow<Map<String, InviteAction>> =
+        channelInviteStore.actions().stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyMap(),
+        )
+
+    /** Emits the id of a channel just joined from an invite card, so the screen can open it. */
+    private val _joinedChannel = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val joinedChannel = _joinedChannel.asSharedFlow()
+
+    private var recordingStartedAt = 0L
+    private var recordingTicker: Job? = null
+    // The captured file once the recorder auto-stops at the max duration (RecordingState.Ready).
+    private var recordedReady: VoiceRecorder.Recording? = null
+
+    init {
+        // Viewing a conversation reads it: clear its badge now and suppress unread while it's open.
+        unreadTracker.setActiveConversation(conversationId)
+        viewModelScope.launch {
+            repository.header(conversationId).onSuccess { _baseHeader.value = it }
+        }
+    }
+
+    override fun onCleared() {
+        unreadTracker.setActiveConversation(null)
+        recordingTicker?.cancel()
+        voiceRecorder.cancel()
+        voicePlayer.stop()
+        super.onCleared()
+    }
+
+    val uiState: StateFlow<ChatUiState> =
+        combine(repository.messages(conversationId), olderMessages, pending, removedIds) { live, older, sending, removed ->
+            // De-duplicate the pagination boundary by id, then order oldest -> newest. Pending
+            // bubbles carry temp ids so they never collide with confirmed messages. Locally deleted
+            // ids are filtered out (a local remove fires no callback to drop them from the stream).
+            val merged = (older + live + sending).associateBy { it.id }.values
+                .filterNot { it.id in removed }
+                .sortedBy { it.createdAt }
+            ChatUiState(loading = false, messages = merged)
+        }
+            .catch { emit(ChatUiState(loading = false, error = it.message)) }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = ChatUiState(loading = true),
+            )
+
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val errors = _messages.asSharedFlow()
+
+    private val _sendFailures = MutableSharedFlow<SendFailure>(extraBufferCapacity = 1)
+    val sendFailures = _sendFailures.asSharedFlow()
+
+    /** One-shot files to hand to an external viewer (Open action). */
+    private val _openFile = MutableSharedFlow<AttachmentOpen>(extraBufferCapacity = 1)
+    val openFile = _openFile.asSharedFlow()
+
+    /** One-shot files to hand to a share sheet (Share action). */
+    private val _shareFile = MutableSharedFlow<AttachmentOpen>(extraBufferCapacity = 1)
+    val shareFile = _shareFile.asSharedFlow()
+
+    /** Loads an older page when the user scrolls to the top (M3-5). Idempotent + stops at the start. */
+    fun loadOlder() {
+        if (_loadingOlder.value || reachedStart) return
+        val oldest = uiState.value.messages.firstOrNull()?.createdAt ?: return
+        _loadingOlder.value = true
+        viewModelScope.launch {
+            repository.loadOlder(conversationId, oldest, ChatRepository.PAGE_SIZE)
+                .onSuccess { page ->
+                    // getMessagesBefore is inclusive of the boundary, so a page that adds nothing new
+                    // (only the already-known oldest) means we've reached the start.
+                    if (page.size < ChatRepository.PAGE_SIZE) reachedStart = true
+                    olderMessages.update { it + page }
+                }
+                .onFailure { e -> _messages.tryEmit("Couldn't load older messages: ${e.message ?: "unknown error"}") }
+            _loadingOlder.value = false
+        }
+    }
+
+    private val _downloads = MutableStateFlow<Map<String, AttachmentDownload>>(emptyMap())
+    val downloads: StateFlow<Map<String, AttachmentDownload>> = _downloads.asStateFlow()
+
+    fun send(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return
+        val pendingId = "pending-${System.nanoTime()}"
+        pending.update {
+            it + UiMessage(
+                id = pendingId,
+                text = trimmed,
+                fromMe = true,
+                createdAt = System.currentTimeMillis(),
+                status = MessageStatus.SENDING,
+            )
+        }
+        launchSend(pendingId, trimmed)
+    }
+
+    /** Re-sends a failed optimistic bubble in place (M3-4/M3-8). */
+    fun retrySend(failure: SendFailure) {
+        pending.update { list ->
+            list.map { if (it.id == failure.pendingId) it.copy(status = MessageStatus.SENDING) else it }
+        }
+        launchSend(failure.pendingId, failure.text)
+    }
+
+    private fun launchSend(pendingId: String, text: String) {
+        viewModelScope.launch {
+            repository.sendText(conversationId, text)
+                // The confirmed message arrives on the live stream, so drop the optimistic bubble.
+                .onSuccess { pending.update { list -> list.filterNot { it.id == pendingId } } }
+                .onFailure { e ->
+                    pending.update { list ->
+                        list.map { if (it.id == pendingId) it.copy(status = MessageStatus.FAILED) else it }
+                    }
+                    _sendFailures.tryEmit(SendFailure(sendErrorMessage(e), text, pendingId))
+                }
+        }
+    }
+
+    private fun sendErrorMessage(e: Throwable): String = when (e) {
+        is MessageTimeoutException -> "Message timed out"
+        else -> "Couldn't send: ${e.message ?: "unknown error"}"
+    }
+
+    /**
+     * Deletes a message locally on this device. Hides it immediately (optimistically) and, when the
+     * message is backed by a stored row, removes it from the local store; if that fails the bubble is
+     * restored and an error is surfaced. Optimistic bubbles (no [UiMessage.rid]) are simply dropped.
+     */
+    fun deleteMessage(message: UiMessage) {
+        removedIds.update { it + message.id }
+        pending.update { list -> list.filterNot { it.id == message.id } }
+        val rid = message.rid ?: return
+        viewModelScope.launch {
+            repository.removeMessage(rid).onFailure { e ->
+                removedIds.update { it - message.id }
+                _messages.tryEmit("Couldn't delete message: ${e.message ?: "unknown error"}")
+            }
+        }
+    }
+
+    // --- Channel invites ----------------------------------------------------------------------
+
+    /**
+     * Accepts a channel invitation: joins from the ticket and, on success, persists the JOINED state
+     * (so the card stays "joined" across restarts) and emits the channel id so the screen can open it.
+     */
+    fun joinInvite(message: UiMessage) {
+        val invite = message.invite ?: return
+        viewModelScope.launch {
+            repository.joinChannel(invite.ticket)
+                .onSuccess {
+                    channelInviteStore.setAction(message.id, InviteAction.JOINED)
+                    _joinedChannel.tryEmit(it)
+                }
+                .onFailure { e -> _messages.tryEmit("Couldn't join channel: ${e.message ?: "unknown error"}") }
+        }
+    }
+
+    /** Dismisses a channel invitation locally (soft): the card collapses but can still be joined until it expires. */
+    fun ignoreInvite(message: UiMessage) {
+        if (message.invite == null) return
+        viewModelScope.launch { channelInviteStore.setAction(message.id, InviteAction.IGNORED) }
+    }
+
+    /**
+     * Sends a picked attachment with the same optimistic treatment as text: an immediate outgoing
+     * bubble (rendering the local content uri) shown as SENDING until the confirmed message lands on
+     * the live stream. On failure the bubble settles to FAILED and keeps the picked uri so a tap can
+     * retry the upload.
+     */
+    fun sendAttachment(uri: String) {
+        val pendingId = "pending-${System.nanoTime()}"
+        pending.update {
+            it + UiMessage(
+                id = pendingId,
+                text = "",
+                fromMe = true,
+                createdAt = System.currentTimeMillis(),
+                attachment = repository.optimisticAttachment(uri),
+                status = MessageStatus.SENDING,
+            )
+        }
+        launchSendAttachment(pendingId, uri)
+    }
+
+    /** Re-uploads a failed optimistic attachment bubble in place. */
+    fun retryAttachment(message: UiMessage) {
+        val source = message.attachment?.source as? AttachmentSource.Local ?: return
+        pending.update { list ->
+            list.map { if (it.id == message.id) it.copy(status = MessageStatus.SENDING) else it }
+        }
+        launchSendAttachment(message.id, source.uri)
+    }
+
+    private fun launchSendAttachment(pendingId: String, uri: String) {
+        viewModelScope.launch {
+            repository.sendAttachment(conversationId, uri)
+                // The confirmed message arrives on the live stream, so drop the optimistic bubble.
+                .onSuccess { pending.update { list -> list.filterNot { it.id == pendingId } } }
+                .onFailure { e ->
+                    pending.update { list ->
+                        list.map { if (it.id == pendingId) it.copy(status = MessageStatus.FAILED) else it }
+                    }
+                    _messages.tryEmit("Couldn't send attachment: ${e.message ?: "unknown error"}")
+                }
+        }
+    }
+
+    // --- Voice messages -----------------------------------------------------------------------
+
+    /**
+     * Begins recording a voice note (caller must have RECORD_AUDIO). Drives [recording] to Active and
+     * ticks the elapsed time + mic level for the recording bar. On any recorder error the attempt is
+     * abandoned back to Idle with a message.
+     */
+    fun startRecording() {
+        if (_recording.value != RecordingState.Idle) return
+        recordedReady = null
+        voiceRecorder.onMaxDuration = { onMaxDurationReached() }
+        val started = runCatching { voiceRecorder.start() }.isSuccess
+        if (!started) {
+            voiceRecorder.onMaxDuration = null
+            _messages.tryEmit("Couldn't start recording")
+            return
+        }
+        recordingStartedAt = System.currentTimeMillis()
+        _recording.value = RecordingState.Active(elapsedMs = 0, amplitude = 0, locked = false)
+        recordingTicker?.cancel()
+        recordingTicker = viewModelScope.launch {
+            while (isActive) {
+                val current = _recording.value
+                if (current !is RecordingState.Active) break
+                _recording.value = current.copy(
+                    elapsedMs = System.currentTimeMillis() - recordingStartedAt,
+                    amplitude = voiceRecorder.maxAmplitude(),
+                )
+                delay(RECORDING_TICK_MS)
+            }
+        }
+    }
+
+    /** Switches the in-progress recording to hands-free (finger lifted); recording continues. */
+    fun lockRecording() {
+        val current = _recording.value
+        if (current is RecordingState.Active) _recording.value = current.copy(locked = true)
+    }
+
+    private fun onMaxDurationReached() {
+        // Fired on the recorder thread; hop to the main scope to finalize safely.
+        viewModelScope.launch {
+            if (_recording.value !is RecordingState.Active) return@launch
+            recordingTicker?.cancel()
+            val rec = voiceRecorder.stop()
+            if (rec == null) {
+                _recording.value = RecordingState.Idle
+                _messages.tryEmit("Recording failed")
+                return@launch
+            }
+            recordedReady = rec
+            _recording.value = RecordingState.Ready(rec.durationMs)
+        }
+    }
+
+    /** Discards the current recording (slide-to-cancel / delete). */
+    fun cancelRecording() {
+        recordingTicker?.cancel()
+        voiceRecorder.cancel()
+        recordedReady?.file?.delete()
+        recordedReady = null
+        _recording.value = RecordingState.Idle
+    }
+
+    /**
+     * Stops recording and sends the note with the same optimistic treatment as other attachments: an
+     * immediate SENDING bubble that plays from the local file, dropped once the confirmed message lands
+     * (or settled to FAILED, keeping the file for retry). A note too short to have captured audio is
+     * discarded silently.
+     */
+    fun stopAndSendRecording() {
+        recordingTicker?.cancel()
+        val rec = when (_recording.value) {
+            is RecordingState.Ready -> recordedReady
+            is RecordingState.Active -> voiceRecorder.stop()
+            RecordingState.Idle -> null
+        }
+        recordedReady = null
+        _recording.value = RecordingState.Idle
+        if (rec == null) return
+        sendVoiceFile(rec.file, rec.durationMs)
+    }
+
+    private fun sendVoiceFile(file: File, durationMs: Long) {
+        val pendingId = "pending-${System.nanoTime()}"
+        pending.update {
+            it + UiMessage(
+                id = pendingId,
+                text = "",
+                fromMe = true,
+                createdAt = System.currentTimeMillis(),
+                attachment = UiAttachment(
+                    kind = AttachmentKind.VOICE,
+                    mime = VOICE_MIME,
+                    name = file.name,
+                    size = file.length(),
+                    durationMs = durationMs,
+                    source = AttachmentSource.Local(file.absolutePath),
+                ),
+                status = MessageStatus.SENDING,
+            )
+        }
+        launchSendVoice(pendingId, file.absolutePath, durationMs)
+    }
+
+    /** Re-sends a failed optimistic voice bubble in place. */
+    fun retryVoice(message: UiMessage) {
+        val attachment = message.attachment ?: return
+        val source = attachment.source as? AttachmentSource.Local ?: return
+        pending.update { list ->
+            list.map { if (it.id == message.id) it.copy(status = MessageStatus.SENDING) else it }
+        }
+        launchSendVoice(message.id, source.uri, attachment.durationMs ?: 0L)
+    }
+
+    private fun launchSendVoice(pendingId: String, filePath: String, durationMs: Long) {
+        viewModelScope.launch {
+            repository.sendVoice(conversationId, filePath, durationMs)
+                .onSuccess { pending.update { list -> list.filterNot { it.id == pendingId } } }
+                .onFailure { e ->
+                    pending.update { list ->
+                        list.map { if (it.id == pendingId) it.copy(status = MessageStatus.FAILED) else it }
+                    }
+                    _messages.tryEmit("Couldn't send voice message: ${e.message ?: "unknown error"}")
+                }
+        }
+    }
+
+    /** Play/pause a voice note, resolving it to a local file first (inline/remote materialized; local direct). */
+    fun toggleVoice(message: UiMessage) {
+        val attachment = message.attachment ?: return
+        when (val source = attachment.source) {
+            is AttachmentSource.Local -> voicePlayer.toggle(message.id, File(source.uri))
+            else -> viewModelScope.launch {
+                repository.localFile(attachment)
+                    .onSuccess { file -> voicePlayer.toggle(message.id, file) }
+                    .onFailure { e -> _messages.tryEmit("Couldn't play: ${e.message ?: "unavailable"}") }
+            }
+        }
+    }
+
+    fun seekVoice(positionMs: Int) = voicePlayer.seekTo(positionMs)
+
+    /** Stashes what to forward (attachment or text) for the forward picker to pick up. */
+    fun prepareForward(message: UiMessage) {
+        val attachment = message.attachment
+        forwardPayloadStore.set(
+            if (attachment != null && attachment.source !is AttachmentSource.Local)
+                ForwardPayload.Attachment(attachment)
+            else ForwardPayload.Text(message.text),
+        )
+    }
+
+    /**
+     * Saves an attachment to public storage (Pictures / Downloads). Remote attachments are downloaded
+     * first (reusing the content-addressed cache); Local (still-sending) attachments are ignored.
+     */
+    fun saveAttachment(message: UiMessage) {
+        val attachment = message.attachment ?: return
+        viewModelScope.launch {
+            val open: () -> InputStream = when (val src = attachment.source) {
+                is AttachmentSource.Inline -> ({ src.bytes.inputStream() })
+                is AttachmentSource.Remote -> {
+                    val file = repository.downloadAttachment(attachment).getOrElse { e ->
+                        _messages.tryEmit("Couldn't save: ${e.message ?: "download failed"}")
+                        return@launch
+                    }
+                    ({ file.inputStream() })
+                }
+                is AttachmentSource.Local -> return@launch
+            }
+            mediaSaver.save(attachment.name, attachment.mime, attachment.kind, open)
+                .onSuccess { label -> _messages.tryEmit("Saved to $label") }
+                .onFailure { e -> _messages.tryEmit("Couldn't save: ${e.message ?: "unknown error"}") }
+        }
+    }
+
+    /** Downloads (if needed) then emits the local file so the screen can open it in an external app. */
+    fun openAttachment(message: UiMessage) {
+        val attachment = message.attachment ?: return
+        if (attachment.source is AttachmentSource.Local) return
+        viewModelScope.launch {
+            repository.localFile(attachment)
+                .onSuccess { file -> _openFile.tryEmit(AttachmentOpen(file, attachment.mime)) }
+                .onFailure { e -> _messages.tryEmit("Couldn't open: ${e.message ?: "download failed"}") }
+        }
+    }
+
+    /** Resolves the attachment to a shareable local file, then emits it for the screen to share out. */
+    fun shareAttachment(message: UiMessage) {
+        val attachment = message.attachment ?: return
+        if (attachment.source is AttachmentSource.Local) return
+        viewModelScope.launch {
+            repository.localFile(attachment)
+                .onSuccess { file -> _shareFile.tryEmit(AttachmentOpen(file, attachment.mime)) }
+                .onFailure { e -> _messages.tryEmit("Couldn't share: ${e.message ?: "unknown error"}") }
+        }
+    }
+
+    /** Fetches a remote attachment (idempotent: ignores in-flight/ready downloads). */
+    fun download(attachment: UiAttachment) {
+        val source = attachment.source
+        if (source !is AttachmentSource.Remote) return
+        val key = source.contentId
+        val current = _downloads.value[key]
+        if (current is AttachmentDownload.Loading || current is AttachmentDownload.Ready) return
+
+        _downloads.update { it + (key to AttachmentDownload.Loading) }
+        viewModelScope.launch {
+            repository.downloadAttachment(attachment)
+                .onSuccess { file -> _downloads.update { it + (key to AttachmentDownload.Ready(file)) } }
+                .onFailure { e ->
+                    _downloads.update { it + (key to AttachmentDownload.Failed(e.message ?: "Download failed")) }
+                }
+        }
+    }
+}
