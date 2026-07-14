@@ -63,6 +63,7 @@ import io.bosonnetwork.photon.feature.onboarding.OnboardingScreen
 import io.bosonnetwork.photon.feature.settings.ApproveDeviceScreen
 import io.bosonnetwork.photon.feature.settings.DevicesScreen
 import io.bosonnetwork.photon.feature.settings.PairNewDeviceScreen
+import io.bosonnetwork.photon.feature.settings.SessionsScreen
 import io.bosonnetwork.photon.feature.settings.SettingsScreen
 import io.bosonnetwork.photon.feature.settings.ShowKeyScreen
 
@@ -177,6 +178,7 @@ fun PhotonNavHost(
             }
             composable(TopLevelDestination.SETTINGS.route) {
                 SettingsScreen(
+                    onOpenSessions = { navController.navigate(Routes.SESSIONS) },
                     onOpenDevices = { navController.navigate(Routes.DEVICES) },
                     onSignedOut = {
                         appViewModel.onSignedOut()
@@ -187,13 +189,16 @@ fun PhotonNavHost(
                     },
                 )
             }
-            composable(Routes.DEVICES) {
-                DevicesScreen(
+            composable(Routes.SESSIONS) {
+                SessionsScreen(
                     onBack = { navController.popBackStack() },
                     onAddDevice = { navController.navigate(Routes.ADD_DEVICE) },
                     onApproveDevice = { navController.navigate(Routes.APPROVE_DEVICE) },
                     onShowKey = { navController.navigate(Routes.SHOW_KEY) },
                 )
+            }
+            composable(Routes.DEVICES) {
+                DevicesScreen(onBack = { navController.popBackStack() })
             }
             composable(Routes.SHOW_KEY) {
                 ShowKeyScreen(onBack = { navController.popBackStack() })

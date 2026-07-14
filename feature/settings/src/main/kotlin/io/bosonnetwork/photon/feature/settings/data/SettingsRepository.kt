@@ -30,6 +30,7 @@ import io.bosonnetwork.photon.core.model.AuthTokenStore
 import io.bosonnetwork.photon.core.model.NotificationPreferences
 import io.bosonnetwork.photon.core.model.ThemeMode
 import io.bosonnetwork.photon.core.model.ThemePreferences
+import io.bosonnetwork.photon.core.model.shortId
 import io.bosonnetwork.photon.core.network.DeviceRegistrationStore
 import io.bosonnetwork.photon.core.network.DirectorApi
 import io.bosonnetwork.photon.core.network.DirectorApiFactory
@@ -78,7 +79,15 @@ interface SettingsRepository {
     /** Removes the account passphrase; [currentPassphrase] must match the configured one. */
     suspend fun clearPassphrase(currentPassphrase: String): Result<Unit>
 
+    /** Live messaging sessions (service-level); one row per connected device (screen 6). */
+    suspend fun loadSessions(): Result<List<UiDevice>>
+
+    /**
+     * All devices registered under the account (Director registry, account-level), regardless of
+     * whether each one currently has a live messaging session. Contrast [loadSessions].
+     */
     suspend fun loadDevices(): Result<List<UiDevice>>
+
     suspend fun revokeSession(deviceId: String): Result<Unit>
 
     /** Deregisters a device. [passphrase] is required only when the account has one configured. */
@@ -166,28 +175,53 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override suspend fun removeAvatar(): Result<Unit> = runCatching { api().removeAvatar() }
 
-    override suspend fun loadDevices(): Result<List<UiDevice>> = runCatching {
-        val devices = api().getDevices()
+    override suspend fun loadSessions(): Result<List<UiDevice>> = runCatching {
+        // This screen lists messaging *sessions* (a service-level concept), not the Director device
+        // registry (an account-level concept). A session exists only while a Photon client is
+        // connected from a device, so the list is driven by getSessions(); the Director registry is
+        // joined in on a best-effort basis only to supply a friendly name/app for each session.
         val client = session.messagingClient
-        val currentDeviceId = client?.deviceId?.toString()
-        val sessions: Map<String, SessionInfo> = client
-            ?.let { runCatching { it.getSessions().awaitResult() }.getOrNull() }
-            ?.associateBy { it.deviceId().toString() }
+            ?: throw AppError.Network("Not connected to the messaging service")
+        val currentDeviceId = client.deviceId?.toString()
+        val sessions: List<SessionInfo> = client.getSessions().awaitResult()
+
+        val devicesById = runCatching { api().getDevices() }.getOrNull()
+            ?.associateBy { it.id }
             ?: emptyMap()
 
-        devices.map { d ->
-            val live = sessions[d.id]
+        sessions.map { s ->
+            val id = s.deviceId().toString()
+            val device = devicesById[id]
+            UiDevice(
+                deviceId = id,
+                name = device?.name?.takeIf { it.isNotBlank() } ?: shortId(id),
+                app = device?.app,
+                online = s.online(),
+                lastActive = maxOf(s.lastActive(), device?.lastSeen ?: 0L),
+                lastAddress = s.lastAddress()?.takeIf { it.isNotBlank() } ?: device?.lastAddress,
+                registeredAt = device?.createdAt ?: 0L,
+                isCurrent = id == currentDeviceId,
+            )
+        }.sortedWith(compareByDescending<UiDevice> { it.isCurrent }.thenByDescending { it.lastActive })
+    }
+
+    override suspend fun loadDevices(): Result<List<UiDevice>> = runCatching {
+        // Account-level: every device registered under the account (from any Boson app), whether or
+        // not it has a live messaging session. The current device is identified from the persisted
+        // registration record so it resolves even while the messaging client is disconnected.
+        val currentDeviceId = registrationStore.get()?.deviceId
+        api().getDevices().map { d ->
             UiDevice(
                 deviceId = d.id,
-                name = d.name?.takeIf { it.isNotBlank() } ?: "Unnamed device",
+                name = d.name?.takeIf { it.isNotBlank() } ?: shortId(d.id),
                 app = d.app,
-                online = live?.online() ?: false,
-                lastActive = maxOf(d.lastSeen, live?.lastActive() ?: 0L),
-                lastAddress = live?.lastAddress()?.takeIf { it.isNotBlank() } ?: d.lastAddress,
+                online = false,
+                lastActive = d.lastSeen,
+                lastAddress = d.lastAddress,
                 registeredAt = d.createdAt,
                 isCurrent = d.id == currentDeviceId,
             )
-        }.sortedWith(compareByDescending<UiDevice> { it.isCurrent }.thenByDescending { it.lastActive })
+        }.sortedWith(compareByDescending<UiDevice> { it.isCurrent }.thenByDescending { it.registeredAt })
     }
 
     override suspend fun revokeSession(deviceId: String): Result<Unit> = runCatching {

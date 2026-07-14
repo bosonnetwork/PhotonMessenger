@@ -51,6 +51,7 @@ class SettingsViewModelsTest {
     private class FakeSettingsRepo(
         private val theme: Flow<ThemePreferences>,
         var profile: Result<UiProfile> = Result.success(SAMPLE_PROFILE),
+        var sessions: Result<List<UiDevice>> = Result.success(emptyList()),
         var devices: Result<List<UiDevice>> = Result.success(emptyList()),
         var actionResult: Result<Unit> = Result.success(Unit),
         var removeResult: Result<Unit> = Result.success(Unit),
@@ -76,6 +77,7 @@ class SettingsViewModelsTest {
             passphraseResult.also { setPassphraseArgs = newPassphrase to currentPassphrase }
         override suspend fun clearPassphrase(currentPassphrase: String) =
             passphraseResult.also { clearedPassphrase = currentPassphrase }
+        override suspend fun loadSessions() = sessions
         override suspend fun loadDevices() = devices
         override suspend fun revokeSession(deviceId: String) = actionResult.also { revoked = deviceId }
         override suspend fun removeDevice(deviceId: String, passphrase: String?) =
@@ -154,24 +156,34 @@ class SettingsViewModelsTest {
     }
 
     @Test
-    fun `devices load into state`() = runTest {
-        val device = UiDevice("d1", "Pixel", "PhotonMessenger", true, 100, null, 50, isCurrent = true)
-        val repo = FakeSettingsRepo(themeFlow, devices = Result.success(listOf(device)))
-        val vm = DevicesViewModel(repo)
+    fun `sessions load into state`() = runTest {
+        val session = UiDevice("d1", "Pixel", "PhotonMessenger", true, 100, null, 50, isCurrent = true)
+        val repo = FakeSettingsRepo(themeFlow, sessions = Result.success(listOf(session)))
+        val vm = SessionsViewModel(repo)
         vm.uiState.test {
             var state = awaitItem()
             while (state.loading) state = awaitItem()
-            assertEquals(listOf("Pixel"), state.devices.map { it.name })
+            assertEquals(listOf("Pixel"), state.sessions.map { it.name })
             cancelAndIgnoreRemainingEvents()
         }
     }
 
     @Test
-    fun `revoke session calls the repository`() = runTest {
+    fun `revoke session calls the repository without removing the device`() = runTest {
         val repo = FakeSettingsRepo(themeFlow)
-        val vm = DevicesViewModel(repo)
-        vm.revokeSession("d9")
+        val vm = SessionsViewModel(repo)
+        vm.revokeSession("d9", alsoRemoveDevice = false)
         assertEquals("d9", repo.revoked)
+        assertEquals(null, repo.removed)
+    }
+
+    @Test
+    fun `revoke session with also-remove deregisters the device`() = runTest {
+        val repo = FakeSettingsRepo(themeFlow)
+        val vm = SessionsViewModel(repo)
+        vm.revokeSession("d1", alsoRemoveDevice = true)
+        assertEquals("d1", repo.revoked)
+        assertEquals("d1", repo.removed)
     }
 
     @Test
@@ -249,6 +261,19 @@ class SettingsViewModelsTest {
             var cleared = awaitItem()
             while (cleared.passphrasePrompt != null) cleared = awaitItem()
             assertEquals("secret", repo.removedPassphrase)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `registered devices load into state`() = runTest {
+        val device = UiDevice("d1", "Old phone", "Photon", false, 100, null, 50, isCurrent = false)
+        val repo = FakeSettingsRepo(themeFlow, devices = Result.success(listOf(device)))
+        val vm = DevicesViewModel(repo)
+        vm.uiState.test {
+            var state = awaitItem()
+            while (state.loading) state = awaitItem()
+            assertEquals(listOf("Old phone"), state.devices.map { it.name })
             cancelAndIgnoreRemainingEvents()
         }
     }

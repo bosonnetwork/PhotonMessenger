@@ -43,6 +43,7 @@ enum class TopLevelDestination(
 object Routes {
     const val ONBOARDING = "onboarding"
     const val CREATE_CHANNEL = "createChannel"
+    const val SESSIONS = "sessions"
     const val DEVICES = "devices"
     const val ADD_DEVICE = "addDevice"
     const val APPROVE_DEVICE = "approveDevice"

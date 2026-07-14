@@ -23,9 +23,7 @@
 package io.bosonnetwork.photon.feature.settings
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -33,20 +31,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -62,7 +56,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -76,13 +69,15 @@ import io.bosonnetwork.photon.feature.settings.model.UiDevice
 import java.text.DateFormat
 import java.util.Date
 
+/**
+ * Account-level device management (spec screen 6): every device registered under the account,
+ * regardless of whether it has a live messaging session. Removing a device deregisters its device
+ * key from the Director; the session-level view (sign a device out of messaging) is [SessionsScreen].
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DevicesScreen(
     onBack: () -> Unit,
-    onAddDevice: () -> Unit,
-    onApproveDevice: () -> Unit,
-    onShowKey: () -> Unit,
     viewModel: DevicesViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -97,7 +92,7 @@ fun DevicesScreen(
         topBar = {
             TopAppBar(
                 scrollBehavior = topBarScroll,
-                title = { Text("Devices & sessions") },
+                title = { Text("Registered devices") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -108,22 +103,15 @@ fun DevicesScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         ResponsiveContent(modifier = Modifier.padding(padding)) {
-            Column(Modifier.fillMaxSize()) {
-                PairingActions(
-                    onAddDevice = onAddDevice,
-                    onApproveDevice = onApproveDevice,
-                    onShowKey = onShowKey,
-                )
-                HorizontalDivider()
-                when {
-                    state.loading -> LoadingState()
-                    state.error != null -> ErrorState(state.error ?: "Error")
-                    state.devices.isEmpty() -> EmptyState("No devices", icon = Icons.Outlined.Devices)
-                    else -> LazyColumn(Modifier.fillMaxSize()) {
-                        items(state.devices, key = { it.deviceId }) { device ->
-                            DeviceRow(device, viewModel, onRemove = { removeTarget = it })
-                            HorizontalDivider()
-                        }
+            when {
+                state.loading -> LoadingState()
+                state.error != null -> ErrorState(state.error ?: "Error")
+                state.devices.isEmpty() ->
+                    EmptyState("No registered devices", icon = Icons.Outlined.Devices)
+                else -> LazyColumn(Modifier.fillMaxSize()) {
+                    items(state.devices, key = { it.deviceId }) { device ->
+                        DeviceRow(device, onRemove = { removeTarget = it })
+                        HorizontalDivider()
                     }
                 }
             }
@@ -133,10 +121,13 @@ fun DevicesScreen(
     removeTarget?.let { device ->
         ConfirmDialog(
             title = "Remove ${device.name}?",
-            text = "The device is deregistered from your account and can no longer sign in " +
-                "with its device key.",
+            text = "The device is deregistered from your account and can no longer sign in with " +
+                "its device key. Any active session it has is ended when it next reconnects.",
             confirmLabel = "Remove",
-            onConfirm = { viewModel.removeDevice(device.deviceId) },
+            onConfirm = {
+                viewModel.removeDevice(device.deviceId)
+                removeTarget = null
+            },
             onDismiss = { removeTarget = null },
         )
     }
@@ -152,7 +143,7 @@ fun DevicesScreen(
 
 /** Prompts for the account passphrase when the server gated a device removal (428/403). */
 @Composable
-private fun RemoveDevicePassphraseDialog(
+internal fun RemoveDevicePassphraseDialog(
     error: String?,
     onDismiss: () -> Unit,
     onSubmit: (String) -> Unit,
@@ -188,71 +179,21 @@ private fun RemoveDevicePassphraseDialog(
 }
 
 @Composable
-private fun PairingActions(
-    onAddDevice: () -> Unit,
-    onApproveDevice: () -> Unit,
-    onShowKey: () -> Unit,
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = onAddDevice, modifier = Modifier.weight(1f)) {
-                Text("Add this device")
-            }
-            OutlinedButton(onClick = onApproveDevice, modifier = Modifier.weight(1f)) {
-                Text("Approve a device")
-            }
-        }
-        OutlinedButton(onClick = onShowKey, modifier = Modifier.fillMaxWidth()) {
-            Text("Show my key")
-        }
-    }
-}
-
-@Composable
-private fun DeviceRow(device: UiDevice, viewModel: DevicesViewModel, onRemove: (UiDevice) -> Unit) {
-    var menuOpen by remember { mutableStateOf(false) }
-
+private fun DeviceRow(device: UiDevice, onRemove: (UiDevice) -> Unit) {
     ListItem(
         headlineContent = {
             Text(if (device.isCurrent) "${device.name} (this device)" else device.name)
         },
-        supportingContent = { Text(device.subtitle()) },
-        leadingContent = {
-            // Decorative: the online/offline state is already in the row subtitle, and a disabled
-            // chip would otherwise be announced as "disabled" by TalkBack (X-A1).
-            AssistChip(
-                onClick = {},
-                enabled = false,
-                label = { Text(if (device.online) "Online" else "Offline") },
-                modifier = Modifier.clearAndSetSemantics {},
-            )
-        },
+        supportingContent = { Text(device.registrationSubtitle()) },
         trailingContent = {
+            // The current device cannot deregister itself here; sign out from Settings instead.
             if (!device.isCurrent) {
-                Box {
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "Device actions")
-                    }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Sign out session") },
-                            enabled = device.online,
-                            onClick = {
-                                menuOpen = false
-                                viewModel.revokeSession(device.deviceId)
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Remove device", color = MaterialTheme.colorScheme.error) },
-                            onClick = {
-                                menuOpen = false
-                                onRemove(device)
-                            },
-                        )
-                    }
+                IconButton(onClick = { onRemove(device) }) {
+                    Icon(
+                        Icons.Filled.DeleteOutline,
+                        contentDescription = "Remove device",
+                        tint = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
         },
@@ -260,18 +201,14 @@ private fun DeviceRow(device: UiDevice, viewModel: DevicesViewModel, onRemove: (
 }
 
 @Composable
-private fun UiDevice.subtitle(): String {
+private fun UiDevice.registrationSubtitle(): String {
     val parts = buildList {
         app?.takeIf { it.isNotBlank() }?.let { add(it) }
-        if (online) {
-            add("Active now")
-        } else if (lastActive > 0) {
-            add("Last active ${formatTimestamp(lastActive)}")
-        }
-        lastAddress?.takeIf { it.isNotBlank() }?.let { add(it) }
+        if (registeredAt > 0) add("Registered ${formatRegistrationTimestamp(registeredAt)}")
+        if (lastActive > 0) add("Last seen ${formatRegistrationTimestamp(lastActive)}")
     }
-    return parts.joinToString(" - ").ifEmpty { "Registered ${formatTimestamp(registeredAt)}" }
+    return parts.joinToString(" - ").ifEmpty { "Registered device" }
 }
 
-private fun formatTimestamp(epochMillis: Long): String =
-    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(epochMillis))
+private fun formatRegistrationTimestamp(epochMillis: Long): String =
+    DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(epochMillis))

@@ -38,26 +38,26 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-data class DevicesUiState(
+data class SessionsUiState(
     val loading: Boolean = true,
-    val devices: List<UiDevice> = emptyList(),
+    val sessions: List<UiDevice> = emptyList(),
     val error: String? = null,
     /** Non-null while a passphrase-protected device removal is waiting for the user's passphrase (M6). */
     val passphrasePrompt: PassphrasePrompt? = null,
 )
 
 /**
- * Account-level device management (spec screen 6): lists every device registered under the account
- * (Director registry), independent of live messaging sessions, and lets the user deregister a device.
- * The session-level counterpart (sign a device out of messaging) is [SessionsViewModel].
+ * Live messaging sessions (service-level, spec screen 6): one row per connected device. Revoking a
+ * session signs that device out of messaging; an optional flag also deregisters the device from the
+ * account. The account-level counterpart (manage all registered devices) is [DevicesViewModel].
  */
 @HiltViewModel
-class DevicesViewModel @Inject constructor(
+class SessionsViewModel @Inject constructor(
     private val repository: SettingsRepository,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(DevicesUiState())
-    val uiState: StateFlow<DevicesUiState> = _uiState.asStateFlow()
+    private val _uiState = MutableStateFlow(SessionsUiState())
+    val uiState: StateFlow<SessionsUiState> = _uiState.asStateFlow()
 
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val messages = _messages.asSharedFlow()
@@ -69,8 +69,8 @@ class DevicesViewModel @Inject constructor(
     fun refresh() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(loading = true)
-            repository.loadDevices()
-                .onSuccess { _uiState.value = DevicesUiState(loading = false, devices = it) }
+            repository.loadSessions()
+                .onSuccess { _uiState.value = SessionsUiState(loading = false, sessions = it) }
                 .onFailure {
                     _uiState.value = _uiState.value.copy(loading = false, error = it.message)
                 }
@@ -78,18 +78,29 @@ class DevicesViewModel @Inject constructor(
     }
 
     /**
-     * Deregisters the device. If the account is passphrase-protected the server gates this with 428;
-     * we then surface a passphrase prompt and retry via [confirmRemoveWithPassphrase].
+     * Revokes the device's messaging session (service-level, M6-3); by default the device stays
+     * registered and can reconnect. When [alsoRemoveDevice] is set, the device is additionally
+     * deregistered from the account after the session is revoked; a passphrase-protected account
+     * gates that removal, so we fall back to the passphrase prompt.
      */
-    fun removeDevice(deviceId: String) {
+    fun revokeSession(deviceId: String, alsoRemoveDevice: Boolean) {
         viewModelScope.launch {
-            repository.removeDevice(deviceId, passphrase = null)
-                .onSuccess { refresh() }
-                .onFailure { handleRemoveFailure(deviceId, it) }
+            val revoked = repository.revokeSession(deviceId)
+            if (revoked.isFailure) {
+                _messages.tryEmit("Couldn't revoke session: ${revoked.exceptionOrNull()?.message ?: "unknown error"}")
+                return@launch
+            }
+            if (alsoRemoveDevice) {
+                repository.removeDevice(deviceId, passphrase = null)
+                    .onSuccess { refresh() }
+                    .onFailure { handleRemoveFailure(deviceId, it) }
+            } else {
+                refresh()
+            }
         }
     }
 
-    /** Retries a gated removal with the passphrase the user supplied in the prompt. */
+    /** Retries a gated device removal with the passphrase the user supplied in the prompt. */
     fun confirmRemoveWithPassphrase(passphrase: String) {
         val deviceId = _uiState.value.passphrasePrompt?.deviceId ?: return
         viewModelScope.launch {

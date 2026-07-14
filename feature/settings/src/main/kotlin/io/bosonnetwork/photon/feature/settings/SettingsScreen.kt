@@ -108,6 +108,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    onOpenSessions: () -> Unit,
     onOpenDevices: () -> Unit,
     onSignedOut: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
@@ -199,6 +200,13 @@ fun SettingsScreen(
                     ListItem(
                         headlineContent = { Text("Devices & sessions") },
                         supportingContent = { Text("Manage where you're signed in") },
+                        modifier = Modifier.clickable(role = Role.Button, onClick = onOpenSessions),
+                    )
+                    HorizontalDivider()
+
+                    ListItem(
+                        headlineContent = { Text("Registered devices") },
+                        supportingContent = { Text("Manage devices registered to your account") },
                         modifier = Modifier.clickable(role = Role.Button, onClick = onOpenDevices),
                     )
                     HorizontalDivider()

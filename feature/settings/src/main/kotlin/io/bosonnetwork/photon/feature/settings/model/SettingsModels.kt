@@ -35,8 +35,10 @@ data class UiProfile(
 )
 
 /**
- * A registered device joined with its live messaging session (spec screen 6, M6-2). The name/app come
- * from the Director device registry; online/lastActive/lastAddress come from the live session (if any).
+ * A live messaging session, optionally enriched with its device registration (spec screen 6, M6-2).
+ * The list is driven by the messaging service's sessions (each session belongs to a device);
+ * online/lastActive/lastAddress come from the session, while name/app/registeredAt are joined in from
+ * the Director device registry when available (falling back to a short device id).
  */
 data class UiDevice(
     val deviceId: String,
@@ -48,4 +50,13 @@ data class UiDevice(
     val registeredAt: Long,
     /** This is the device the app is currently running on; its session cannot be revoked from here. */
     val isCurrent: Boolean,
+)
+
+/**
+ * A pending device removal that the server gated on the account passphrase (M6). Shared by the
+ * sessions view (via the "also remove device" option) and the account-level devices view.
+ */
+data class PassphrasePrompt(
+    val deviceId: String,
+    val error: String? = null,
 )
