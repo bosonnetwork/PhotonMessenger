@@ -42,6 +42,21 @@ sealed class AppError(message: String?, cause: Throwable? = null) : Exception(me
     class Forbidden(message: String? = null, cause: Throwable? = null) : AppError(message, cause)
 
     /**
+     * The messaging server refused the connection because the user already holds the maximum number
+     * of concurrent sessions (each running app instance is one session). Terminal: the client does
+     * not auto-retry. The user must close another session before retrying. [message] carries the
+     * user-facing explanation and recovery guidance.
+     */
+    class SessionLimitExceeded(message: String? = null, cause: Throwable? = null) : AppError(message, cause)
+
+    /**
+     * The messaging server refused the connection for an unrecoverable reason other than the session
+     * limit (outdated protocol, invalid credentials, unauthorized device). Terminal: retrying as-is
+     * will not help; [message] carries the suggested recovery action.
+     */
+    class ConnectionRejected(message: String? = null, cause: Throwable? = null) : AppError(message, cause)
+
+    /**
      * The account has a passphrase configured but none was supplied for a passphrase-gated
      * operation (HTTP 428 Precondition Required). The UI should prompt for the passphrase and retry.
      */

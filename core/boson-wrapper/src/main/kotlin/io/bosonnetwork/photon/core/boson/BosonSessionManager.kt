@@ -146,7 +146,22 @@ class BosonSessionManager(
         client.addConnectionListener(connectionListener)
         shouldStayConnected = true
         _connectionState.value = ConnectionState.CONNECTING
-        client.start().awaitResult()
+        try {
+            client.start().awaitResult()
+        } catch (e: Throwable) {
+            // The client fails start() terminally only for unrecoverable rejections (bad protocol,
+            // credentials, unauthorized device, or the per-user session limit); recoverable errors
+            // are retried inside the client and never throw here. Surface the terminal case as a
+            // typed AppError so the UI can explain it and offer the right recovery action, and drop
+            // the intent to stay connected so nothing auto-reconnects behind a hard rejection.
+            val terminal = e.toConnectionError()
+            if (terminal != null) {
+                shouldStayConnected = false
+                _connectionState.value = ConnectionState.DISCONNECTED
+                throw terminal
+            }
+            throw e
+        }
         // Publish only after start() so subscribers never query a half-initialised client. The
         // reconnect loop restarts this same instance, so the value doesn't churn on a flaky link.
         _client.value = client

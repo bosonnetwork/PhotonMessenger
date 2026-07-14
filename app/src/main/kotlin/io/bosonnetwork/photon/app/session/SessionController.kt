@@ -27,6 +27,7 @@ import io.bosonnetwork.photon.app.notification.FriendRequestNotifier
 import io.bosonnetwork.photon.app.notification.MessageNotifier
 import io.bosonnetwork.photon.app.service.MessagingForegroundService
 import io.bosonnetwork.photon.core.boson.BosonSessionManager
+import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.core.model.ConnectionState
 import io.bosonnetwork.photon.core.network.DirectorApi
 import io.bosonnetwork.photon.core.network.DirectorApiFactory
@@ -94,6 +95,12 @@ class SessionController @Inject constructor(
     @Volatile
     private var wantConnected = false
 
+    // True when the last bring-up failed with an unrecoverable rejection (session limit, bad
+    // protocol/credentials, unauthorized device). Retrying as-is won't help, so an automatic
+    // network-regain retry is suppressed; only an explicit user Retry clears it.
+    @Volatile
+    private var terminalFailure = false
+
     private suspend fun api(): DirectorApi {
         val cfg: DirectorConfig = configStore.config.first()
         cachedApi?.let { (cached, api) -> if (cached == cfg) return api }
@@ -108,6 +115,7 @@ class SessionController @Inject constructor(
                 if (active.value || own.value.phase == SessionPhase.DISCOVERING) return@launch
                 own.value = SessionStatus(SessionPhase.DISCOVERING)
             }
+            terminalFailure = false
             MessagingForegroundService.start(context)
             runCatching {
                 // Register this device first: the messaging node's authenticateDevice rejects any device
@@ -124,7 +132,12 @@ class SessionController @Inject constructor(
                 active.value = true
             }.onFailure { e ->
                 active.value = false
-                own.value = SessionStatus(SessionPhase.FAILED, e.toDirectorError().message ?: "Couldn't connect")
+                // BosonSessionManager already maps an unrecoverable rejection to a terminal AppError;
+                // toDirectorError() passes those through unchanged. Flag terminal failures so a
+                // network-regain doesn't silently retry a hard rejection behind the user's back.
+                val error = e.toDirectorError()
+                terminalFailure = error is AppError.SessionLimitExceeded || error is AppError.ConnectionRejected
+                own.value = SessionStatus(SessionPhase.FAILED, error.message ?: "Couldn't connect")
                 MessagingForegroundService.stop(context)
             }
         }
@@ -132,11 +145,14 @@ class SessionController @Inject constructor(
 
     /** Retries a failed bring-up when the network comes back (M1-19), if the user wants to be online. */
     fun onNetworkAvailable() {
-        if (wantConnected && !active.value) ensureConnected()
+        // A terminal rejection (e.g. session limit) won't clear just because the network came back,
+        // so don't auto-retry it - the user must take action and tap Retry.
+        if (wantConnected && !active.value && !terminalFailure) ensureConnected()
     }
 
-    /** Retries a failed bring-up. */
+    /** Retries a failed bring-up. Explicit user action, so it also clears a terminal failure. */
     fun retry() {
+        terminalFailure = false
         own.value = SessionStatus(SessionPhase.IDLE)
         ensureConnected()
     }
@@ -144,6 +160,7 @@ class SessionController @Inject constructor(
     /** Tears down the live session and stops the foreground service (sign-out). */
     fun disconnect() {
         wantConnected = false
+        terminalFailure = false
         scope.launch {
             active.value = false
             own.value = SessionStatus(SessionPhase.IDLE)
