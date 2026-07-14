@@ -26,6 +26,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.bosonnetwork.photon.core.boson.UnreadTracker
+import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.core.model.ChannelInviteStore
 import io.bosonnetwork.photon.core.model.InviteAction
 import io.bosonnetwork.photon.core.model.ProfileResolver
@@ -45,6 +46,7 @@ import io.bosonnetwork.photon.feature.chat.model.UiAttachment
 import io.bosonnetwork.photon.feature.chat.model.UiMessage
 import io.bosonnetwork.photon.feature.chat.model.VOICE_MIME
 import io.bosonnetwork.photonmessaging.exceptions.MessageTimeoutException
+import io.bosonnetwork.photonmessaging.exceptions.NotConnectedException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.File
 import java.io.InputStream
@@ -295,10 +297,25 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    private fun sendErrorMessage(e: Throwable): String = when (e) {
-        is MessageTimeoutException -> "Message timed out"
-        else -> "Couldn't send: ${e.message ?: "unknown error"}"
+    /**
+     * Maps a send failure to a short, user-facing message. Internal exception text - Vert.x/MQTT
+     * transport details, NullPointerExceptions, stack traces - is never surfaced: a lost connection
+     * is reported as a not-connected state and every other cause collapses to a generic prompt. The
+     * caller pairs this with a Retry affordance (the snackbar action, or the FAILED bubble's tap).
+     */
+    private fun sendErrorMessage(e: Throwable, what: String = "message"): String = when {
+        e.isNotConnected() -> "Not connected. Your $what wasn't sent - retry once you're back online."
+        e is MessageTimeoutException -> "Your $what timed out."
+        else -> "Couldn't send your $what."
     }
+
+    // A transient "the client isn't connected right now" failure: the transport dropped and a
+    // reconnect is in progress (NotConnectedException from the messaging client, or AppError.Network
+    // when no client is up yet). Retrying once reconnected succeeds, so it is reported as such rather
+    // than as an internal error. Walks the cause chain since awaitResult may rethrow a wrapped cause.
+    private fun Throwable.isNotConnected(): Boolean =
+        generateSequence(this) { it.cause?.takeIf { c -> c !== it } }
+            .any { it is NotConnectedException || it is AppError.Network }
 
     /**
      * Deletes a message locally on this device. Hides it immediately (optimistically) and, when the
@@ -380,7 +397,7 @@ class ChatViewModel @Inject constructor(
                     pending.update { list ->
                         list.map { if (it.id == pendingId) it.copy(status = MessageStatus.FAILED) else it }
                     }
-                    _messages.tryEmit("Couldn't send attachment: ${e.message ?: "unknown error"}")
+                    _messages.tryEmit(sendErrorMessage(e, "attachment"))
                 }
         }
     }
@@ -508,7 +525,7 @@ class ChatViewModel @Inject constructor(
                     pending.update { list ->
                         list.map { if (it.id == pendingId) it.copy(status = MessageStatus.FAILED) else it }
                     }
-                    _messages.tryEmit("Couldn't send voice message: ${e.message ?: "unknown error"}")
+                    _messages.tryEmit(sendErrorMessage(e, "voice message"))
                 }
         }
     }

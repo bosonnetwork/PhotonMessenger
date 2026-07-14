@@ -48,6 +48,7 @@ import io.bosonnetwork.photon.feature.chat.model.VOICE_MIME
 import io.bosonnetwork.photon.feature.chat.model.chooseCarrier
 import io.bosonnetwork.photon.feature.chat.model.remoteAttachmentFromMap
 import io.bosonnetwork.photon.feature.chat.model.remoteAttachmentToMap
+import io.bosonnetwork.photonmessaging.exceptions.NotConnectedException
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -255,9 +256,33 @@ class ChatViewModelsTest {
         vm.sendFailures.test {
             vm.send("hi")
             val failure = awaitItem()
-            assertTrue(failure.message.contains("nope"))
+            // The internal exception text ("nope") must never reach the user; a clean, generic
+            // prompt is shown while the original draft is preserved for the Retry action.
+            assertFalse(failure.message.contains("nope"))
+            assertEquals("Couldn't send your message.", failure.message)
             assertEquals("hi", failure.text)
             assertTrue(failure.pendingId.startsWith("pending-"))
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `send while disconnected reports a clean not-connected message`() = runTest {
+        val repo = FakeChatRepo(
+            convosFlow, msgsFlow,
+            sendResult = Result.failure(
+                NotConnectedException("Not connected to the messaging service"),
+            ),
+        )
+        val vm = chatVm(repo, "abc")
+
+        vm.sendFailures.test {
+            vm.send("hi")
+            val failure = awaitItem()
+            // A lost transport surfaces as a not-connected state, never the raw MQTT/Vert.x detail.
+            assertTrue(failure.message.startsWith("Not connected."))
+            assertFalse(failure.message.contains("messaging service"))
+            assertEquals("hi", failure.text)
             cancelAndIgnoreRemainingEvents()
         }
     }
