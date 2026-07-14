@@ -116,7 +116,6 @@ class SessionController @Inject constructor(
                 own.value = SessionStatus(SessionPhase.DISCOVERING)
             }
             terminalFailure = false
-            MessagingForegroundService.start(context)
             runCatching {
                 // Register this device first: the messaging node's authenticateDevice rejects any device
                 // not in the user's device table, so an unregistered device connects but never reaches
@@ -125,6 +124,13 @@ class SessionController @Inject constructor(
                 val coords = ServiceDiscovery.toServiceCoords(api().getNodeStatus())
                 sessionManager.connect(coords)
             }.onSuccess {
+                // Hold the hosting process up with the foreground service only once a session is
+                // actually live. Starting it up-front and tearing it down on every failed or retried
+                // bring-up thrashed the service and could pull the app back to the foreground while
+                // the server was unreachable. A background retry that succeeds may not be permitted to
+                // start a foreground service (Android 12+ background-start limits), so guard the start;
+                // the connection is up regardless.
+                runCatching { MessagingForegroundService.start(context) }
                 sessionManager.messagingClient?.let {
                     messageNotifier.attach(it)
                     friendRequestNotifier.attach(it)
@@ -138,7 +144,9 @@ class SessionController @Inject constructor(
                 val error = e.toDirectorError()
                 terminalFailure = error is AppError.SessionLimitExceeded || error is AppError.ConnectionRejected
                 own.value = SessionStatus(SessionPhase.FAILED, error.message ?: "Couldn't connect")
-                MessagingForegroundService.stop(context)
+                // No foreground service is started until a connection succeeds, so a failed bring-up
+                // (including every background retry) leaves nothing to tear down and never touches the
+                // service - that is what keeps a retry loop from resurfacing the app.
             }
         }
     }

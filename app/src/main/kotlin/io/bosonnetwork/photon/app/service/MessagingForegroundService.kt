@@ -58,6 +58,10 @@ class MessagingForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Enter the foreground synchronously to honor the startForegroundService() contract. The
+        // service is only ever started once a messaging session is actually live (see
+        // SessionController), so it is never started-then-immediately-stopped on a failing bring-up -
+        // which is what previously raced into ForegroundServiceDidNotStartInTimeException.
         val notification = notificationGateway.foregroundNotification("Connected")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ServiceCompat.startForeground(
