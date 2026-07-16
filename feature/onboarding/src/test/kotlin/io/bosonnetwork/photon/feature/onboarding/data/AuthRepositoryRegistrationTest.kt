@@ -28,7 +28,6 @@ import androidx.datastore.preferences.core.Preferences
 import io.bosonnetwork.photon.core.boson.BosonCrypto
 import io.bosonnetwork.photon.core.boson.KeyManager
 import io.bosonnetwork.photon.core.model.AuthTokenStore
-import io.bosonnetwork.photon.core.network.DeviceRegistrationStore
 import io.bosonnetwork.photon.core.network.DirectorApiFactory
 import io.bosonnetwork.photon.core.network.DirectorConfigStore
 import io.bosonnetwork.photon.core.security.SecretStore
@@ -46,7 +45,6 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
@@ -57,9 +55,10 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 /**
- * Device registration management semantics: the device key owner (user binding) plus the persisted
- * node record let the connect path skip re-registration, invalidate on identity/node change, and
- * identity changes always rotate the device key.
+ * Device registration management semantics: the connect path probes the Director's super node id
+ * (public GET /client/id) and skips re-registration while the stored registered-node id matches; a
+ * node change re-registers. (Rotation of the device key on identity change lives in KeyManager's
+ * ensureDeviceKeyFor / AuthRepository.adoptIdentity and is unit-tested in KeyManagerTest.)
  */
 class AuthRepositoryRegistrationTest {
 
@@ -70,8 +69,10 @@ class AuthRepositoryRegistrationTest {
     private lateinit var scope: CoroutineScope
     private lateinit var keyManager: KeyManager
     private lateinit var configStore: DirectorConfigStore
-    private lateinit var registrationStore: DeviceRegistrationStore
     private lateinit var repository: AuthRepository
+
+    /** The super node id the Director's GET /client/id currently reports. */
+    private var nodeId = "NODE-1"
 
     private class FakeTokenStore(@Volatile var token: String? = "cwt") : AuthTokenStore {
         override fun currentToken(): String? = token
@@ -102,13 +103,11 @@ class AuthRepositoryRegistrationTest {
         }
         keyManager = KeyManager(inMemorySecrets())
         configStore = DirectorConfigStore(dataStore)
-        registrationStore = DeviceRegistrationStore(dataStore)
         repository = AuthRepository(
             apiFactory = DirectorApiFactory(FakeTokenStore()),
             configStore = configStore,
             tokenStore = FakeTokenStore(),
             keyManager = keyManager,
-            registrationStore = registrationStore,
         )
     }
 
@@ -126,10 +125,12 @@ class AuthRepositoryRegistrationTest {
         return BosonCrypto.idOf(userKey).toString()
     }
 
-    /** Responds to profile lookups (not passphrase protected) and device registrations. */
+    /** Responds to the node-id probe, profile lookups (not passphrase protected), and registrations. */
     private fun serveDirector(addDeviceCode: Int = 201) {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse = when {
+                request.path!!.endsWith("/client/id") ->
+                    MockResponse().setBody("""{"id":"$nodeId"}""")
                 request.path!!.endsWith("/client/profile") ->
                     MockResponse().setBody("""{"id":"USER","passphraseProtected":false}""")
                 request.path!!.endsWith("/client/devices") ->
@@ -155,45 +156,43 @@ class AuthRepositoryRegistrationTest {
         drainRequests().count { it.path!!.endsWith("/client/devices") }
 
     @Test
-    fun `ensureDeviceRegistered registers once and then skips with zero network calls`() = runTest {
-        val userId = givenSignedInUser()
+    fun `ensureDeviceRegistered registers once then skips re-registering on the same node`() = runTest {
+        givenSignedInUser()
         serveDirector()
 
         repository.ensureDeviceRegistered()
-        val afterFirst = server.requestCount
-        assertTrue(afterFirst > 0)
-        assertEquals(baseUrl(), registrationStore.get()?.baseUrl)
-        assertEquals(userId, keyManager.deviceKeyOwner())
+        assertTrue(server.requestCount > 0)
+        assertEquals(nodeId, keyManager.registeredNodeId())
 
         repository.ensureDeviceRegistered()
-        assertEquals("second bring-up must be a pure cache hit", afterFirst, server.requestCount)
+
+        // The node-id probe runs each bring-up, but the device is registered only once.
+        assertEquals(1, countDeviceRegistrations())
     }
 
     @Test
-    fun `a node change invalidates the record and re-registers`() = runTest {
+    fun `a node change re-registers and records the new node`() = runTest {
         givenSignedInUser()
         serveDirector()
         repository.ensureDeviceRegistered()
+        assertEquals("NODE-1", keyManager.registeredNodeId())
 
-        // Simulate a node switch by rewriting the recorded registration for another base URL.
-        val stale = registrationStore.get()!!
-        registrationStore.set(stale.copy(baseUrl = "https://other.node"))
-
+        // The configured Director now reports a different super node.
+        nodeId = "NODE-2"
         repository.ensureDeviceRegistered()
 
         assertEquals(2, countDeviceRegistrations())
-        assertEquals("record rewritten for the current node", baseUrl(), registrationStore.get()?.baseUrl)
+        assertEquals("NODE-2", keyManager.registeredNodeId())
     }
 
     @Test
-    fun `a 409 already-registered response still writes the record`() = runTest {
-        val userId = givenSignedInUser()
+    fun `a 409 already-registered response still records the node`() = runTest {
+        givenSignedInUser()
         serveDirector(addDeviceCode = 409)
 
         repository.ensureDeviceRegistered()
 
-        assertEquals(baseUrl(), registrationStore.get()?.baseUrl)
-        assertEquals(userId, keyManager.deviceKeyOwner())
+        assertEquals(nodeId, keyManager.registeredNodeId())
     }
 
     @Test
@@ -205,8 +204,7 @@ class AuthRepositoryRegistrationTest {
             kotlinx.coroutines.runBlocking { repository.registerDevice(null) }
         }
 
-        assertNull(registrationStore.get())
-        assertNull(keyManager.deviceKeyOwner())
+        assertNull(keyManager.registeredNodeId())
     }
 
     @Test
@@ -217,56 +215,28 @@ class AuthRepositoryRegistrationTest {
     }
 
     @Test
-    fun `registering under a different identity rotates the device key`() = runTest {
+    fun `an unreachable node-id probe skips registration`() = runTest {
         givenSignedInUser()
-        serveDirector()
-        repository.ensureDeviceRegistered()
-        val firstDeviceId = keyManager.deviceId()!!.toString()
+        // No dispatcher configured to answer /client/id successfully.
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(404)
+        }
 
-        // The account identity changes (new user key) without a sign-out.
-        val secondUserId = BosonCrypto.idOf(keyManager.generateUserKey()).toString()
         repository.ensureDeviceRegistered()
 
-        assertNotNull(registrationStore.get())
-        assertEquals(secondUserId, keyManager.deviceKeyOwner())
-        assertNotEquals(
-            "device key must never straddle two identities",
-            firstDeviceId,
-            keyManager.deviceId()!!.toString(),
-        )
+        assertEquals(0, countDeviceRegistrations())
+        assertNull(keyManager.registeredNodeId())
     }
 
     @Test
-    fun `signOut clears the registration record`() = runTest {
+    fun `signOut clears the registered node`() = runTest {
         givenSignedInUser()
         serveDirector()
         repository.ensureDeviceRegistered()
-        assertNotNull(registrationStore.get())
+        assertNotNull(keyManager.registeredNodeId())
 
         repository.signOut()
 
-        assertNull(registrationStore.get())
-        assertNull(keyManager.deviceKeyOwner())
-    }
-
-    @Test
-    fun `registration request carries the rotated device id`() = runTest {
-        givenSignedInUser()
-        serveDirector()
-        repository.ensureDeviceRegistered()
-
-        // Drain recorded requests, keeping the registration body for comparison.
-        val firstBody = drainRequests()
-            .first { it.path!!.endsWith("/client/devices") }.body.readUtf8()
-
-        keyManager.generateUserKey() // identity change
-        repository.ensureDeviceRegistered()
-
-        val secondBody = drainRequests()
-            .first { it.path!!.endsWith("/client/devices") }.body.readUtf8()
-
-        fun deviceIdOf(body: String): String =
-            Regex(""""deviceId"\s*:\s*"([^"]+)"""").find(body)!!.groupValues[1]
-        assertNotEquals(deviceIdOf(firstBody), deviceIdOf(secondBody))
+        assertNull(keyManager.registeredNodeId())
     }
 }

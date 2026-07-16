@@ -28,8 +28,6 @@ import io.bosonnetwork.photon.core.boson.KeyManager
 import io.bosonnetwork.photon.core.boson.PairingPayload
 import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.core.model.AuthTokenStore
-import io.bosonnetwork.photon.core.network.DeviceRegistrationStore
-import io.bosonnetwork.photon.core.network.RegisteredNode
 import io.bosonnetwork.photon.core.network.DirectorApi
 import io.bosonnetwork.photon.core.network.DirectorApiFactory
 import io.bosonnetwork.photon.core.network.DirectorConfig
@@ -98,7 +96,6 @@ class DevicePairingRepositoryImpl @Inject constructor(
     private val configStore: DirectorConfigStore,
     private val keyManager: KeyManager,
     private val tokenStore: AuthTokenStore,
-    private val registrationStore: DeviceRegistrationStore,
 ) : DevicePairingRepository {
 
     /** State the new device must keep between showing its QR and finishing the pairing. */
@@ -178,11 +175,9 @@ class DevicePairingRepositoryImpl @Inject constructor(
             ).token
             tokenStore.setToken(token)
 
-            // Pairing registered this device server-side: record the owner + node so the first
-            // bring-up after pairing skips re-registration.
-            keyManager.setDeviceKeyOwner(response.userId)
-            val cfg = config()
-            registrationStore.set(RegisteredNode(cfg.baseUrl, cfg.nodeId))
+            // Pairing registered this device server-side: record the super node so the first bring-up
+            // after pairing skips re-registration (its presence also marks the key as registered).
+            keyManager.setRegisteredNodeId(api().getNodeId().id)
 
             active = null
             response.userId

@@ -25,6 +25,15 @@ package io.bosonnetwork.photon.core.network.model
 import kotlinx.serialization.Serializable
 
 /**
+ * GET /api/v1/client/id -> the super node's Boson id (base58). Public/auth-less; used to detect which
+ * super node the device is registered with.
+ */
+@Serializable
+data class NodeIdDto(
+    val id: String,
+)
+
+/**
  * GET /api/v1/client/node -> NodeStatus (Director). Only the fields PhotonMessenger needs are
  * modeled; the JSON also carries info/startedAt/running which we ignore. See spec 1.7.
  */

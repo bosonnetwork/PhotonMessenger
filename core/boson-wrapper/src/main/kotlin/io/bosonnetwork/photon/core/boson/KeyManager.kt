@@ -67,36 +67,36 @@ class KeyManager(
             .also { secrets.putBytes(KEY_DEVICE, BosonCrypto.privateKeyBytes64(it)) }
 
     /**
-     * The base58 user id this device key was last REGISTERED under (with the Director), or null if
-     * it has never been registered. Set after a successful registration; used to detect identity
-     * changes so a device key is never reused across identities.
+     * The base58 id of the super node this device is currently REGISTERED with, or null if it has
+     * never been registered (or the key was rotated since). Set after a successful registration; used
+     * to detect a node change and, by its presence, whether the current device key is registered.
      */
-    fun deviceKeyOwner(): String? = secrets.getBytes(KEY_DEVICE_OWNER)?.decodeToString()
+    fun registeredNodeId(): String? = secrets.getBytes(KEY_REG_NODE)?.decodeToString()
 
-    /** Records the identity the device key is now registered under (call after successful registration). */
-    fun setDeviceKeyOwner(userId: String) {
-        secrets.putBytes(KEY_DEVICE_OWNER, userId.encodeToByteArray())
+    /** Records (or clears, when null) the super node this device is registered with. */
+    fun setRegisteredNodeId(nodeId: String?) {
+        if (nodeId == null) secrets.remove(KEY_REG_NODE)
+        else secrets.putBytes(KEY_REG_NODE, nodeId.encodeToByteArray())
     }
 
-    /** Generates and persists a FRESH device keypair, clearing any recorded owner. */
+    /** Generates and persists a FRESH device keypair; a rotated key is by definition not registered. */
     fun rotateDeviceKey(): Signature.KeyPair {
-        secrets.remove(KEY_DEVICE_OWNER)
+        secrets.remove(KEY_REG_NODE)
         return BosonCrypto.generateKeyPair()
             .also { secrets.putBytes(KEY_DEVICE, BosonCrypto.privateKeyBytes64(it)) }
     }
 
     /**
-     * Returns a device key safe to register under [newUserId]: rotates first when the current key
-     * was registered under a DIFFERENT identity. [newUserId] == null means the adopting identity is
-     * not yet known (pairing invite), so any previously-registered key must be rotated too.
+     * Returns a device key safe to register under [newUserId]: rotates first when the current key is
+     * already registered under a DIFFERENT identity. A device key is owned by exactly one user (the
+     * current user key), so "different identity" is derived from the current user key rather than a
+     * stored owner. [newUserId] == null means the adopting identity is not yet known (pairing invite),
+     * so any previously-registered key must be rotated too.
      */
-    fun ensureDeviceKeyFor(newUserId: String?): Signature.KeyPair {
-        val owner = deviceKeyOwner()
-        return when {
-            owner == null -> ensureDeviceKey()      // never registered: safe to (re)use
-            owner == newUserId -> ensureDeviceKey() // same identity: keep
-            else -> rotateDeviceKey()               // identity change (or unknown): rotate
-        }
+    fun ensureDeviceKeyFor(newUserId: String?): Signature.KeyPair = when {
+        registeredNodeId() == null -> ensureDeviceKey()        // never registered: safe to (re)use
+        userId()?.toString() == newUserId -> ensureDeviceKey() // same identity: keep
+        else -> rotateDeviceKey()                              // different (or unknown) identity: rotate
     }
 
     override fun hasUserKey(): Boolean = secrets.getBytes(KEY_USER) != null
@@ -104,12 +104,12 @@ class KeyManager(
     override fun clear() {
         secrets.remove(KEY_USER)
         secrets.remove(KEY_DEVICE)
-        secrets.remove(KEY_DEVICE_OWNER)
+        secrets.remove(KEY_REG_NODE)
     }
 
     private companion object {
         const val KEY_USER = "user_key_64"
         const val KEY_DEVICE = "device_key_64"
-        const val KEY_DEVICE_OWNER = "device_key_owner"
+        const val KEY_REG_NODE = "reg_node_id"
     }
 }

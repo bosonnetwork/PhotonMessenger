@@ -31,7 +31,6 @@ import io.bosonnetwork.photon.core.model.NotificationPreferences
 import io.bosonnetwork.photon.core.model.ThemeMode
 import io.bosonnetwork.photon.core.model.ThemePreferences
 import io.bosonnetwork.photon.core.model.shortId
-import io.bosonnetwork.photon.core.network.DeviceRegistrationStore
 import io.bosonnetwork.photon.core.network.DirectorApi
 import io.bosonnetwork.photon.core.network.DirectorApiFactory
 import io.bosonnetwork.photon.core.network.DirectorConfig
@@ -113,7 +112,6 @@ class SettingsRepositoryImpl @Inject constructor(
     private val keyManager: KeyManager,
     private val session: BosonSessionManager,
     private val avatarPreparer: AvatarPreparer,
-    private val registrationStore: DeviceRegistrationStore,
 ) : SettingsRepository {
 
     @Volatile
@@ -255,8 +253,7 @@ class SettingsRepositoryImpl @Inject constructor(
         runCatching { api().signOut() }
         runCatching { session.disconnect() }
         tokenStore.clear()
-        keyManager.clear()
-        registrationStore.clear()
+        keyManager.clear() // also clears the registered-node marker
         cachedApi = null
     }
 

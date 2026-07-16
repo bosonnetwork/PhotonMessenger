@@ -31,8 +31,9 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
- * Device-key ownership + rotation semantics (device registration management): a device key must
- * never be reused across identity changes.
+ * Device-key registration + rotation semantics (device registration management): a device key must
+ * never be reused across identity changes. "Registered" is marked by the registered-node id; the
+ * owning identity is derived from the current user key.
  */
 class KeyManagerTest {
 
@@ -68,15 +69,25 @@ class KeyManagerTest {
     }
 
     @Test
-    fun `rotateDeviceKey produces a fresh key and clears the owner`() {
+    fun `registeredNodeId round-trips and clears`() {
+        val km = KeyManager(inMemorySecrets())
+        assertNull(km.registeredNodeId())
+        km.setRegisteredNodeId("NODE-1")
+        assertEquals("NODE-1", km.registeredNodeId())
+        km.setRegisteredNodeId(null)
+        assertNull(km.registeredNodeId())
+    }
+
+    @Test
+    fun `rotateDeviceKey produces a fresh key and clears the registered node`() {
         val km = KeyManager(inMemorySecrets())
         val before = keyId(km.ensureDeviceKey())
-        km.setDeviceKeyOwner("USER-A")
+        km.setRegisteredNodeId("NODE-1")
 
         val after = keyId(km.rotateDeviceKey())
 
         assertNotEquals(before, after)
-        assertNull(km.deviceKeyOwner())
+        assertNull(km.registeredNodeId())
         assertEquals(after, keyId(km.ensureDeviceKey())) // rotated key is persisted
     }
 
@@ -85,52 +96,56 @@ class KeyManagerTest {
         val km = KeyManager(inMemorySecrets())
         val original = keyId(km.ensureDeviceKey())
 
+        // No registered-node id: the key was never registered, so it is safe to (re)use for anyone.
         assertEquals(original, keyId(km.ensureDeviceKeyFor("USER-A")))
         assertEquals(original, keyId(km.ensureDeviceKeyFor(null)))
     }
 
     @Test
-    fun `ensureDeviceKeyFor keeps the key for the same owner`() {
+    fun `ensureDeviceKeyFor keeps the key for the same identity`() {
         val km = KeyManager(inMemorySecrets())
+        val user = keyId(km.generateUserKey())
         val original = keyId(km.ensureDeviceKey())
-        km.setDeviceKeyOwner("USER-A")
+        km.setRegisteredNodeId("NODE-1")
 
-        assertEquals(original, keyId(km.ensureDeviceKeyFor("USER-A")))
-        assertEquals("USER-A", km.deviceKeyOwner())
+        assertEquals(original, keyId(km.ensureDeviceKeyFor(user)))
+        assertEquals("NODE-1", km.registeredNodeId())
     }
 
     @Test
     fun `ensureDeviceKeyFor rotates on identity change`() {
         val km = KeyManager(inMemorySecrets())
+        km.generateUserKey() // current user
         val original = keyId(km.ensureDeviceKey())
-        km.setDeviceKeyOwner("USER-A")
+        km.setRegisteredNodeId("NODE-1")
 
-        val rotated = keyId(km.ensureDeviceKeyFor("USER-B"))
+        val rotated = keyId(km.ensureDeviceKeyFor("USER-OTHER"))
 
         assertNotEquals(original, rotated)
-        assertNull(km.deviceKeyOwner())
+        assertNull(km.registeredNodeId())
     }
 
     @Test
     fun `ensureDeviceKeyFor rotates a registered key when the adopting identity is unknown`() {
         val km = KeyManager(inMemorySecrets())
+        km.generateUserKey()
         val original = keyId(km.ensureDeviceKey())
-        km.setDeviceKeyOwner("USER-A")
+        km.setRegisteredNodeId("NODE-1")
 
         assertNotEquals(original, keyId(km.ensureDeviceKeyFor(null)))
     }
 
     @Test
-    fun `clear removes user key, device key, and owner`() {
+    fun `clear removes user key, device key, and registered node`() {
         val km = KeyManager(inMemorySecrets())
         km.generateUserKey()
         km.ensureDeviceKey()
-        km.setDeviceKeyOwner("USER-A")
+        km.setRegisteredNodeId("NODE-1")
 
         km.clear()
 
         assertNull(km.userKeyPair())
         assertNull(km.deviceKeyPair())
-        assertNull(km.deviceKeyOwner())
+        assertNull(km.registeredNodeId())
     }
 }

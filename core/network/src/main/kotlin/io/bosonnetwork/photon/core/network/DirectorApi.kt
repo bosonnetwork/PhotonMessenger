@@ -31,6 +31,7 @@ import io.bosonnetwork.photon.core.network.model.DeviceDto
 import io.bosonnetwork.photon.core.network.model.FinishRegistrationRequest
 import io.bosonnetwork.photon.core.network.model.FinishRegistrationResponse
 import io.bosonnetwork.photon.core.network.model.MeDto
+import io.bosonnetwork.photon.core.network.model.NodeIdDto
 import io.bosonnetwork.photon.core.network.model.NodeStatusDto
 import io.bosonnetwork.photon.core.network.model.ClearPassphraseRequest
 import io.bosonnetwork.photon.core.network.model.NonceDto
@@ -93,6 +94,10 @@ interface DirectorApi {
     /** Device sign-in: a paired device exchanges a device-key signature for a CWT (spec 2.4). Auth-less. */
     @POST("client/auth")
     suspend fun clientAuth(@Body body: ClientAuthRequest): TokenDto
+
+    /** Public: the super node's Boson id (base58). Auth-less; used to detect the registered node. */
+    @GET("client/id")
+    suspend fun getNodeId(): NodeIdDto
 
     /** Authenticated service discovery (spec 1.7). */
     @GET("client/node")

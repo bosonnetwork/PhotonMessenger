@@ -30,7 +30,6 @@ import androidx.datastore.preferences.preferencesDataStoreFile
 import io.bosonnetwork.photon.core.boson.BosonDirectorTrustManagerProvider
 import io.bosonnetwork.photon.core.model.AuthTokenStore
 import io.bosonnetwork.photon.core.model.ProfileResolver
-import io.bosonnetwork.photon.core.network.DeviceRegistrationStore
 import io.bosonnetwork.photon.core.network.DirectorApiFactory
 import io.bosonnetwork.photon.core.network.DirectorConfigStore
 import io.bosonnetwork.photon.core.network.DirectorProfileResolver
@@ -61,11 +60,6 @@ object NetworkModule {
     @Singleton
     fun provideDirectorConfigStore(dataStore: DataStore<Preferences>): DirectorConfigStore =
         DirectorConfigStore(dataStore)
-
-    @Provides
-    @Singleton
-    fun provideDeviceRegistrationStore(dataStore: DataStore<Preferences>): DeviceRegistrationStore =
-        DeviceRegistrationStore(dataStore)
 
     @Provides
     @Singleton

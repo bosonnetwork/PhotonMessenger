@@ -28,8 +28,6 @@ import io.bosonnetwork.photon.core.boson.BosonCrypto
 import io.bosonnetwork.photon.core.boson.KeyManager
 import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.core.model.AuthTokenStore
-import io.bosonnetwork.photon.core.network.DeviceRegistrationStore
-import io.bosonnetwork.photon.core.network.RegisteredNode
 import io.bosonnetwork.photon.core.network.DirectorApi
 import io.bosonnetwork.photon.core.network.DirectorApiFactory
 import io.bosonnetwork.photon.core.network.DirectorConfig
@@ -74,7 +72,6 @@ class AuthRepository @Inject constructor(
     private val configStore: DirectorConfigStore,
     private val tokenStore: AuthTokenStore,
     private val keyManager: KeyManager,
-    private val registrationStore: DeviceRegistrationStore,
 ) {
     @Volatile
     private var cachedApi: Pair<DirectorConfig, DirectorApi>? = null
@@ -195,16 +192,16 @@ class AuthRepository @Inject constructor(
         }
 
     /**
-     * Prepares this device for adopting [newUserId] as its identity: when the device key was
+     * Prepares this device for adopting [newUserId] as its identity: when the device key is already
      * registered under a different user, it is rotated (a device key must never straddle two
-     * identities) and the stale registration record is dropped. A never-registered key, or one
-     * already owned by [newUserId], is kept.
+     * identities; rotation also clears the registered-node marker). A never-registered key, or one
+     * already owned by the current user == [newUserId], is kept. Ownership is derived from the current
+     * user key - a device key is owned by exactly one user by design.
      */
-    private suspend fun adoptIdentity(newUserId: String?) {
-        val owner = keyManager.deviceKeyOwner()
-        if (owner != null && owner != newUserId) {
+    private fun adoptIdentity(newUserId: String?) {
+        val current = keyManager.userId()?.toString()
+        if (current != null && current != newUserId && keyManager.registeredNodeId() != null) {
             keyManager.rotateDeviceKey()
-            registrationStore.clear()
         }
     }
 
@@ -260,7 +257,7 @@ class AuthRepository @Inject constructor(
      * BEFORE the already-registered (409) short-circuit, so a re-registration with the correct
      * passphrase still succeeds (the 409 is swallowed).
      */
-    suspend fun registerDevice(passphrase: String? = null) {
+    suspend fun registerDevice(passphrase: String? = null, superNodeId: String? = null) {
         withContext(Dispatchers.IO) {
             val userId = keyManager.userId()?.toString()
                 ?: throw AppError.InvalidInput("No user identity on this device")
@@ -284,20 +281,18 @@ class AuthRepository @Inject constructor(
                 // failure (a cancellation maps to a non-Conflict error and so is rethrown).
                 if (e.toDirectorError() !is AppError.Conflict) throw e
             }
-            // Persist the completed registration so subsequent bring-ups skip re-registering until
-            // the user, node, or device key changes. The user<->device binding is recorded by the
-            // device key owner; the store only needs the node it was registered against.
-            keyManager.setDeviceKeyOwner(userId)
-            val cfg = config()
-            registrationStore.set(RegisteredNode(cfg.baseUrl, cfg.nodeId))
+            // Persist the super node this device is now registered with, so subsequent bring-ups skip
+            // re-registering until the node or identity changes. Its presence also marks the current
+            // device key as registered. Reuse the caller's probed id when available, else fetch it.
+            keyManager.setRegisteredNodeId(superNodeId ?: api().getNodeId().id)
         }
     }
 
     /**
-     * Silent best-effort device registration for the connect path (before every bring-up). Skips with
-     * ZERO network calls when the device key is still owned by the current user AND the persisted node
-     * still matches the configured Director; any mismatch (identity changed - so the device key owner
-     * differs or was rotated - or the node changed) falls through to registering.
+     * Silent best-effort device registration for the connect path (before every bring-up). Probes the
+     * Director for its super node id (public, auth-less) and skips when the stored registered-node id
+     * already matches it; a mismatch (never registered, device key rotated, or the node changed) falls
+     * through to registering.
      *
      * Without a match: registers when the account has no passphrase, and skips otherwise - silent
      * bring-up has no passphrase to supply, and the Director checks the passphrase BEFORE the
@@ -305,12 +300,17 @@ class AuthRepository @Inject constructor(
      * ("Passphrase required") even for a device that is already registered. Passphrase-protected
      * accounts register this device during onboarding instead - with the passphrase, via
      * [registerDevice] - which writes the record that makes later bring-ups skip.
+     *
+     * If the id probe fails (network down, or an older Director without the endpoint) it returns
+     * without registering; the following discovery/connect surfaces the real error, and the idempotent
+     * 409 path self-heals a stale registered-node id.
      */
     suspend fun ensureDeviceRegistered() {
         val userId = keyManager.userId()?.toString() ?: return // no identity yet; nothing to register
-        if (keyManager.deviceKeyOwner() == userId && registrationStore.get()?.matches(config()) == true) return
+        val nodeId = runCatching { api().getNodeId().id }.getOrNull()?.takeIf { it.isNotBlank() } ?: return
+        if (keyManager.registeredNodeId() == nodeId) return // already registered on this node
         if (isPassphraseProtected()) return
-        registerDevice(null)
+        registerDevice(null, nodeId)
     }
 
     /** Refreshes the CWT (spec 2.1, M1-10). Call on app resume or after a 401. */
@@ -325,8 +325,7 @@ class AuthRepository @Inject constructor(
     suspend fun signOut() {
         runCatching { api().signOut() }
         tokenStore.clear()
-        keyManager.clear()
-        registrationStore.clear()
+        keyManager.clear() // also clears the registered-node marker
         cachedApi = null
     }
 
