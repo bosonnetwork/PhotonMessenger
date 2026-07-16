@@ -52,6 +52,7 @@ import io.bosonnetwork.photonmessaging.Message
 import io.bosonnetwork.photonmessaging.MessageListener
 import io.bosonnetwork.photonmessaging.MessagingClient
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -61,6 +62,8 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Conversations + 1:1 messages over the Boson [MessagingClient] (spec screens 3-4, M3). Returns UI
@@ -152,6 +155,13 @@ class ChatRepositoryImpl @Inject constructor(
         session.ionStore ?: throw AppError.Network("Not connected to the storage service")
 
     private fun myId(): Id? = session.messagingClient?.userId
+
+    // Per-object (content-id keyed) download coordination so parallel fetches of the same attachment
+    // are serialized into a single write instead of racing on the cache file. See downloadAttachment.
+    private val downloadLocks = ConcurrentHashMap<String, Mutex>()
+
+    private fun downloadLock(contentId: String): Mutex =
+        downloadLocks.computeIfAbsent(contentId) { Mutex() }
 
     // Keyed off the session's client flow (not a one-shot read) so a cold start - which composes the
     // UI before connect() completes - fills the list as soon as the session comes up, instead of
@@ -375,38 +385,46 @@ class ChatRepositoryImpl @Inject constructor(
         require(source is AttachmentSource.Remote) { "Attachment is inline; nothing to download" }
 
         val cached = cache.fileFor(source.contentId, attachment.name)
-        if (cached.exists() && cached.length() > 0) return@runCatching cached
+        // Serialize concurrent fetches of the same object. The auto-render download and the Save/Open
+        // paths all land here; without this they could stream into a shared temp file at the same time
+        // and, because integrity is verified against each network stream (not the bytes on disk),
+        // commit a corrupted-but-"verified" file. One fetch wins; the rest reuse its result.
+        downloadLock(source.contentId).withLock {
+            if (cached.exists() && cached.length() > 0)
+                return@withLock cached
+            // Not yet cached: fetch into a private temp file and only atomically publish it to the
+            // cache once the download + integrity check succeed, so a failed fetch leaves the cache
+            // untouched.
+            val store = ionStore()
+            val (peerId, refId) = parseIonUri(source.uri)
+            val expected = try {
+                Id.of(source.contentId)
+            } catch (e: Exception) {
+                throw AppError.Integrity("Malformed content id", e)
+            }
 
-        val store = ionStore()
-        val (peerId, refId) = parseIonUri(source.uri)
-        val expected = try {
-            Id.of(source.contentId)
-        } catch (e: Exception) {
-            throw AppError.Integrity("Malformed content id", e)
-        }
+            // A private temp file per download (never a shared "<name>.part") so parallel fetches can
+            // never interleave their bytes into one another's output.
+            val part = File.createTempFile("dl-", ".part", cached.parentFile)
+            try {
+                val meta = if (peerId == store.servicePeerId)
+                    store.get(refId, part.toPath()).awaitResult()
+                else
+                    store.get(peerId, refId, part.toPath()).awaitResult()
 
-        val part = File(cached.parentFile, "${cached.name}.part")
-        val meta = if (peerId == store.servicePeerId)
-            store.get(refId, part.toPath()).awaitResult()
-        else
-            store.get(peerId, refId, part.toPath()).awaitResult()
-
-        val obj = meta.orElse(null) ?: run {
-            part.delete()
-            throw AppError.NotFound("Attachment is no longer available")
+                val obj = meta.orElse(null)
+                    ?: throw AppError.NotFound("Attachment is no longer available")
+                // End-to-end integrity: the library verifies bytes against the server-advertised content
+                // id; additionally pin it to the content id the sender committed to in the message.
+                if (obj.contentId != expected)
+                    throw AppError.Integrity("Attachment content id mismatch")
+                if (!part.renameTo(cached)) part.copyTo(cached, overwrite = true)
+            } finally {
+                part.delete()
+            }
+            cache.trim()
+            cached
         }
-        // End-to-end integrity: the library verifies bytes against the server-advertised content id;
-        // additionally pin it to the content id the sender committed to in the message.
-        if (obj.contentId != expected) {
-            part.delete()
-            throw AppError.Integrity("Attachment content id mismatch")
-        }
-        if (!part.renameTo(cached)) {
-            part.copyTo(cached, overwrite = true)
-            part.delete()
-        }
-        cache.trim()
-        cached
     }
 
     override suspend fun loadOlder(conversationId: String, before: Long, limit: Int): Result<List<UiMessage>> =
