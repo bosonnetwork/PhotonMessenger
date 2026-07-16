@@ -28,8 +28,8 @@ import io.bosonnetwork.photon.core.boson.BosonCrypto
 import io.bosonnetwork.photon.core.boson.KeyManager
 import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.core.model.AuthTokenStore
-import io.bosonnetwork.photon.core.network.DeviceRegistration
 import io.bosonnetwork.photon.core.network.DeviceRegistrationStore
+import io.bosonnetwork.photon.core.network.RegisteredNode
 import io.bosonnetwork.photon.core.network.DirectorApi
 import io.bosonnetwork.photon.core.network.DirectorApiFactory
 import io.bosonnetwork.photon.core.network.DirectorConfig
@@ -285,20 +285,22 @@ class AuthRepository @Inject constructor(
                 if (e.toDirectorError() !is AppError.Conflict) throw e
             }
             // Persist the completed registration so subsequent bring-ups skip re-registering until
-            // the user, node, or device key changes.
+            // the user, node, or device key changes. The user<->device binding is recorded by the
+            // device key owner; the store only needs the node it was registered against.
             keyManager.setDeviceKeyOwner(userId)
             val cfg = config()
-            registrationStore.set(DeviceRegistration(userId, cfg.baseUrl, cfg.nodeId, deviceId))
+            registrationStore.set(RegisteredNode(cfg.baseUrl, cfg.nodeId))
         }
     }
 
     /**
      * Silent best-effort device registration for the connect path (before every bring-up). Skips with
-     * ZERO network calls when the persisted [DeviceRegistration] still covers the current user, node,
-     * and device key; any mismatch (user, node, or device key changed) falls through to registering.
+     * ZERO network calls when the device key is still owned by the current user AND the persisted node
+     * still matches the configured Director; any mismatch (identity changed - so the device key owner
+     * differs or was rotated - or the node changed) falls through to registering.
      *
-     * Without a matching record: registers when the account has no passphrase, and skips otherwise -
-     * silent bring-up has no passphrase to supply, and the Director checks the passphrase BEFORE the
+     * Without a match: registers when the account has no passphrase, and skips otherwise - silent
+     * bring-up has no passphrase to supply, and the Director checks the passphrase BEFORE the
      * already-registered (409) short-circuit, so a re-registration attempt would return 428
      * ("Passphrase required") even for a device that is already registered. Passphrase-protected
      * accounts register this device during onboarding instead - with the passphrase, via
@@ -306,9 +308,7 @@ class AuthRepository @Inject constructor(
      */
     suspend fun ensureDeviceRegistered() {
         val userId = keyManager.userId()?.toString() ?: return // no identity yet; nothing to register
-        val cfg = config()
-        val deviceId = BosonCrypto.idOf(keyManager.ensureDeviceKey()).toString()
-        if (registrationStore.get()?.matches(userId, cfg, deviceId) == true) return
+        if (keyManager.deviceKeyOwner() == userId && registrationStore.get()?.matches(config()) == true) return
         if (isPassphraseProtected()) return
         registerDevice(null)
     }

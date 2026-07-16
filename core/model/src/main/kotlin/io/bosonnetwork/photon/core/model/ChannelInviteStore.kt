@@ -40,6 +40,15 @@ interface ChannelInviteStore {
     /** Live map of invite message id -> the action taken on it; absent ids are pending. */
     fun actions(): Flow<Map<String, InviteAction>>
 
-    /** Records [action] for the invite message [messageId] (joining overrides a prior ignore). */
-    suspend fun setAction(messageId: String, action: InviteAction)
+    /**
+     * Records [action] for the invite message [messageId] (joining overrides a prior ignore).
+     * [channelId] is known only when joining (from the join result) and null when ignoring;
+     * [channelName] comes from the invite payload. Both are stored for querying and may be null.
+     */
+    suspend fun setAction(
+        messageId: String,
+        action: InviteAction,
+        channelId: String? = null,
+        channelName: String? = null,
+    )
 }

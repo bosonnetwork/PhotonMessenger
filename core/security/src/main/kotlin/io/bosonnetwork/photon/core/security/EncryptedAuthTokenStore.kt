@@ -33,21 +33,21 @@ class EncryptedAuthTokenStore(
 ) : AuthTokenStore {
 
     @Volatile
-    private var cached: String? = secrets.getString(KEY_TOKEN)
+    private var cached: String? = secrets.getString(KEY_ACCESS_TOKEN)
 
     override fun currentToken(): String? = cached
 
     override suspend fun setToken(token: String?) {
         cached = token
-        secrets.putString(KEY_TOKEN, token)
+        secrets.putString(KEY_ACCESS_TOKEN, token)
     }
 
     override suspend fun clear() {
         cached = null
-        secrets.remove(KEY_TOKEN)
+        secrets.remove(KEY_ACCESS_TOKEN)
     }
 
     private companion object {
-        const val KEY_TOKEN = "director_cwt"
+        const val KEY_ACCESS_TOKEN = "director_access_token"
     }
 }

@@ -24,21 +24,35 @@ package io.bosonnetwork.photon.app.di
 
 import android.content.Context
 import io.bosonnetwork.photon.core.database.MessagingStoreFactory
+import io.bosonnetwork.photon.core.database.RoomStores
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import io.bosonnetwork.photon.core.model.ChannelInviteStore
 import io.bosonnetwork.photonmessaging.MessagingStore
 import io.vertx.core.Vertx
 import javax.inject.Singleton
 
-/** Provides the Room-backed native persistence backend (Option A) as a [MessagingStore]. */
+/**
+ * Provides the Room-backed native persistence backend (Option A). A single Room database (held inside
+ * [RoomStores]) backs both the [MessagingStore] and the [ChannelInviteStore] so they share one file;
+ * the `RoomDatabase` type stays encapsulated in `core:database`.
+ */
 @Module
 @InstallIn(SingletonComponent::class)
 object DatabaseModule {
     @Provides
     @Singleton
-    fun provideMessagingStore(@ApplicationContext context: Context, vertx: Vertx): MessagingStore =
-        MessagingStoreFactory.create(context, vertx)
+    fun provideRoomStores(@ApplicationContext context: Context, vertx: Vertx): RoomStores =
+        MessagingStoreFactory.createStores(context, vertx)
+
+    @Provides
+    @Singleton
+    fun provideMessagingStore(stores: RoomStores): MessagingStore = stores.messagingStore
+
+    @Provides
+    @Singleton
+    fun provideChannelInviteStore(stores: RoomStores): ChannelInviteStore = stores.channelInviteStore
 }

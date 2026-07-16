@@ -83,7 +83,7 @@ class RoomMessagingStoreTest {
     }
 
     private fun friend(id: Id, name: String, revision: Int = 1) = StoredContact(
-        id, friendType, ByteArray(32) { 1 }, name, null, null, null, false, false, revision,
+        id, friendType, ByteArray(32) { 1 }, name, null, null, false, false, revision,
         1_000L, 2_000L, null,
     )
 
@@ -153,7 +153,7 @@ class RoomMessagingStoreTest {
         val owner = Id.random()
         val other = Id.random()
         val channelContact = StoredContact(
-            channelId, channelType, ByteArray(32) { 2 }, "Team", null, null, null, false, false, 1,
+            channelId, channelType, ByteArray(32) { 2 }, "Team", null, null, false, false, 1,
             1_000L, 2_000L, StoredChannel(channelId, owner, 0, "notice", false),
         )
         store.putContactLocally(channelContact).await()

@@ -28,11 +28,13 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
 import io.bosonnetwork.photon.core.database.entity.ChannelEntity
+import io.bosonnetwork.photon.core.database.entity.ChannelInviteEntity
 import io.bosonnetwork.photon.core.database.entity.ChannelMemberEntity
 import io.bosonnetwork.photon.core.database.entity.ContactEntity
 import io.bosonnetwork.photon.core.database.entity.ContactsRevisionEntity
 import io.bosonnetwork.photon.core.database.entity.FriendRequestEntity
 import io.bosonnetwork.photon.core.database.entity.MessageEntity
+import kotlinx.coroutines.flow.Flow
 
 /** Room DAO for the messaging store. Methods are synchronous; the store runs them off the event loop. */
 @Dao
@@ -157,7 +159,50 @@ interface MessagingDao {
     @Query("UPDATE channel_members SET role = :role WHERE channelId = :channelId AND id = :id")
     fun updateMemberRole(channelId: ByteArray, id: ByteArray, role: Int): Int
 
+    // --- Channel invites (app-local recipient action state) ---
+    @Upsert
+    fun upsertChannelInvite(invite: ChannelInviteEntity)
+
+    @Query("SELECT * FROM channel_invites WHERE messageId = :messageId")
+    fun getChannelInvite(messageId: ByteArray): ChannelInviteEntity?
+
+    @Query("SELECT * FROM channel_invites")
+    fun channelInvites(): Flow<List<ChannelInviteEntity>>
+
     // --- Transactional composites ---
+
+    /**
+     * Records the recipient's action on a channel invite, preserving a JOINED as terminal: a later
+     * IGNORED never overrides an existing JOINED (an ignored invite can still be joined until expiry).
+     * Missing [channelId]/[channelName] fall back to any already-stored value, and the original
+     * [ChannelInviteEntity.createdAt] is kept.
+     */
+    @Transaction
+    fun setChannelInviteAction(
+        messageId: ByteArray,
+        channelId: ByteArray?,
+        channelName: String?,
+        action: Int,
+        now: Long,
+    ) {
+        val existing = getChannelInvite(messageId)
+        if (existing?.action == ChannelInviteEntity.ACTION_JOINED &&
+            action == ChannelInviteEntity.ACTION_IGNORED
+        ) {
+            return
+        }
+        upsertChannelInvite(
+            ChannelInviteEntity(
+                messageId = messageId,
+                channelId = channelId ?: existing?.channelId,
+                channelName = channelName ?: existing?.channelName,
+                action = action,
+                createdAt = existing?.createdAt ?: now,
+                updatedAt = now,
+            ),
+        )
+    }
+
 
     @Transaction
     fun putContactWithRevision(revision: Int, contact: ContactEntity, channel: ChannelEntity?, updatedAt: Long) {

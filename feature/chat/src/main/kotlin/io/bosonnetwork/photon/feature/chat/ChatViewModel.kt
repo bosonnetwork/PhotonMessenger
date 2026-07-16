@@ -345,7 +345,12 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             repository.joinChannel(invite.ticket)
                 .onSuccess {
-                    channelInviteStore.setAction(message.id, InviteAction.JOINED)
+                    channelInviteStore.setAction(
+                        message.id,
+                        InviteAction.JOINED,
+                        channelId = it.toString(),
+                        channelName = invite.channelName,
+                    )
                     _joinedChannel.tryEmit(it)
                 }
                 .onFailure { e -> _messages.tryEmit("Couldn't join channel: ${e.message ?: "unknown error"}") }
@@ -354,8 +359,14 @@ class ChatViewModel @Inject constructor(
 
     /** Dismisses a channel invitation locally (soft): the card collapses but can still be joined until it expires. */
     fun ignoreInvite(message: UiMessage) {
-        if (message.invite == null) return
-        viewModelScope.launch { channelInviteStore.setAction(message.id, InviteAction.IGNORED) }
+        val invite = message.invite ?: return
+        viewModelScope.launch {
+            channelInviteStore.setAction(
+                message.id,
+                InviteAction.IGNORED,
+                channelName = invite.channelName,
+            )
+        }
     }
 
     /**

@@ -57,9 +57,9 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 /**
- * Device registration management semantics: the persisted (userId, node, deviceId) record lets the
- * connect path skip re-registration, invalidates on user/node change, and identity changes always
- * rotate the device key.
+ * Device registration management semantics: the device key owner (user binding) plus the persisted
+ * node record let the connect path skip re-registration, invalidate on identity/node change, and
+ * identity changes always rotate the device key.
  */
 class AuthRepositoryRegistrationTest {
 
@@ -162,7 +162,7 @@ class AuthRepositoryRegistrationTest {
         repository.ensureDeviceRegistered()
         val afterFirst = server.requestCount
         assertTrue(afterFirst > 0)
-        assertEquals(userId, registrationStore.get()?.userId)
+        assertEquals(baseUrl(), registrationStore.get()?.baseUrl)
         assertEquals(userId, keyManager.deviceKeyOwner())
 
         repository.ensureDeviceRegistered()
@@ -192,7 +192,7 @@ class AuthRepositoryRegistrationTest {
 
         repository.ensureDeviceRegistered()
 
-        assertEquals(userId, registrationStore.get()?.userId)
+        assertEquals(baseUrl(), registrationStore.get()?.baseUrl)
         assertEquals(userId, keyManager.deviceKeyOwner())
     }
 
@@ -221,16 +221,19 @@ class AuthRepositoryRegistrationTest {
         givenSignedInUser()
         serveDirector()
         repository.ensureDeviceRegistered()
-        val firstDeviceId = registrationStore.get()!!.deviceId
+        val firstDeviceId = keyManager.deviceId()!!.toString()
 
         // The account identity changes (new user key) without a sign-out.
         val secondUserId = BosonCrypto.idOf(keyManager.generateUserKey()).toString()
         repository.ensureDeviceRegistered()
 
-        val record = registrationStore.get()
-        assertNotNull(record)
-        assertEquals(secondUserId, record!!.userId)
-        assertNotEquals("device key must never straddle two identities", firstDeviceId, record.deviceId)
+        assertNotNull(registrationStore.get())
+        assertEquals(secondUserId, keyManager.deviceKeyOwner())
+        assertNotEquals(
+            "device key must never straddle two identities",
+            firstDeviceId,
+            keyManager.deviceId()!!.toString(),
+        )
     }
 
     @Test

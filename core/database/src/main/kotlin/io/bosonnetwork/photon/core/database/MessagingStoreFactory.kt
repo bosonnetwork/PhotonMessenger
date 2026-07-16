@@ -23,13 +23,23 @@
 package io.bosonnetwork.photon.core.database
 
 import android.content.Context
+import io.bosonnetwork.photon.core.model.ChannelInviteStore
 import io.bosonnetwork.photonmessaging.MessagingStore
 import io.vertx.core.Vertx
 
 /**
- * Constructs the native Room-backed [MessagingStore], keeping Room (and the `RoomDatabase` type
- * hierarchy) fully encapsulated in this module so consumers depend only on the `MessagingStore`
- * contract.
+ * Both Room-backed stores that share a single [PhotonDatabase] instance (the same Room file). Exposes
+ * only the [MessagingStore] and [ChannelInviteStore] contracts, keeping the `RoomDatabase` type
+ * hierarchy encapsulated in this module.
+ */
+class RoomStores internal constructor(
+    val messagingStore: MessagingStore,
+    val channelInviteStore: ChannelInviteStore,
+)
+
+/**
+ * Constructs the native Room-backed stores, keeping Room (and the `RoomDatabase` type hierarchy)
+ * fully encapsulated in this module so consumers depend only on the store contracts.
  */
 object MessagingStoreFactory {
     fun create(context: Context, vertx: Vertx): MessagingStore =
@@ -42,4 +52,10 @@ object MessagingStoreFactory {
     /** In-memory backend for tests/integration harnesses. */
     fun createInMemory(context: Context, vertx: Vertx): MessagingStore =
         RoomMessagingStore(vertx, PhotonDatabase.createInMemory(context))
+
+    /** The messaging store and channel-invite store, sharing one on-disk Room database. */
+    fun createStores(context: Context, vertx: Vertx): RoomStores {
+        val db = PhotonDatabase.create(context)
+        return RoomStores(RoomMessagingStore(vertx, db), RoomChannelInviteStore(db))
+    }
 }

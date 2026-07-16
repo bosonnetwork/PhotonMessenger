@@ -47,6 +47,9 @@ class KeyManager(
 
     fun userId(): Id? = userKeyPair()?.let { BosonCrypto.idOf(it) }
 
+    /** The device id (derived from the device key), or null if no device key exists yet. */
+    fun deviceId(): Id? = deviceKeyPair()?.let { BosonCrypto.idOf(it) }
+
     /** Creates and persists a fresh user keypair (identity binding). Overwrites any existing one. */
     fun generateUserKey(): Signature.KeyPair =
         BosonCrypto.generateKeyPair().also { secrets.putBytes(KEY_USER, BosonCrypto.privateKeyBytes64(it)) }

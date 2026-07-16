@@ -58,11 +58,9 @@ class DeviceRegistrationStoreTest {
         scope.cancel()
     }
 
-    private val registration = DeviceRegistration(
-        userId = "USER-A",
+    private val node = RegisteredNode(
         baseUrl = "https://whisper.freeddns.org:9000",
         nodeId = "NODE-1",
-        deviceId = "DEVICE-1",
     )
 
     @Test
@@ -73,45 +71,43 @@ class DeviceRegistrationStoreTest {
     @Test
     fun `set then get round-trips the record`() = runTest {
         val store = DeviceRegistrationStore(dataStore())
-        store.set(registration)
-        assertEquals(registration, store.get())
+        store.set(node)
+        assertEquals(node, store.get())
     }
 
     @Test
     fun `a null nodeId round-trips and replaces a previous one`() = runTest {
         val store = DeviceRegistrationStore(dataStore())
-        store.set(registration)
-        store.set(registration.copy(nodeId = null))
-        assertEquals(registration.copy(nodeId = null), store.get())
+        store.set(node)
+        store.set(node.copy(nodeId = null))
+        assertEquals(node.copy(nodeId = null), store.get())
     }
 
     @Test
     fun `clear removes the record`() = runTest {
         val store = DeviceRegistrationStore(dataStore())
-        store.set(registration)
+        store.set(node)
         store.clear()
         assertNull(store.get())
     }
 
     @Test
-    fun `a partial record reads as null`() = runTest {
+    fun `a record without a baseUrl reads as null`() = runTest {
         val ds = dataStore()
-        ds.edit { it[stringPreferencesKey("device_reg_user_id")] = "USER-A" }
+        ds.edit { it[stringPreferencesKey("device_reg_node_id")] = "NODE-1" }
         assertNull(DeviceRegistrationStore(ds).get())
     }
 
     @Test
-    fun `matches requires user, node, and device key to line up`() {
+    fun `matches requires the node to line up`() {
         val cfg = DirectorConfig(
-            baseUrl = registration.baseUrl,
+            baseUrl = node.baseUrl,
             certificatePins = emptyList(),
-            nodeId = registration.nodeId,
+            nodeId = node.nodeId,
         )
-        assertTrue(registration.matches("USER-A", cfg, "DEVICE-1"))
-        assertFalse(registration.matches("USER-B", cfg, "DEVICE-1"))
-        assertFalse(registration.matches("USER-A", cfg, "DEVICE-2"))
-        assertFalse(registration.matches("USER-A", cfg.copy(baseUrl = "https://other.node"), "DEVICE-1"))
-        assertFalse(registration.matches("USER-A", cfg.copy(nodeId = null), "DEVICE-1"))
-        assertFalse(registration.matches("USER-A", cfg.copy(nodeId = "NODE-2"), "DEVICE-1"))
+        assertTrue(node.matches(cfg))
+        assertFalse(node.matches(cfg.copy(baseUrl = "https://other.node")))
+        assertFalse(node.matches(cfg.copy(nodeId = null)))
+        assertFalse(node.matches(cfg.copy(nodeId = "NODE-2")))
     }
 }

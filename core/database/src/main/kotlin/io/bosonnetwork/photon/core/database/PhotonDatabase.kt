@@ -27,6 +27,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import io.bosonnetwork.photon.core.database.entity.ChannelEntity
+import io.bosonnetwork.photon.core.database.entity.ChannelInviteEntity
 import io.bosonnetwork.photon.core.database.entity.ChannelMemberEntity
 import io.bosonnetwork.photon.core.database.entity.ContactEntity
 import io.bosonnetwork.photon.core.database.entity.ContactsRevisionEntity
@@ -42,8 +43,9 @@ import io.bosonnetwork.photon.core.database.entity.MessageEntity
         ChannelMemberEntity::class,
         FriendRequestEntity::class,
         MessageEntity::class,
+        ChannelInviteEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class PhotonDatabase : RoomDatabase() {

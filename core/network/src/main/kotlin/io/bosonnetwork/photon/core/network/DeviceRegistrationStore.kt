@@ -29,66 +29,53 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.first
 
 /**
- * The device registration this app last completed against the Director: which [userId] the device
- * key ([deviceId]) was registered under, and on which super node ([baseUrl] + [nodeId]). The connect
- * path skips re-registration while this record matches the current identity + node + device key, and
- * treats any mismatch as "not registered" (user or node changed).
+ * The super node this app last completed a device registration against ([baseUrl] + [nodeId]). The
+ * user<->device binding is held authoritatively by the device key's owner record (KeyManager's
+ * `device_key_owner`), so this snapshot only needs the node: the connect path skips re-registration
+ * while the device key is still owned by the current user AND this node still matches the configured
+ * Director. A node change invalidates by comparison, not by clearing.
  */
-data class DeviceRegistration(
-    val userId: String,
+data class RegisteredNode(
     val baseUrl: String,
     val nodeId: String?,
-    val deviceId: String,
 ) {
-    /** True when this record covers exactly the given (user, node, device key) triple. */
-    fun matches(userId: String, config: DirectorConfig, deviceId: String): Boolean =
-        this.userId == userId &&
-            this.baseUrl == config.baseUrl &&
-            this.nodeId == config.nodeId &&
-            this.deviceId == deviceId
+    /** True when this record covers the node in [config]. */
+    fun matches(config: DirectorConfig): Boolean =
+        baseUrl == config.baseUrl && nodeId == config.nodeId
 }
 
 /**
- * Persists the completed device registration (device registration management). Written after a
- * successful registration (onboarding, silent connect path, or multi-device pairing) and cleared on
- * sign-out or identity change; a node change invalidates by comparison, not by clearing.
+ * Persists the node of the completed device registration. Written after a successful registration
+ * (onboarding, silent connect path, or multi-device pairing) and cleared on sign-out.
  */
 class DeviceRegistrationStore(
     private val dataStore: DataStore<Preferences>,
 ) {
-    /** The last completed registration, or null when none (or an incomplete record) is stored. */
-    suspend fun get(): DeviceRegistration? {
+    /** The node last registered against, or null when none is stored. */
+    suspend fun get(): RegisteredNode? {
         val prefs = dataStore.data.first()
-        return DeviceRegistration(
-            userId = prefs[USER_ID] ?: return null,
+        return RegisteredNode(
             baseUrl = prefs[BASE_URL] ?: return null,
             nodeId = prefs[NODE_ID],
-            deviceId = prefs[DEVICE_ID] ?: return null,
         )
     }
 
-    suspend fun set(registration: DeviceRegistration) {
+    suspend fun set(node: RegisteredNode) {
         dataStore.edit {
-            it[USER_ID] = registration.userId
-            it[BASE_URL] = registration.baseUrl
-            if (registration.nodeId != null) it[NODE_ID] = registration.nodeId else it.remove(NODE_ID)
-            it[DEVICE_ID] = registration.deviceId
+            it[BASE_URL] = node.baseUrl
+            if (node.nodeId != null) it[NODE_ID] = node.nodeId else it.remove(NODE_ID)
         }
     }
 
     suspend fun clear() {
         dataStore.edit {
-            it.remove(USER_ID)
             it.remove(BASE_URL)
             it.remove(NODE_ID)
-            it.remove(DEVICE_ID)
         }
     }
 
     private companion object {
-        val USER_ID = stringPreferencesKey("device_reg_user_id")
         val BASE_URL = stringPreferencesKey("device_reg_base_url")
         val NODE_ID = stringPreferencesKey("device_reg_node_id")
-        val DEVICE_ID = stringPreferencesKey("device_reg_device_id")
     }
 }

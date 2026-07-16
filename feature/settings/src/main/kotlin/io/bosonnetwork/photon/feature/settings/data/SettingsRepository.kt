@@ -207,9 +207,9 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override suspend fun loadDevices(): Result<List<UiDevice>> = runCatching {
         // Account-level: every device registered under the account (from any Boson app), whether or
-        // not it has a live messaging session. The current device is identified from the persisted
-        // registration record so it resolves even while the messaging client is disconnected.
-        val currentDeviceId = registrationStore.get()?.deviceId
+        // not it has a live messaging session. The current device is identified from the local device
+        // key so it resolves even while the messaging client is disconnected.
+        val currentDeviceId = keyManager.deviceId()?.toString()
         api().getDevices().map { d ->
             UiDevice(
                 deviceId = d.id,

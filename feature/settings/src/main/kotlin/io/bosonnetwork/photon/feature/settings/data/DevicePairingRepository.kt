@@ -28,8 +28,8 @@ import io.bosonnetwork.photon.core.boson.KeyManager
 import io.bosonnetwork.photon.core.boson.PairingPayload
 import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.core.model.AuthTokenStore
-import io.bosonnetwork.photon.core.network.DeviceRegistration
 import io.bosonnetwork.photon.core.network.DeviceRegistrationStore
+import io.bosonnetwork.photon.core.network.RegisteredNode
 import io.bosonnetwork.photon.core.network.DirectorApi
 import io.bosonnetwork.photon.core.network.DirectorApiFactory
 import io.bosonnetwork.photon.core.network.DirectorConfig
@@ -178,13 +178,11 @@ class DevicePairingRepositoryImpl @Inject constructor(
             ).token
             tokenStore.setToken(token)
 
-            // Pairing registered this device server-side: record it so the first bring-up after
-            // pairing skips re-registration.
+            // Pairing registered this device server-side: record the owner + node so the first
+            // bring-up after pairing skips re-registration.
             keyManager.setDeviceKeyOwner(response.userId)
             val cfg = config()
-            registrationStore.set(
-                DeviceRegistration(response.userId, cfg.baseUrl, cfg.nodeId, deviceId),
-            )
+            registrationStore.set(RegisteredNode(cfg.baseUrl, cfg.nodeId))
 
             active = null
             response.userId

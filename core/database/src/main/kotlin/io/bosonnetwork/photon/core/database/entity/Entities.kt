@@ -99,6 +99,31 @@ data class FriendRequestEntity(
     override fun hashCode() = id.contentHashCode()
 }
 
+/**
+ * The recipient-side action taken on a channel-invite message, keyed by the invite message id. Kept
+ * separate from the messaging model (it is app-local UI state, not part of the Boson `MessagingStore`
+ * contract); [channelId] is known only once the invite is joined, so it is null for ignored invites.
+ * [action] is 0 = JOINED, 1 = IGNORED.
+ */
+@Entity(tableName = "channel_invites")
+data class ChannelInviteEntity(
+    @PrimaryKey val messageId: ByteArray,
+    val channelId: ByteArray?,
+    val channelName: String?,
+    val action: Int,
+    val createdAt: Long,
+    val updatedAt: Long,
+) {
+    override fun equals(other: Any?) =
+        this === other || (other is ChannelInviteEntity && messageId.contentEquals(other.messageId))
+    override fun hashCode() = messageId.contentHashCode()
+
+    companion object {
+        const val ACTION_JOINED = 0
+        const val ACTION_IGNORED = 1
+    }
+}
+
 @Entity(
     tableName = "messages",
     indices = [Index(value = ["id"], unique = true), Index(value = ["conversationId"])],

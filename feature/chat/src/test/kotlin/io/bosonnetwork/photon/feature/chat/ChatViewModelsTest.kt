@@ -172,7 +172,12 @@ class ChatViewModelsTest {
     private class FakeChannelInviteStore : ChannelInviteStore {
         val state = MutableStateFlow<Map<String, InviteAction>>(emptyMap())
         override fun actions() = state
-        override suspend fun setAction(messageId: String, action: InviteAction) {
+        override suspend fun setAction(
+            messageId: String,
+            action: InviteAction,
+            channelId: String?,
+            channelName: String?,
+        ) {
             state.update { it + (messageId to action) }
         }
     }

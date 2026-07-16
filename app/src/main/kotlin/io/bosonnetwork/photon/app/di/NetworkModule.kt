@@ -29,9 +29,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStoreFile
 import io.bosonnetwork.photon.core.boson.BosonDirectorTrustManagerProvider
 import io.bosonnetwork.photon.core.model.AuthTokenStore
-import io.bosonnetwork.photon.core.model.ChannelInviteStore
 import io.bosonnetwork.photon.core.model.ProfileResolver
-import io.bosonnetwork.photon.core.network.ChannelInviteStoreImpl
 import io.bosonnetwork.photon.core.network.DeviceRegistrationStore
 import io.bosonnetwork.photon.core.network.DirectorApiFactory
 import io.bosonnetwork.photon.core.network.DirectorConfigStore
@@ -78,11 +76,6 @@ object NetworkModule {
     @Singleton
     fun provideNotificationPreferencesStore(dataStore: DataStore<Preferences>): NotificationPreferencesStore =
         NotificationPreferencesStore(dataStore)
-
-    @Provides
-    @Singleton
-    fun provideChannelInviteStore(dataStore: DataStore<Preferences>): ChannelInviteStore =
-        ChannelInviteStoreImpl(dataStore)
 
     @Provides
     @Singleton

@@ -60,6 +60,14 @@ class KeyManagerTest {
     }
 
     @Test
+    fun `deviceId is null until a device key exists, then matches the device key`() {
+        val km = KeyManager(inMemorySecrets())
+        assertNull(km.deviceId())
+        val key = km.ensureDeviceKey()
+        assertEquals(keyId(key), km.deviceId()?.toString())
+    }
+
+    @Test
     fun `rotateDeviceKey produces a fresh key and clears the owner`() {
         val km = KeyManager(inMemorySecrets())
         val before = keyId(km.ensureDeviceKey())
