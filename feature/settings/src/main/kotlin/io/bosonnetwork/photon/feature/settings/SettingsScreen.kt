@@ -198,14 +198,14 @@ fun SettingsScreen(
                     HorizontalDivider()
 
                     ListItem(
-                        headlineContent = { Text("Devices & sessions") },
+                        headlineContent = { Text("Sessions") },
                         supportingContent = { Text("Manage where you're signed in") },
                         modifier = Modifier.clickable(role = Role.Button, onClick = onOpenSessions),
                     )
                     HorizontalDivider()
 
                     ListItem(
-                        headlineContent = { Text("Registered devices") },
+                        headlineContent = { Text("Devices") },
                         supportingContent = { Text("Manage devices registered to your account") },
                         modifier = Modifier.clickable(role = Role.Button, onClick = onOpenDevices),
                     )
@@ -289,7 +289,7 @@ private fun UserIdRow(
     val scope = rememberCoroutineScope()
     ListItem(
         modifier = Modifier.clickable(role = Role.Button, onClick = onShowQr),
-        headlineContent = { Text("User ID") },
+        headlineContent = { Text("Boson ID") },
         supportingContent = {
             // A full base58 id (~44 chars) wraps onto multiple lines even at a small size, so show an
             // abbreviated first-8...last-8 form on a single line, in the same style as the other
@@ -300,12 +300,12 @@ private fun UserIdRow(
             Row {
                 IconButton(onClick = {
                     clipboard.setText(AnnotatedString(userId))
-                    scope.launch { snackbar.showSnackbar("User ID copied") }
+                    scope.launch { snackbar.showSnackbar("Boson ID copied") }
                 }) {
-                    Icon(Icons.Filled.ContentCopy, contentDescription = "Copy user ID")
+                    Icon(Icons.Filled.ContentCopy, contentDescription = "Copy Boson ID")
                 }
                 IconButton(onClick = onShowQr) {
-                    Icon(Icons.Filled.QrCode2, contentDescription = "Show user ID as QR")
+                    Icon(Icons.Filled.QrCode2, contentDescription = "Show Boson ID as QR")
                 }
             }
         },
@@ -367,7 +367,7 @@ private fun AboutSection() {
     SectionTitle("About")
     ListItem(
         headlineContent = { Text("Photon") },
-        supportingContent = { Text("Version $version - decentralized messaging on Boson") },
+        supportingContent = { Text("Version $version - Powered by BosonNetwork") },
     )
 }
 
@@ -385,7 +385,6 @@ private fun PassphraseSection(
     val icon = if (protected) Icons.Filled.CheckCircle else Icons.Filled.Warning
     val tint = if (protected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
     ListItem(
-        leadingContent = { Icon(icon, contentDescription = null, tint = tint) },
         headlineContent = {
             Text(if (protected) "Protected by a passphrase" else "No passphrase set")
         },
@@ -398,6 +397,7 @@ private fun PassphraseSection(
                 },
             )
         },
+        trailingContent = { Icon(icon, contentDescription = null, tint = tint) },
     )
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
