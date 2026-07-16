@@ -25,6 +25,7 @@ package io.bosonnetwork.photon.feature.chat.data
 import io.bosonnetwork.photon.core.boson.BosonSessionManager
 import io.bosonnetwork.photon.core.boson.awaitResult
 import io.bosonnetwork.photon.core.model.AppError
+import io.bosonnetwork.photon.core.model.DisplayProfile
 import io.bosonnetwork.photon.core.model.ProfileResolver
 import io.bosonnetwork.photon.core.model.cachedDisplay
 import io.bosonnetwork.photon.core.model.shortId
@@ -539,17 +540,17 @@ class ChatRepositoryImpl @Inject constructor(
      * Director so their resolved public names attach on the next mapping pass; until then (or when
      * the Director doesn't know them either) senders fall back to a short id.
      */
-    private suspend fun channelSenderResolver(client: MessagingClient, convo: Id): ((Id) -> String?)? =
+    private suspend fun channelSenderResolver(client: MessagingClient, convo: Id): ((Id) -> DisplayProfile?)? =
         runCatching {
             val contact = client.getContact(convo).awaitResult().orElse(null) as? Channel
                 ?: return@runCatching null
             contact.loadMembers().awaitResult()
             // Members carry no local name (the library identifies them by id only), so prefetch every
-            // member's profile; cachedDisplay then yields the Director-resolved name, or a short id
-            // until it arrives.
+            // member's profile; cachedDisplay then yields the Director-resolved name+avatar, or a short
+            // id until it arrives.
             contact.members.forEach { member -> profileResolver.prefetch(member.id.toString()) }
-            val resolver: (Id) -> String = { from ->
-                profileResolver.cachedDisplay(from.toString()).displayName
+            val resolver: (Id) -> DisplayProfile = { from ->
+                profileResolver.cachedDisplay(from.toString())
             }
             resolver
         }.getOrNull()

@@ -23,6 +23,7 @@
 package io.bosonnetwork.photon.feature.chat.model
 
 import io.bosonnetwork.photon.core.boson.ChannelInvite
+import io.bosonnetwork.photon.core.model.DisplayProfile
 import io.bosonnetwork.photon.core.model.shortId
 import io.bosonnetwork.Id
 import io.bosonnetwork.photonmessaging.ContentDisposition
@@ -95,6 +96,8 @@ data class UiMessage(
     val senderId: String? = null,
     /** Sender display name; shown above incoming bubbles in channels (M4). */
     val senderName: String? = null,
+    /** Sender avatar URL; shown next to the name above incoming bubbles in channels. */
+    val senderAvatarUrl: String? = null,
     /** Store-assigned numeric id used to remove this message locally; null for optimistic bubbles
      *  (M3-4) that are not yet persisted. */
     val rid: Long? = null,
@@ -120,13 +123,14 @@ fun Conversation.toUi(avatarUrl: String? = null): UiConversation {
     )
 }
 
-fun Message.toUi(myUserId: Id?, resolveSenderName: ((Id) -> String?)? = null): UiMessage {
+fun Message.toUi(myUserId: Id?, resolveSender: ((Id) -> DisplayProfile?)? = null): UiMessage {
     val from = getFrom().orElse(null)
     // A channel invite takes precedence: it carries a JSON body that must render as an invite card,
     // never as text or an attachment.
     val invite = runCatching { extractInvite() }.getOrNull()
     val attachment = if (invite != null) null else runCatching { extractAttachment() }.getOrNull()
     val fromMe = from != null && from == myUserId
+    val display = if (!fromMe && from != null) resolveSender?.invoke(from) else null
     return UiMessage(
         id = getId().toString(),
         text = if (invite != null || attachment != null) ""
@@ -136,7 +140,8 @@ fun Message.toUi(myUserId: Id?, resolveSenderName: ((Id) -> String?)? = null): U
         attachment = attachment,
         invite = invite,
         senderId = from?.toString(),
-        senderName = if (!fromMe && from != null) resolveSenderName?.invoke(from) else null,
+        senderName = display?.displayName,
+        senderAvatarUrl = display?.avatarUrl,
         rid = getRid().takeIf { it > 0 },
     )
 }

@@ -618,15 +618,27 @@ private fun MessageBubble(
             ) {
                 Column {
                     if (isChannel && showSender && !message.fromMe && message.senderName != null) {
-                        Text(
-                            text = message.senderName,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = identityColor(message.senderId),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 6.dp),
-                        )
+                        ) {
+                            PhotonAvatar(
+                                model = message.senderAvatarUrl,
+                                size = 18.dp,
+                                name = message.senderName,
+                                colorKey = message.senderId,
+                                isChannel = false,
+                            )
+                            Text(
+                                text = message.senderName,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = identityColor(message.senderId),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                     if (message.invite != null) {
                         InviteCard(
