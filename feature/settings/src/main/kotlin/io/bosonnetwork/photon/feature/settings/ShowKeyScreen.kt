@@ -57,9 +57,10 @@ import io.bosonnetwork.photon.core.designsystem.component.ResponsiveContent
 import io.bosonnetwork.photon.core.qr.rememberQrBitmap
 
 /**
- * Shows the local user private key as a QR (and text) so another device can import it during
- * onboarding (O5). Gated behind an explicit reveal tap with a clear security warning: this is the
- * raw identity secret, so anyone who captures it can impersonate the user.
+ * Shows THIS device's device key as a QR (and text). Gated behind an explicit reveal tap with a clear
+ * security warning: the device key authorizes this device on the messaging service, so anyone who
+ * captures it can connect as this device. Unlike the identity key, a leaked device key can be revoked
+ * by removing this device from the Devices list.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -67,13 +68,13 @@ fun ShowKeyScreen(
     onBack: () -> Unit,
     viewModel: ShowKeyViewModel = hiltViewModel(),
 ) {
-    val keyBase58 = remember { viewModel.userKeyBase58() }
+    val keyBase58 = remember { viewModel.deviceKeyBase58() }
     var revealed by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Show identity key") },
+                title = { Text("Show device key") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -84,7 +85,7 @@ fun ShowKeyScreen(
     ) { padding ->
         ResponsiveContent(modifier = Modifier.padding(padding)) {
             if (keyBase58 == null) {
-                EmptyState("No identity key on this device")
+                EmptyState("No device key on this device")
             } else {
                 Column(
                     modifier = Modifier
@@ -94,9 +95,12 @@ fun ShowKeyScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        "Your private key IS your identity. Anyone who captures this QR or text can " +
-                            "impersonate you and read your messages. Only reveal it to a device you own, " +
-                            "in a private place.",
+                        "This is this device's key. It authorizes this device to connect to the " +
+                            "messaging service and receive your messages - it is not your identity key. " +
+                            "Anyone who captures this QR or text can connect as this device and read the " +
+                            "messages delivered to it. Unlike your identity, a leaked device key can be " +
+                            "revoked: remove this device from your Devices list to cut it off. Only reveal " +
+                            "it on a device you own, in a private place.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.error,
                         textAlign = TextAlign.Center,
@@ -110,7 +114,7 @@ fun ShowKeyScreen(
                         rememberQrBitmap(keyBase58)?.let { qr ->
                             Image(
                                 bitmap = qr,
-                                contentDescription = "Identity key QR",
+                                contentDescription = "Device key QR",
                                 modifier = Modifier.size(260.dp),
                             )
                         }

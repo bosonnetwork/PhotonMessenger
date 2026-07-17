@@ -200,7 +200,7 @@ class SettingsRepositoryImpl @Inject constructor(
                 registeredAt = device?.createdAt ?: 0L,
                 isCurrent = id == currentDeviceId,
             )
-        }.sortedWith(compareByDescending<UiDevice> { it.isCurrent }.thenByDescending { it.lastActive })
+        }.sortedByDescending { it.lastActive } // most-recently-active first; no last-active (0) sinks to the end
     }
 
     override suspend fun loadDevices(): Result<List<UiDevice>> = runCatching {
@@ -219,7 +219,7 @@ class SettingsRepositoryImpl @Inject constructor(
                 registeredAt = d.createdAt,
                 isCurrent = d.id == currentDeviceId,
             )
-        }.sortedWith(compareByDescending<UiDevice> { it.isCurrent }.thenByDescending { it.registeredAt })
+        }.sortedByDescending { it.lastActive } // most-recently-active first; no last-active (0) sinks to the end
     }
 
     override suspend fun revokeSession(deviceId: String): Result<Unit> = runCatching {

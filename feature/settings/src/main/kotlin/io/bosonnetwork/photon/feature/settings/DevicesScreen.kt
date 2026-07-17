@@ -23,7 +23,9 @@
 package io.bosonnetwork.photon.feature.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -32,14 +34,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -66,18 +69,21 @@ import io.bosonnetwork.photon.core.designsystem.component.ErrorState
 import io.bosonnetwork.photon.core.designsystem.component.LoadingState
 import io.bosonnetwork.photon.core.designsystem.component.ResponsiveContent
 import io.bosonnetwork.photon.feature.settings.model.UiDevice
-import java.text.DateFormat
-import java.util.Date
 
 /**
  * Account-level device management (spec screen 6): every device registered under the account,
  * regardless of whether it has a live messaging session. Removing a device deregisters its device
  * key from the Director; the session-level view (sign a device out of messaging) is [SessionsScreen].
+ * Device pairing (add this device / approve a device) and revealing this device's identity key live
+ * here too, at the bottom and behind the current-device indicator respectively.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DevicesScreen(
     onBack: () -> Unit,
+    onAddDevice: () -> Unit,
+    onApproveDevice: () -> Unit,
+    onShowKey: () -> Unit,
     viewModel: DevicesViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -92,7 +98,7 @@ fun DevicesScreen(
         topBar = {
             TopAppBar(
                 scrollBehavior = topBarScroll,
-                title = { Text("Registered devices") },
+                title = { Text("Devices") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -103,17 +109,27 @@ fun DevicesScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         ResponsiveContent(modifier = Modifier.padding(padding)) {
-            when {
-                state.loading -> LoadingState()
-                state.error != null -> ErrorState(state.error ?: "Error")
-                state.devices.isEmpty() ->
-                    EmptyState("No registered devices", icon = Icons.Outlined.Devices)
-                else -> LazyColumn(Modifier.fillMaxSize()) {
-                    items(state.devices, key = { it.deviceId }) { device ->
-                        DeviceRow(device, onRemove = { removeTarget = it })
-                        HorizontalDivider()
+            Column(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f)) {
+                    when {
+                        state.loading -> LoadingState()
+                        state.error != null -> ErrorState(state.error ?: "Error")
+                        state.devices.isEmpty() ->
+                            EmptyState("No registered devices", icon = Icons.Outlined.Devices)
+                        else -> LazyColumn(Modifier.fillMaxSize()) {
+                            items(state.devices, key = { it.deviceId }) { device ->
+                                DeviceRow(
+                                    device = device,
+                                    onRemove = { removeTarget = it },
+                                    onShowKey = onShowKey,
+                                )
+                                HorizontalDivider()
+                            }
+                        }
                     }
                 }
+                HorizontalDivider()
+                DevicePairingActions(onAddDevice = onAddDevice, onApproveDevice = onApproveDevice)
             }
         }
     }
@@ -138,6 +154,22 @@ fun DevicesScreen(
             onDismiss = viewModel::dismissPassphrasePrompt,
             onSubmit = viewModel::confirmRemoveWithPassphrase,
         )
+    }
+}
+
+/** Pair another device to this account, or approve a device that is requesting to join. */
+@Composable
+private fun DevicePairingActions(onAddDevice: () -> Unit, onApproveDevice: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        OutlinedButton(onClick = onAddDevice, modifier = Modifier.weight(1f)) {
+            Text("Add this device")
+        }
+        OutlinedButton(onClick = onApproveDevice, modifier = Modifier.weight(1f)) {
+            Text("Approve a device")
+        }
     }
 }
 
@@ -179,15 +211,24 @@ internal fun RemoveDevicePassphraseDialog(
 }
 
 @Composable
-private fun DeviceRow(device: UiDevice, onRemove: (UiDevice) -> Unit) {
-    ListItem(
-        headlineContent = {
-            Text(if (device.isCurrent) "${device.name} (this device)" else device.name)
-        },
-        supportingContent = { Text(device.registrationSubtitle()) },
-        trailingContent = {
-            // The current device cannot deregister itself here; sign out from Settings instead.
-            if (!device.isCurrent) {
+private fun DeviceRow(device: UiDevice, onRemove: (UiDevice) -> Unit, onShowKey: () -> Unit) {
+    DeviceListRow(
+        title = device.name,
+        device = device,
+        trailing = {
+            // Both actions are 48dp icon buttons, so they share a horizontal center; DeviceListRow
+            // centers them vertically on the block.
+            if (device.isCurrent) {
+                // The current device cannot deregister itself here; instead its indicator is the tap
+                // target to reveal this device's identity key (for importing it onto another device).
+                IconButton(onClick = onShowKey) {
+                    Icon(
+                        Icons.Filled.Smartphone,
+                        contentDescription = "This device - show identity key",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            } else {
                 IconButton(onClick = { onRemove(device) }) {
                     Icon(
                         Icons.Filled.DeleteOutline,
@@ -199,16 +240,3 @@ private fun DeviceRow(device: UiDevice, onRemove: (UiDevice) -> Unit) {
         },
     )
 }
-
-@Composable
-private fun UiDevice.registrationSubtitle(): String {
-    val parts = buildList {
-        app?.takeIf { it.isNotBlank() }?.let { add(it) }
-        if (registeredAt > 0) add("Registered ${formatRegistrationTimestamp(registeredAt)}")
-        if (lastActive > 0) add("Last seen ${formatRegistrationTimestamp(lastActive)}")
-    }
-    return parts.joinToString(" - ").ifEmpty { "Registered device" }
-}
-
-private fun formatRegistrationTimestamp(epochMillis: Long): String =
-    DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(epochMillis))

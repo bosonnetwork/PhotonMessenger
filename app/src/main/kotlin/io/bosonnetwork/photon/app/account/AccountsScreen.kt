@@ -23,10 +23,12 @@
 package io.bosonnetwork.photon.app.account
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -50,6 +52,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import io.bosonnetwork.photon.core.security.Profile
@@ -94,11 +97,15 @@ fun AccountsScreen(
                         },
                         trailingContent = {
                             if (active) {
-                                Icon(
-                                    Icons.Filled.CheckCircle,
-                                    contentDescription = "Active",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
+                                // Match the delete IconButton's 48dp slot so the active check and the
+                                // remove icon are the same size and share the same trailing position.
+                                Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Filled.CheckCircle,
+                                        contentDescription = "Active",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
                             } else {
                                 IconButton(onClick = { confirmRemove = profile }) {
                                     Icon(Icons.Outlined.Delete, contentDescription = "Remove account")

@@ -29,16 +29,17 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 
 /**
- * Backs the "Show my key" screen (O5): exposes the local user private key in base58 (64-byte
- * libsodium form) so another device can scan/import it. Reads the key lazily and never logs it.
+ * Backs the "Show device key" screen: exposes THIS device's device key in base58 (64-byte libsodium
+ * form). The device key authorizes this device on the messaging service and is distinct from the user
+ * identity key. Reads the key lazily and never logs it.
  */
 @HiltViewModel
 class ShowKeyViewModel @Inject constructor(
     private val keyManager: KeyManager,
 ) : ViewModel() {
 
-    /** The user private key as base58, or null if this device has no identity key. */
-    fun userKeyBase58(): String? = keyManager.userKeyPair()?.let {
+    /** This device's device key as base58, or null if this device has no device key yet. */
+    fun deviceKeyBase58(): String? = keyManager.deviceKeyPair()?.let {
         BosonCrypto.privateKey64ToBase58(BosonCrypto.privateKeyBytes64(it))
     }
 }

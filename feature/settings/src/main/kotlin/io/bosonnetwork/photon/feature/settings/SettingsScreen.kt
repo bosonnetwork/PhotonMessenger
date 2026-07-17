@@ -168,6 +168,12 @@ fun SettingsScreen(
                             onShowQr = { showIdQr = true },
                         )
                         HorizontalDivider()
+                        ListItem(
+                            headlineContent = { Text("Accounts") },
+                            supportingContent = { Text("Switch between or add accounts on this device") },
+                            modifier = Modifier.clickable(role = Role.Button, onClick = onOpenAccounts),
+                        )
+                        HorizontalDivider()
                     }
 
                     SectionTitle("Appearance")
@@ -195,13 +201,6 @@ fun SettingsScreen(
                         protected = state.profile?.passphraseProtected == true,
                         onSet = { showSetPassphrase = true },
                         onRemove = { showRemovePassphrase = true },
-                    )
-                    HorizontalDivider()
-
-                    ListItem(
-                        headlineContent = { Text("Accounts") },
-                        supportingContent = { Text("Switch between or add accounts on this device") },
-                        modifier = Modifier.clickable(role = Role.Button, onClick = onOpenAccounts),
                     )
                     HorizontalDivider()
 

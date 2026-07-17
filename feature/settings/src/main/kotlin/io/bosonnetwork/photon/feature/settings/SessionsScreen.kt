@@ -23,26 +23,29 @@
 package io.bosonnetwork.photon.feature.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Circle
+import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -61,7 +64,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -70,21 +72,16 @@ import io.bosonnetwork.photon.core.designsystem.component.ErrorState
 import io.bosonnetwork.photon.core.designsystem.component.LoadingState
 import io.bosonnetwork.photon.core.designsystem.component.ResponsiveContent
 import io.bosonnetwork.photon.feature.settings.model.UiDevice
-import java.text.DateFormat
-import java.util.Date
 
 /**
- * Live messaging sessions (service-level, spec screen 6): each row is a connected device. Revoke
- * signs a device out of messaging (optionally also deregistering it). The account-level view that
- * manages all registered devices is [DevicesScreen].
+ * Live messaging sessions (service-level, spec screen 6): each row is a connected device, with an
+ * online/offline status icon and a Revoke action. Revoke signs a device out of messaging (optionally
+ * also deregistering it). Device pairing and the account-level device registry live on [DevicesScreen].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionsScreen(
     onBack: () -> Unit,
-    onAddDevice: () -> Unit,
-    onApproveDevice: () -> Unit,
-    onShowKey: () -> Unit,
     viewModel: SessionsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -99,7 +96,7 @@ fun SessionsScreen(
         topBar = {
             TopAppBar(
                 scrollBehavior = topBarScroll,
-                title = { Text("Devices & sessions") },
+                title = { Text("Sessions") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -110,23 +107,15 @@ fun SessionsScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         ResponsiveContent(modifier = Modifier.padding(padding)) {
-            Column(Modifier.fillMaxSize()) {
-                PairingActions(
-                    onAddDevice = onAddDevice,
-                    onApproveDevice = onApproveDevice,
-                    onShowKey = onShowKey,
-                )
-                HorizontalDivider()
-                when {
-                    state.loading -> LoadingState()
-                    state.error != null -> ErrorState(state.error ?: "Error")
-                    state.sessions.isEmpty() ->
-                        EmptyState("No active sessions", icon = Icons.Outlined.Devices)
-                    else -> LazyColumn(Modifier.fillMaxSize()) {
-                        items(state.sessions, key = { it.deviceId }) { session ->
-                            SessionRow(session, onRevoke = { revokeTarget = it })
-                            HorizontalDivider()
-                        }
+            when {
+                state.loading -> LoadingState()
+                state.error != null -> ErrorState(state.error ?: "Error")
+                state.sessions.isEmpty() ->
+                    EmptyState("No active sessions", icon = Icons.Outlined.Devices)
+                else -> LazyColumn(Modifier.fillMaxSize()) {
+                    items(state.sessions, key = { it.deviceId }) { session ->
+                        SessionRow(session, onRevoke = { revokeTarget = it })
+                        HorizontalDivider()
                     }
                 }
             }
@@ -205,68 +194,39 @@ private fun RevokeSessionDialog(
 }
 
 @Composable
-private fun PairingActions(
-    onAddDevice: () -> Unit,
-    onApproveDevice: () -> Unit,
-    onShowKey: () -> Unit,
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = onAddDevice, modifier = Modifier.weight(1f)) {
-                Text("Add this device")
-            }
-            OutlinedButton(onClick = onApproveDevice, modifier = Modifier.weight(1f)) {
-                Text("Approve a device")
-            }
-        }
-        OutlinedButton(onClick = onShowKey, modifier = Modifier.fillMaxWidth()) {
-            Text("Show my key")
-        }
-    }
-}
-
-@Composable
 private fun SessionRow(session: UiDevice, onRevoke: (UiDevice) -> Unit) {
-    ListItem(
-        headlineContent = {
-            Text(if (session.isCurrent) "${session.name} (this device)" else session.name)
-        },
-        supportingContent = { Text(session.subtitle()) },
-        leadingContent = {
-            // Decorative: the online/offline state is already in the row subtitle, and a disabled
-            // chip would otherwise be announced as "disabled" by TalkBack (X-A1).
-            AssistChip(
-                onClick = {},
-                enabled = false,
-                label = { Text(if (session.online) "Online" else "Offline") },
-                modifier = Modifier.clearAndSetSemantics {},
+    DeviceListRow(
+        title = session.name,
+        device = session,
+        leading = {
+            // A filled dot reads as online, an outlined ring as offline; the contentDescription keeps
+            // it announced for TalkBack now that the text label is gone. It centers on the title line.
+            Icon(
+                imageVector = if (session.online) Icons.Filled.Circle else Icons.Outlined.Circle,
+                contentDescription = if (session.online) "Online" else "Offline",
+                tint = if (session.online) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.size(DeviceRowLeadingSize),
             )
         },
-        trailingContent = {
-            // The current device's own session cannot be revoked from here (the service rejects it).
-            if (!session.isCurrent) {
-                TextButton(onClick = { onRevoke(session) }) { Text("Revoke") }
+        trailing = {
+            // Fixed-width, centered slot so Revoke and the current-device indicator share one
+            // horizontal center; DeviceListRow centers the slot vertically on the block.
+            Box(Modifier.width(DeviceRowTrailingWidth), contentAlignment = Alignment.Center) {
+                if (session.isCurrent) {
+                    // The current device's own session cannot be revoked here (the service rejects it).
+                    Icon(
+                        Icons.Filled.Smartphone,
+                        contentDescription = "This device",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    TextButton(onClick = { onRevoke(session) }) { Text("Revoke") }
+                }
             }
         },
     )
 }
-
-@Composable
-private fun UiDevice.subtitle(): String {
-    val parts = buildList {
-        app?.takeIf { it.isNotBlank() }?.let { add(it) }
-        if (online) {
-            add("Active now")
-        } else if (lastActive > 0) {
-            add("Last active ${formatTimestamp(lastActive)}")
-        }
-        lastAddress?.takeIf { it.isNotBlank() }?.let { add(it) }
-    }
-    return parts.joinToString(" - ").ifEmpty { "Registered ${formatTimestamp(registeredAt)}" }
-}
-
-private fun formatTimestamp(epochMillis: Long): String =
-    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(epochMillis))

@@ -230,15 +230,15 @@ fun PhotonNavHost(
                 )
             }
             composable(Routes.SESSIONS) {
-                SessionsScreen(
+                SessionsScreen(onBack = { navController.popBackStack() })
+            }
+            composable(Routes.DEVICES) {
+                DevicesScreen(
                     onBack = { navController.popBackStack() },
                     onAddDevice = { navController.navigate(Routes.ADD_DEVICE) },
                     onApproveDevice = { navController.navigate(Routes.APPROVE_DEVICE) },
                     onShowKey = { navController.navigate(Routes.SHOW_KEY) },
                 )
-            }
-            composable(Routes.DEVICES) {
-                DevicesScreen(onBack = { navController.popBackStack() })
             }
             composable(Routes.SHOW_KEY) {
                 ShowKeyScreen(onBack = { navController.popBackStack() })
