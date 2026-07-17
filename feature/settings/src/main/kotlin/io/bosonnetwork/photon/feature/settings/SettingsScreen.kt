@@ -53,7 +53,6 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -62,6 +61,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
@@ -656,16 +658,20 @@ private fun GuidanceCard(title: String, body: String, action: String, onClick: (
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ThemeModeRow(current: ThemeMode, onSelect: (ThemeMode) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    val modes = ThemeMode.entries
+    // M3 single-choice button group: one connected control for the mutually-exclusive theme options,
+    // with the selected segment marked (check) - clearer as a single selector than separate chips.
+    SingleChoiceSegmentedButtonRow(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
     ) {
-        ThemeMode.entries.forEach { mode ->
-            FilterChip(
+        modes.forEachIndexed { index, mode ->
+            SegmentedButton(
                 selected = current == mode,
                 onClick = { onSelect(mode) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = modes.size),
                 label = { Text(mode.label()) },
             )
         }
