@@ -71,6 +71,7 @@ import io.bosonnetwork.photon.feature.settings.DevicesScreen
 import io.bosonnetwork.photon.feature.settings.PairNewDeviceScreen
 import io.bosonnetwork.photon.feature.settings.SessionsScreen
 import io.bosonnetwork.photon.feature.settings.SettingsScreen
+import io.bosonnetwork.photon.feature.settings.ShowIdentityKeyScreen
 import io.bosonnetwork.photon.feature.settings.ShowKeyScreen
 
 /**
@@ -209,6 +210,7 @@ fun PhotonNavHost(
                     onOpenAccounts = { navController.navigate(Routes.ACCOUNTS) },
                     onOpenSessions = { navController.navigate(Routes.SESSIONS) },
                     onOpenDevices = { navController.navigate(Routes.DEVICES) },
+                    onShowIdentityKey = { navController.navigate(Routes.SHOW_IDENTITY_KEY) },
                     onSignedOut = {
                         appViewModel.onSignedOut()
                         navController.navigate(Routes.ONBOARDING) {
@@ -242,6 +244,9 @@ fun PhotonNavHost(
             }
             composable(Routes.SHOW_KEY) {
                 ShowKeyScreen(onBack = { navController.popBackStack() })
+            }
+            composable(Routes.SHOW_IDENTITY_KEY) {
+                ShowIdentityKeyScreen(onBack = { navController.popBackStack() })
             }
             composable(Routes.ADD_DEVICE) {
                 PairNewDeviceScreen(

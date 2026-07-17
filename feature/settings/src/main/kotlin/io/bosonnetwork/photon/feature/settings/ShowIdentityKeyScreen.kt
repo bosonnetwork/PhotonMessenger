@@ -27,27 +27,25 @@ import androidx.compose.runtime.remember
 import androidx.hilt.navigation.compose.hiltViewModel
 
 /**
- * Shows THIS device's device key as a QR (and text). Gated behind an explicit reveal tap with a clear
- * security warning: the device key authorizes this device on the messaging service, so anyone who
- * captures it can connect as this device. Unlike the identity key, a leaked device key can be revoked
- * by removing this device from the Devices list. Reached from the Devices screen's current-device row.
+ * Shows the user IDENTITY key as a QR (and text) so it can be backed up or imported onto another
+ * device. Deliberately hard to reach - it is unlocked by tapping the Boson ID row 7 times - and then
+ * gated behind an explicit reveal tap, because the identity key IS the account and, unlike a device
+ * key, cannot be revoked.
  */
 @Composable
-fun ShowKeyScreen(
+fun ShowIdentityKeyScreen(
     onBack: () -> Unit,
-    viewModel: ShowKeyViewModel = hiltViewModel(),
+    viewModel: ShowIdentityKeyViewModel = hiltViewModel(),
 ) {
-    val keyBase58 = remember { viewModel.deviceKeyBase58() }
+    val keyBase58 = remember { viewModel.userKeyBase58() }
     RevealKeyScaffold(
-        title = "Show device key",
-        warning = "This is this device's key. It authorizes this device to connect to the messaging " +
-            "service and receive your messages - it is not your identity key. Anyone who captures this " +
-            "QR or text can connect as this device and read the messages delivered to it. Unlike your " +
-            "identity, a leaked device key can be revoked: remove this device from your Devices list to " +
-            "cut it off. Only reveal it on a device you own, in a private place.",
+        title = "Show identity key",
+        warning = "This is your identity key - it IS your account. Anyone who captures this QR or text " +
+            "can impersonate you and read your messages, and unlike a device key it cannot be revoked. " +
+            "Back it up somewhere safe, and only reveal it on a device you own, in a private place.",
         keyBase58 = keyBase58,
-        qrContentDescription = "Device key QR",
-        emptyMessage = "No device key on this device",
+        qrContentDescription = "Identity key QR",
+        emptyMessage = "No identity key on this device",
         onBack = onBack,
     )
 }

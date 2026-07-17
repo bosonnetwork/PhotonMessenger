@@ -20,35 +20,27 @@
  * SOFTWARE.
  */
 
-package io.bosonnetwork.photon.app.navigation
+package io.bosonnetwork.photon.feature.settings
 
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Chat
-import androidx.compose.material.icons.outlined.People
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.lifecycle.ViewModel
+import io.bosonnetwork.photon.core.boson.BosonCrypto
+import io.bosonnetwork.photon.core.boson.KeyManager
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 
-/** Top-level navigation destinations (design spec section 5 navigation). */
-enum class TopLevelDestination(
-    val route: String,
-    val label: String,
-    val icon: ImageVector,
-) {
-    HOME("home", "Chats", Icons.Outlined.Chat),
-    CONTACTS("contacts", "Contacts", Icons.Outlined.People),
-    SETTINGS("settings", "Settings", Icons.Outlined.Settings),
-}
+/**
+ * Backs the hidden "Show identity key" screen (reached by tapping the Boson ID row 7 times): exposes
+ * the user identity private key in base58 (64-byte libsodium form) so it can be backed up or imported
+ * onto another device. This is the account-wide identity secret, distinct from the per-device device
+ * key. Reads the key lazily and never logs it.
+ */
+@HiltViewModel
+class ShowIdentityKeyViewModel @Inject constructor(
+    private val keyManager: KeyManager,
+) : ViewModel() {
 
-/** Non-top-level routes. */
-object Routes {
-    const val ONBOARDING = "onboarding"
-    const val CREATE_CHANNEL = "createChannel"
-    const val ACCOUNTS = "accounts"
-    const val SESSIONS = "sessions"
-    const val DEVICES = "devices"
-    const val ADD_DEVICE = "addDevice"
-    const val APPROVE_DEVICE = "approveDevice"
-    const val SHOW_KEY = "showKey"
-    const val SHOW_IDENTITY_KEY = "showIdentityKey"
-    const val FORWARD = "forward"
+    /** The user identity private key as base58, or null if this device has no identity key. */
+    fun userKeyBase58(): String? = keyManager.userKeyPair()?.let {
+        BosonCrypto.privateKey64ToBase58(BosonCrypto.privateKeyBytes64(it))
+    }
 }

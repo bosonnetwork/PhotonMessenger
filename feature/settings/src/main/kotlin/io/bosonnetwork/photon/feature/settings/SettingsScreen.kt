@@ -73,6 +73,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -111,6 +112,7 @@ fun SettingsScreen(
     onOpenAccounts: () -> Unit,
     onOpenSessions: () -> Unit,
     onOpenDevices: () -> Unit,
+    onShowIdentityKey: () -> Unit,
     onSignedOut: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
@@ -166,6 +168,7 @@ fun SettingsScreen(
                             userId = profile.id,
                             snackbar = snackbar,
                             onShowQr = { showIdQr = true },
+                            onRevealIdentityKey = onShowIdentityKey,
                         )
                         HorizontalDivider()
                         ListItem(
@@ -291,11 +294,40 @@ private fun UserIdRow(
     userId: String,
     snackbar: SnackbarHostState,
     onShowQr: () -> Unit,
+    onRevealIdentityKey: () -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
+
+    // Hidden gesture, in the spirit of Android's "tap Build number 7 times": tapping the row body 7
+    // times in quick succession unlocks the identity-key screen (which is itself reveal-gated). The
+    // trailing copy/QR icon buttons keep their own single-tap actions, so nothing is lost.
+    var tapCount by remember { mutableIntStateOf(0) }
+    var lastTapAt by remember { mutableLongStateOf(0L) }
+
     ListItem(
-        modifier = Modifier.clickable(role = Role.Button, onClick = onShowQr),
+        modifier = Modifier.clickable(role = Role.Button) {
+            val now = System.currentTimeMillis()
+            tapCount = if (now - lastTapAt > IDENTITY_KEY_TAP_WINDOW_MS) 1 else tapCount + 1
+            lastTapAt = now
+            val remaining = IDENTITY_KEY_TAP_COUNT - tapCount
+            if (remaining <= 0) {
+                tapCount = 0
+                onRevealIdentityKey()
+            } else if (remaining <= IDENTITY_KEY_TAP_COUNTDOWN_FROM) {
+                scope.launch {
+                    // Dismiss the previous hint so the countdown updates promptly (toast-like).
+                    snackbar.currentSnackbarData?.dismiss()
+                    snackbar.showSnackbar(
+                        if (remaining == 1) {
+                            "1 more tap to show your identity key"
+                        } else {
+                            "$remaining more taps to show your identity key"
+                        },
+                    )
+                }
+            }
+        },
         headlineContent = { Text("Boson ID") },
         supportingContent = {
             // A full base58 id (~44 chars) wraps onto multiple lines even at a small size, so show an
@@ -318,6 +350,11 @@ private fun UserIdRow(
         },
     )
 }
+
+// The hidden identity-key gesture: 7 quick taps on the Boson ID row, hinting for the final few.
+private const val IDENTITY_KEY_TAP_COUNT = 7
+private const val IDENTITY_KEY_TAP_COUNTDOWN_FROM = 3
+private const val IDENTITY_KEY_TAP_WINDOW_MS = 2000L
 
 /**
  * Abbreviates a long id to "first8...last8" so it fits on one line; short ids are returned as-is.
