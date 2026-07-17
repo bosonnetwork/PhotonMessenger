@@ -25,6 +25,7 @@ package io.bosonnetwork.photon.app.di
 import android.content.Context
 import io.bosonnetwork.photon.core.database.MessagingStoreFactory
 import io.bosonnetwork.photon.core.database.RoomStores
+import io.bosonnetwork.photon.core.security.ProfileManager
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -33,6 +34,7 @@ import dagger.hilt.components.SingletonComponent
 import io.bosonnetwork.photon.core.model.ChannelInviteStore
 import io.bosonnetwork.photonmessaging.MessagingStore
 import io.vertx.core.Vertx
+import java.io.File
 import javax.inject.Singleton
 
 /**
@@ -45,8 +47,16 @@ import javax.inject.Singleton
 object DatabaseModule {
     @Provides
     @Singleton
-    fun provideRoomStores(@ApplicationContext context: Context, vertx: Vertx): RoomStores =
-        MessagingStoreFactory.createStores(context, vertx)
+    fun provideRoomStores(
+        @ApplicationContext context: Context,
+        vertx: Vertx,
+        profileManager: ProfileManager,
+    ): RoomStores =
+        MessagingStoreFactory.createStores(
+            context,
+            vertx,
+            File(profileManager.activeFilesRoot(), "messaging-room.db").absolutePath,
+        )
 
     @Provides
     @Singleton

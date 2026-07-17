@@ -26,6 +26,7 @@ import android.content.Context
 import io.bosonnetwork.photon.core.boson.KeyManager
 import io.bosonnetwork.photon.core.model.AuthTokenStore
 import io.bosonnetwork.photon.core.security.EncryptedAuthTokenStore
+import io.bosonnetwork.photon.core.security.ProfileManager
 import io.bosonnetwork.photon.core.security.SecretStore
 import dagger.Module
 import dagger.Provides
@@ -39,7 +40,13 @@ import javax.inject.Singleton
 object SecurityModule {
     @Provides
     @Singleton
-    fun provideSecretStore(@ApplicationContext context: Context): SecretStore = SecretStore(context)
+    fun provideProfileManager(@ApplicationContext context: Context): ProfileManager =
+        ProfileManager(context.filesDir, context.cacheDir)
+
+    @Provides
+    @Singleton
+    fun provideSecretStore(@ApplicationContext context: Context, profileManager: ProfileManager): SecretStore =
+        SecretStore(context, profileManager.secretsFileName())
 
     @Provides
     @Singleton

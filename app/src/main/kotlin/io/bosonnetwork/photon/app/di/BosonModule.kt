@@ -22,16 +22,15 @@
 
 package io.bosonnetwork.photon.app.di
 
-import android.content.Context
 import io.bosonnetwork.photon.core.boson.BosonClientFactory
 import io.bosonnetwork.photon.core.boson.BosonSessionManager
 import io.bosonnetwork.photon.core.boson.DefaultUnreadTracker
 import io.bosonnetwork.photon.core.boson.KeyManager
 import io.bosonnetwork.photon.core.boson.UnreadTracker
+import io.bosonnetwork.photon.core.security.ProfileManager
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
-import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import io.bosonnetwork.photonmessaging.MessagingStore
 import io.vertx.core.Vertx
@@ -57,11 +56,11 @@ object BosonModule {
     @Provides
     @Singleton
     fun provideBosonSessionManager(
-        @ApplicationContext context: Context,
         factory: BosonClientFactory,
         keyManager: KeyManager,
         store: MessagingStore,
-    ): BosonSessionManager = BosonSessionManager(factory, keyManager, store, context.filesDir)
+        profileManager: ProfileManager,
+    ): BosonSessionManager = BosonSessionManager(factory, keyManager, store, profileManager.activeFilesRoot())
 
     @Provides
     @Singleton

@@ -36,6 +36,7 @@ import io.bosonnetwork.photon.core.network.DirectorConfigStore
 import io.bosonnetwork.photon.core.network.ServiceDiscovery
 import io.bosonnetwork.photon.core.network.toDirectorError
 import io.bosonnetwork.photon.feature.onboarding.data.AuthRepository
+import io.bosonnetwork.photon.feature.onboarding.data.NodeMigration
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -101,6 +102,14 @@ class SessionController @Inject constructor(
     @Volatile
     private var terminalFailure = false
 
+    // A detected home super node migration awaiting the user's confirmation, and a one-shot flag set
+    // once they confirm so the next bring-up performs the re-registration instead of re-prompting.
+    private val _migrationRequired = MutableStateFlow<NodeMigration?>(null)
+    val migrationRequired: StateFlow<NodeMigration?> = _migrationRequired
+
+    @Volatile
+    private var migrationConfirmed = false
+
     private suspend fun api(): DirectorApi {
         val cfg: DirectorConfig = configStore.config.first()
         cachedApi?.let { (cached, api) -> if (cached == cfg) return api }
@@ -116,6 +125,17 @@ class SessionController @Inject constructor(
                 own.value = SessionStatus(SessionPhase.DISCOVERING)
             }
             terminalFailure = false
+            // Gate a deliberate home-node change behind an explicit confirmation (the local profile is
+            // kept either way). Only fires when this identity is already registered on a DIFFERENT node;
+            // a first registration or an unchanged node skips straight through to the normal bring-up.
+            if (!migrationConfirmed) {
+                val migration = runCatching { authRepository.checkNodeMigration() }.getOrNull()
+                if (migration != null) {
+                    _migrationRequired.value = migration
+                    own.value = SessionStatus(SessionPhase.IDLE)
+                    return@launch
+                }
+            }
             runCatching {
                 // Register this device first: the messaging node's authenticateDevice rejects any device
                 // not in the user's device table, so an unregistered device connects but never reaches
@@ -136,8 +156,11 @@ class SessionController @Inject constructor(
                     friendRequestNotifier.attach(it)
                 }
                 active.value = true
+                migrationConfirmed = false
+                _migrationRequired.value = null
             }.onFailure { e ->
                 active.value = false
+                migrationConfirmed = false
                 // BosonSessionManager already maps an unrecoverable rejection to a terminal AppError;
                 // toDirectorError() passes those through unchanged. Flag terminal failures so a
                 // network-regain doesn't silently retry a hard rejection behind the user's back.
@@ -163,6 +186,19 @@ class SessionController @Inject constructor(
         terminalFailure = false
         own.value = SessionStatus(SessionPhase.IDLE)
         ensureConnected()
+    }
+
+    /** User confirmed the home node migration: re-register with the new node and connect. */
+    fun confirmMigration() {
+        migrationConfirmed = true
+        _migrationRequired.value = null
+        ensureConnected()
+    }
+
+    /** User declined the migration: stay disconnected (they can change the server back or retry). */
+    fun dismissMigration() {
+        _migrationRequired.value = null
+        own.value = SessionStatus(SessionPhase.IDLE)
     }
 
     /** Tears down the live session and stops the foreground service (sign-out). */

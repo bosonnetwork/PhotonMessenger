@@ -253,8 +253,10 @@ class SettingsRepositoryImpl @Inject constructor(
         runCatching { api().signOut() }
         runCatching { session.disconnect() }
         tokenStore.clear()
-        keyManager.clear() // also clears the registered-node marker
         cachedApi = null
+        // Sign-out ends the session only; the profile's keys, registered-node marker, and local data
+        // are retained (this device is federated - the client owns the permanent data). Removing an
+        // identity is an explicit delete-profile action.
     }
 
     private fun parseId(text: String): Id =

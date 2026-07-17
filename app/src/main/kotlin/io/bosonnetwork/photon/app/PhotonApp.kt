@@ -27,12 +27,15 @@ import android.app.Application
 import android.os.Bundle
 import coil.ImageLoader
 import coil.ImageLoaderFactory
+import coil.disk.DiskCache
 import io.bosonnetwork.photon.app.image.DirectorImageCallFactory
 import io.bosonnetwork.photon.app.notification.NotificationSettings
 import io.bosonnetwork.photon.app.session.NetworkMonitor
 import io.bosonnetwork.photon.app.session.SessionController
 import io.bosonnetwork.photon.core.network.NotificationPreferencesStore
+import io.bosonnetwork.photon.core.security.ProfileManager
 import dagger.hilt.android.HiltAndroidApp
+import java.io.File
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -60,6 +63,9 @@ class PhotonApp : Application(), ImageLoaderFactory {
 
     @Inject
     lateinit var sessionController: SessionController
+
+    @Inject
+    lateinit var profileManager: ProfileManager
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -90,11 +96,17 @@ class PhotonApp : Application(), ImageLoaderFactory {
     /**
      * App-wide Coil loader: avatar fetches go through the Director-pinned, authenticated HTTP stack
      * (remote users' avatars require the CWT). Coil respects the endpoint's cache headers, so its
-     * disk cache + conditional GETs handle avatar-image persistence.
+     * disk cache + conditional GETs handle avatar-image persistence. The disk cache is per-profile so
+     * a signed-out profile's cached avatars never surface under a different active profile.
      */
     override fun newImageLoader(): ImageLoader =
         ImageLoader.Builder(this)
             .callFactory(imageCallFactory)
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(File(profileManager.activeCacheRoot(), "image_cache"))
+                    .build()
+            }
             .crossfade(true)
             .build()
 }

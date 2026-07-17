@@ -108,6 +108,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    onOpenAccounts: () -> Unit,
     onOpenSessions: () -> Unit,
     onOpenDevices: () -> Unit,
     onSignedOut: () -> Unit,
@@ -198,6 +199,13 @@ fun SettingsScreen(
                     HorizontalDivider()
 
                     ListItem(
+                        headlineContent = { Text("Accounts") },
+                        supportingContent = { Text("Switch between or add accounts on this device") },
+                        modifier = Modifier.clickable(role = Role.Button, onClick = onOpenAccounts),
+                    )
+                    HorizontalDivider()
+
+                    ListItem(
                         headlineContent = { Text("Sessions") },
                         supportingContent = { Text("Manage where you're signed in") },
                         modifier = Modifier.clickable(role = Role.Button, onClick = onOpenSessions),
@@ -265,9 +273,9 @@ fun SettingsScreen(
     if (confirmSignOut) {
         ConfirmDialog(
             title = "Sign out?",
-            text = "Signing out removes your identity key from this device. Make sure it is " +
-                "available on another device (or exported via Devices > Show my key), or you " +
-                "will permanently lose access to this identity.",
+            text = "This ends your session on this device. Your identity, conversations, and settings " +
+                "stay on this device, so you can sign back in anytime. You'll need to sign in again to " +
+                "reconnect.",
             confirmLabel = "Sign out",
             onConfirm = { viewModel.signOut() },
             onDismiss = { confirmSignOut = false },

@@ -47,6 +47,22 @@ class EncryptedAuthTokenStore(
         secrets.remove(KEY_ACCESS_TOKEN)
     }
 
+    /**
+     * Durably writes [token] straight to disk (synchronous commit). Used to seed a DIFFERENT profile's
+     * token store just before an app relaunch, where an async apply() could be lost when the process
+     * exits. Not for the normal request path - use [setToken] there.
+     */
+    fun seedDurably(token: String) {
+        cached = token
+        secrets.putString(KEY_ACCESS_TOKEN, token, commit = true)
+    }
+
+    /** Durably clears the token (synchronous commit); see [seedDurably] for why the commit matters. */
+    fun clearDurably() {
+        cached = null
+        secrets.remove(KEY_ACCESS_TOKEN, commit = true)
+    }
+
     private companion object {
         const val KEY_ACCESS_TOKEN = "director_access_token"
     }

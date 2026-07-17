@@ -58,4 +58,13 @@ object MessagingStoreFactory {
         val db = PhotonDatabase.create(context)
         return RoomStores(RoomMessagingStore(vertx, db), RoomChannelInviteStore(db))
     }
+
+    /**
+     * As [createStores], but at an explicit database path ([dbPath] may be an absolute path, which Room
+     * accepts as the database name) so the store can live under a per-profile directory.
+     */
+    fun createStores(context: Context, vertx: Vertx, dbPath: String): RoomStores {
+        val db = PhotonDatabase.create(context, dbPath)
+        return RoomStores(RoomMessagingStore(vertx, db), RoomChannelInviteStore(db))
+    }
 }

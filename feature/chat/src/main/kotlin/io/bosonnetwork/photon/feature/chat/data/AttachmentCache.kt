@@ -22,22 +22,22 @@
 
 package io.bosonnetwork.photon.feature.chat.data
 
-import android.content.Context
-import dagger.hilt.android.qualifiers.ApplicationContext
+import io.bosonnetwork.photon.core.security.ProfileManager
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Content-addressed download cache for IonStore attachments, under `cacheDir/attachments` (spec M5-7).
- * Files are named by content id (the SHA-256), so identical content is fetched once. A best-effort
- * LRU-by-last-modified eviction keeps the directory under [MAX_CACHE_BYTES].
+ * Content-addressed download cache for IonStore attachments, under the active profile's
+ * `cache/.../attachments` (spec M5-7). Files are named by content id (the SHA-256), so identical
+ * content is fetched once. A best-effort LRU-by-last-modified eviction keeps the directory under
+ * [MAX_CACHE_BYTES].
  */
 @Singleton
 class AttachmentCache @Inject constructor(
-    @ApplicationContext context: Context,
+    profileManager: ProfileManager,
 ) {
-    private val dir: File = File(context.cacheDir, "attachments").apply { mkdirs() }
+    private val dir: File = File(profileManager.activeCacheRoot(), "attachments").apply { mkdirs() }
 
     /** The cache file for the given content id, keeping the original name's extension for the viewer. */
     fun fileFor(contentId: String, name: String): File {

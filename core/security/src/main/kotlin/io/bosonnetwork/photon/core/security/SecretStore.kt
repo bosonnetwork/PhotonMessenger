@@ -32,7 +32,7 @@ import androidx.security.crypto.MasterKey
  * master key (StrongBox-backed where available). Used for the Director CWT and the wrapped 64-byte
  * private keys. Values are never written in cleartext and never logged (spec 4.8).
  */
-class SecretStore(context: Context) {
+class SecretStore(context: Context, fileName: String = FILE_NAME) {
     private val masterKey = MasterKey.Builder(context.applicationContext)
         .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
         .setRequestStrongBoxBacked(true)
@@ -40,7 +40,7 @@ class SecretStore(context: Context) {
 
     private val prefs = EncryptedSharedPreferences.create(
         context.applicationContext,
-        FILE_NAME,
+        fileName,
         masterKey,
         EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
@@ -48,8 +48,14 @@ class SecretStore(context: Context) {
 
     fun getString(key: String): String? = prefs.getString(key, null)
 
-    fun putString(key: String, value: String?) {
-        prefs.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply()
+    /**
+     * Writes (or removes, when null) a value. [commit] forces a synchronous flush to disk: use it when
+     * the caller is about to end the process (e.g. seeding another profile before an app relaunch),
+     * where the default async apply() could be dropped before it reaches disk.
+     */
+    fun putString(key: String, value: String?, commit: Boolean = false) {
+        val editor = prefs.edit().apply { if (value == null) remove(key) else putString(key, value) }
+        if (commit) editor.commit() else editor.apply()
     }
 
     fun getBytes(key: String): ByteArray? =
@@ -59,7 +65,10 @@ class SecretStore(context: Context) {
         putString(key, value?.let { Base64.encodeToString(it, Base64.NO_WRAP) })
     }
 
-    fun remove(key: String) = prefs.edit().remove(key).apply()
+    fun remove(key: String, commit: Boolean = false) {
+        val editor = prefs.edit().remove(key)
+        if (commit) editor.commit() else editor.apply()
+    }
 
     fun clear() = prefs.edit().clear().apply()
 

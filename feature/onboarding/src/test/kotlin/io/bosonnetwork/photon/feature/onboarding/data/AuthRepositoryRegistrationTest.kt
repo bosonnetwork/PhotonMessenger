@@ -30,6 +30,7 @@ import io.bosonnetwork.photon.core.boson.KeyManager
 import io.bosonnetwork.photon.core.model.AuthTokenStore
 import io.bosonnetwork.photon.core.network.DirectorApiFactory
 import io.bosonnetwork.photon.core.network.DirectorConfigStore
+import io.bosonnetwork.photon.core.security.ProfileManager
 import io.bosonnetwork.photon.core.security.SecretStore
 import io.mockk.every
 import io.mockk.mockk
@@ -69,6 +70,7 @@ class AuthRepositoryRegistrationTest {
     private lateinit var scope: CoroutineScope
     private lateinit var keyManager: KeyManager
     private lateinit var configStore: DirectorConfigStore
+    private lateinit var profileManager: ProfileManager
     private lateinit var repository: AuthRepository
 
     /** The super node id the Director's GET /client/id currently reports. */
@@ -103,11 +105,13 @@ class AuthRepositoryRegistrationTest {
         }
         keyManager = KeyManager(inMemorySecrets())
         configStore = DirectorConfigStore(dataStore)
+        profileManager = ProfileManager(tmp.newFolder("files"), tmp.newFolder("cache"))
         repository = AuthRepository(
             apiFactory = DirectorApiFactory(FakeTokenStore()),
             configStore = configStore,
             tokenStore = FakeTokenStore(),
             keyManager = keyManager,
+            profileManager = profileManager,
         )
     }
 
@@ -229,7 +233,7 @@ class AuthRepositoryRegistrationTest {
     }
 
     @Test
-    fun `signOut clears the registered node`() = runTest {
+    fun `signOut ends the session but keeps the identity and registration`() = runTest {
         givenSignedInUser()
         serveDirector()
         repository.ensureDeviceRegistered()
@@ -237,6 +241,78 @@ class AuthRepositoryRegistrationTest {
 
         repository.signOut()
 
-        assertNull(keyManager.registeredNodeId())
+        // Sign-out ends the session only: the profile's key + registered node persist for re-auth.
+        assertNotNull(keyManager.registeredNodeId())
+        assertTrue(keyManager.hasUserKey())
+    }
+
+    @Test
+    fun `checkNodeMigration returns null when the device was never registered`() = runTest {
+        givenSignedInUser()
+        serveDirector()
+        assertNull(repository.checkNodeMigration())
+    }
+
+    @Test
+    fun `checkNodeMigration detects a deliberate node change`() = runTest {
+        givenSignedInUser()
+        serveDirector()
+        repository.ensureDeviceRegistered() // registers on NODE-1
+        assertNull("same node is not a migration", repository.checkNodeMigration())
+
+        nodeId = "NODE-2" // the configured Director now reports a different super node
+        val migration = repository.checkNodeMigration()
+        assertEquals("NODE-1", migration?.fromNodeId)
+        assertEquals("NODE-2", migration?.toNodeId)
+    }
+
+    /** Serves auth/me with the given bound identity (null = the account has no bound identity). */
+    private fun serveMe(userId: String?) {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (request.path!!.endsWith("/auth/me")) {
+                    val body = if (userId != null) """{"sessionId":"s1","userId":"$userId"}"""
+                    else """{"sessionId":"s1"}"""
+                    MockResponse().setBody(body)
+                } else {
+                    MockResponse().setResponseCode(404)
+                }
+        }
+    }
+
+    @Test
+    fun `currentSession is Authenticated when the account matches the local key`() = runTest {
+        val userId = givenSignedInUser()
+        serveMe(userId)
+        assertTrue(repository.currentSession() is SessionState.Authenticated)
+    }
+
+    @Test
+    fun `currentSession reuses an existing profile bound to the signed-in identity`() = runTest {
+        givenSignedInUser() // active profile key = some identity U
+        // Another on-device profile is already bound to the account's identity.
+        val other = profileManager.createProfile()
+        profileManager.bindUserId(other, "USER-OTHER", displayName = null, homeNodeId = null)
+        serveMe("USER-OTHER")
+        val state = repository.currentSession()
+        assertEquals(other, (state as? SessionState.ReuseProfile)?.profileId)
+        assertEquals("USER-OTHER", (state as? SessionState.ReuseProfile)?.userId)
+    }
+
+    @Test
+    fun `currentSession needs a new profile when a bound profile signs in as a different identity`() = runTest {
+        givenSignedInUser() // active profile key = some identity U (no profile for the account's identity)
+        serveMe("USER-OTHER") // the account is bound to a different identity
+        val state = repository.currentSession()
+        assertEquals("USER-OTHER", (state as? SessionState.NewProfileForIdentity)?.userId)
+    }
+
+    @Test
+    fun `currentSession needs a new profile when a bound profile signs in with an unbound account`() = runTest {
+        givenSignedInUser()
+        serveMe(null) // the account has no bound identity
+        val state = repository.currentSession()
+        assertTrue(state is SessionState.NewProfileForIdentity)
+        assertNull((state as SessionState.NewProfileForIdentity).userId)
     }
 }

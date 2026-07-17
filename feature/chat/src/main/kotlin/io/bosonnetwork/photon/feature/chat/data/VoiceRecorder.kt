@@ -27,6 +27,7 @@ import android.media.MediaRecorder
 import android.os.Build
 import android.os.SystemClock
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.bosonnetwork.photon.core.security.ProfileManager
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -71,9 +72,10 @@ interface VoiceRecorder {
 @Singleton
 class AndroidVoiceRecorder @Inject constructor(
     @ApplicationContext private val context: Context,
+    profileManager: ProfileManager,
 ) : VoiceRecorder {
 
-    private val dir: File = File(context.cacheDir, "voice").apply { mkdirs() }
+    private val dir: File = File(profileManager.activeCacheRoot(), "voice").apply { mkdirs() }
 
     private var recorder: MediaRecorder? = null
     private var outputFile: File? = null

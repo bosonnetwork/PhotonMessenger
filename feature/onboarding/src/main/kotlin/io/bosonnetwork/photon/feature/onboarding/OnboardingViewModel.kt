@@ -58,6 +58,14 @@ data class OnboardingUiState(
     val error: String? = null,
 )
 
+/**
+ * One-shot request for the app to hand the just-authenticated session to another profile:
+ * [existingProfileId] non-null opens that existing profile (reuse); null creates a fresh profile and
+ * continues onboarding there. Either way the app seeds the target with the current token + server
+ * config before relaunching, so it comes up ready (or ready to continue) without a second sign-in.
+ */
+data class ProfileHandoff(val existingProfileId: String?)
+
 @HiltViewModel
 class OnboardingViewModel @Inject constructor(
     private val authRepository: AuthRepository,
@@ -70,6 +78,10 @@ class OnboardingViewModel @Inject constructor(
     /** One-shot URLs for the screen to open in a Custom Tab. */
     private val _launchAuthUrl = Channel<String>(Channel.BUFFERED)
     val launchAuthUrl = _launchAuthUrl.receiveAsFlow()
+
+    /** One-shot: the signed-in account belongs to a different profile; the app should hand off to it. */
+    private val _handoff = Channel<ProfileHandoff>(Channel.BUFFERED)
+    val handoff = _handoff.receiveAsFlow()
 
     init {
         authRepository.ensureDeviceKey()
@@ -179,15 +191,17 @@ class OnboardingViewModel @Inject constructor(
     }
 
     private fun applySession(state: SessionState) {
-        _uiState.update {
-            when (state) {
-                is SessionState.NeedsIdentity ->
-                    it.copy(loading = false, step = OnboardingStep.ChooseIdentity, allowCreateIdentity = true)
-                is SessionState.NeedsKey ->
-                    it.copy(loading = false, step = OnboardingStep.ChooseIdentity, allowCreateIdentity = false)
-                is SessionState.Authenticated ->
-                    it.copy(loading = false, step = OnboardingStep.Authenticated)
-            }
+        when (state) {
+            // The identity belongs to (or needs) a different profile: hand off to the app to open the
+            // right profile and relaunch. Never touch the active profile's key here.
+            is SessionState.ReuseProfile -> _handoff.trySend(ProfileHandoff(state.profileId))
+            is SessionState.NewProfileForIdentity -> _handoff.trySend(ProfileHandoff(null))
+            is SessionState.NeedsIdentity ->
+                _uiState.update { it.copy(loading = false, step = OnboardingStep.ChooseIdentity, allowCreateIdentity = true) }
+            is SessionState.NeedsKey ->
+                _uiState.update { it.copy(loading = false, step = OnboardingStep.ChooseIdentity, allowCreateIdentity = false) }
+            is SessionState.Authenticated ->
+                _uiState.update { it.copy(loading = false, step = OnboardingStep.Authenticated) }
         }
     }
 

@@ -20,34 +20,24 @@
  * SOFTWARE.
  */
 
-package io.bosonnetwork.photon.app.navigation
+package io.bosonnetwork.photon.app
 
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Chat
-import androidx.compose.material.icons.outlined.People
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.ui.graphics.vector.ImageVector
+import android.content.Context
+import android.content.Intent
 
-/** Top-level navigation destinations (design spec section 5 navigation). */
-enum class TopLevelDestination(
-    val route: String,
-    val label: String,
-    val icon: ImageVector,
-) {
-    HOME("home", "Chats", Icons.Outlined.Chat),
-    CONTACTS("contacts", "Contacts", Icons.Outlined.People),
-    SETTINGS("settings", "Settings", Icons.Outlined.Settings),
-}
-
-/** Non-top-level routes. */
-object Routes {
-    const val ONBOARDING = "onboarding"
-    const val CREATE_CHANNEL = "createChannel"
-    const val ACCOUNTS = "accounts"
-    const val SESSIONS = "sessions"
-    const val DEVICES = "devices"
-    const val ADD_DEVICE = "addDevice"
-    const val APPROVE_DEVICE = "approveDevice"
-    const val SHOW_KEY = "showKey"
-    const val FORWARD = "forward"
+/**
+ * Restarts the whole app process. Switching the active profile changes the on-disk stores every
+ * `@Singleton` in the graph is bound to, so the cleanest way to rebind the entire graph is to
+ * relaunch from a fresh process. Needs no permission: it launches the app's own launcher activity and
+ * kills the app's own process. The new activity is started before the process exits so the task is
+ * already queued with the ActivityManager. Only call in response to a foreground user action (Android
+ * forbids background activity starts).
+ */
+object AppRelauncher {
+    fun relaunch(context: Context) {
+        val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
+            ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK) }
+        if (launch != null) context.startActivity(launch)
+        Runtime.getRuntime().exit(0)
+    }
 }

@@ -22,12 +22,11 @@
 
 package io.bosonnetwork.photon.app.di
 
-import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.preferencesDataStoreFile
 import io.bosonnetwork.photon.core.boson.BosonDirectorTrustManagerProvider
+import io.bosonnetwork.photon.core.security.ProfileManager
 import io.bosonnetwork.photon.core.model.AuthTokenStore
 import io.bosonnetwork.photon.core.model.ProfileResolver
 import io.bosonnetwork.photon.core.network.DirectorApiFactory
@@ -39,7 +38,6 @@ import io.bosonnetwork.photon.core.network.ThemePreferencesStore
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
-import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
@@ -51,9 +49,9 @@ import kotlinx.coroutines.SupervisorJob
 object NetworkModule {
     @Provides
     @Singleton
-    fun provideSettingsDataStore(@ApplicationContext context: Context): DataStore<Preferences> =
+    fun provideSettingsDataStore(profileManager: ProfileManager): DataStore<Preferences> =
         PreferenceDataStoreFactory.create {
-            context.preferencesDataStoreFile("photon_settings")
+            java.io.File(profileManager.activeFilesRoot(), "settings.preferences_pb")
         }
 
     @Provides

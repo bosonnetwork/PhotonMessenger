@@ -33,11 +33,17 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import io.bosonnetwork.photon.app.account.AccountsScreen
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -84,6 +90,23 @@ fun PhotonNavHost(
     val topLevel = TopLevelDestination.entries
     val currentRoute = currentDestination?.route
     val showBottomBar = topLevel.any { it.route == currentRoute }
+
+    val migration by appViewModel.migrationRequired.collectAsStateWithLifecycle()
+    migration?.let {
+        AlertDialog(
+            onDismissRequest = { appViewModel.dismissMigration() },
+            title = { Text("Move your home super node?") },
+            text = {
+                Text(
+                    "You're signing in through a different super node than the one this device is " +
+                        "registered with. Move your home super node here? Your conversations, contacts, " +
+                        "and identity stay on this device - only your messaging provider changes.",
+                )
+            },
+            confirmButton = { TextButton(onClick = { appViewModel.confirmMigration() }) { Text("Move") } },
+            dismissButton = { TextButton(onClick = { appViewModel.dismissMigration() }) { Text("Not now") } },
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -147,12 +170,17 @@ fun PhotonNavHost(
             composable(Routes.ONBOARDING) {
                 OnboardingScreen(
                     onAuthenticated = {
-                        appViewModel.onSignedIn()
-                        navController.navigate(TopLevelDestination.HOME.route) {
-                            popUpTo(Routes.ONBOARDING) { inclusive = true }
-                            launchSingleTop = true
+                        // If this identity belongs to a different existing profile, the app relaunches
+                        // into it; otherwise bind it to the active profile and go Home.
+                        if (!appViewModel.reconcileProfileIdentityAndMaybeRelaunch()) {
+                            appViewModel.onSignedIn()
+                            navController.navigate(TopLevelDestination.HOME.route) {
+                                popUpTo(Routes.ONBOARDING) { inclusive = true }
+                                launchSingleTop = true
+                            }
                         }
                     },
+                    onHandoffProfile = { appViewModel.handOffToProfile(it) },
                 )
             }
             composable(TopLevelDestination.HOME.route) {
@@ -178,6 +206,7 @@ fun PhotonNavHost(
             }
             composable(TopLevelDestination.SETTINGS.route) {
                 SettingsScreen(
+                    onOpenAccounts = { navController.navigate(Routes.ACCOUNTS) },
                     onOpenSessions = { navController.navigate(Routes.SESSIONS) },
                     onOpenDevices = { navController.navigate(Routes.DEVICES) },
                     onSignedOut = {
@@ -187,6 +216,17 @@ fun PhotonNavHost(
                             launchSingleTop = true
                         }
                     },
+                )
+            }
+            composable(Routes.ACCOUNTS) {
+                var refresh by remember { mutableStateOf(0) }
+                AccountsScreen(
+                    profiles = remember(refresh) { appViewModel.profiles() },
+                    activeProfileId = appViewModel.activeProfileId(),
+                    onSwitch = { appViewModel.switchProfile(it) },
+                    onAddAccount = { appViewModel.addAccount() },
+                    onRemove = { appViewModel.deleteProfile(it); refresh++ },
+                    onBack = { navController.popBackStack() },
                 )
             }
             composable(Routes.SESSIONS) {
