@@ -32,7 +32,11 @@ import io.bosonnetwork.photon.feature.onboarding.data.AuthRepository
 import io.bosonnetwork.photon.feature.onboarding.data.SessionState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,7 +44,9 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class OnboardingStep { Server, SignIn, ChooseIdentity, CreateProfile, ScanKey, PasteKey, Passphrase, Authenticated }
+enum class OnboardingStep {
+    Server, ChooseMethod, ChooseIdentity, CreateProfile, ScanKey, PasteKey, Passphrase, Solving, Authenticated
+}
 
 data class OnboardingUiState(
     val loading: Boolean = false,
@@ -51,9 +57,18 @@ data class OnboardingUiState(
     val directorNodeId: String = "",
     /** True only when no identity is bound yet, so "Create new identity" is offered (else import only). */
     val allowCreateIdentity: Boolean = false,
+    /** True when the node accepts permissionless PoW registration, so "Create a new account" is offered. */
+    val powAvailable: Boolean = false,
+    /**
+     * True when CreateProfile was entered to make a brand-new permissionless account (PoW), so the
+     * optional passphrase field is shown; false when binding a profile to an existing OAuth session.
+     */
+    val creatingNewAccount: Boolean = false,
     val keyInput: String = "",
     val displayName: String = "",
     val bio: String = "",
+    /** Optional account passphrase collected during permissionless (PoW) account creation. */
+    val createPassphrase: String = "",
     val passphraseInput: String = "",
     val error: String? = null,
 )
@@ -117,7 +132,11 @@ class OnboardingViewModel @Inject constructor(
     /** Returns to the server step to point at a different Director. */
     fun editServer() = _uiState.update { it.copy(step = OnboardingStep.Server, error = null) }
 
-    /** Saves the entered Director URL, then loads that server's OAuth providers and advances to sign-in. */
+    /**
+     * Saves the entered Director URL, then probes that server for its OAuth providers AND whether it
+     * accepts permissionless proof-of-work registration, and advances to the method-choice hub. Both
+     * probes run in parallel; PoW is offered as the primary path when available, OAuth as secondary.
+     */
     fun confirmServer() {
         val url = _uiState.value.serverUrl.trim()
         if (url.isEmpty()) return
@@ -126,15 +145,41 @@ class OnboardingViewModel @Inject constructor(
             _uiState.update { it.copy(loading = true, error = null) }
             runCatching {
                 authRepository.setDirectorUrl(url, nodeId)
-                authRepository.providers()
-            }.onSuccess { providers ->
+                coroutineScope {
+                    val providers = async { authRepository.providers() }
+                    val pow = async { authRepository.powAvailable() }
+                    providers.await() to pow.await()
+                }
+            }.onSuccess { (providers, powAvailable) ->
                 _uiState.update {
-                    it.copy(loading = false, providers = providers, step = OnboardingStep.SignIn)
+                    it.copy(
+                        loading = false,
+                        providers = providers,
+                        powAvailable = powAvailable,
+                        step = OnboardingStep.ChooseMethod,
+                    )
                 }
             }.onFailure { e ->
                 _uiState.update { it.copy(loading = false, error = serverErrorMessage(e)) }
             }
         }
+    }
+
+    /** From the method hub: create a brand-new permissionless account (collect a profile, then PoW). */
+    fun chooseCreateAccount() = _uiState.update {
+        it.copy(
+            step = OnboardingStep.CreateProfile,
+            creatingNewAccount = true,
+            displayName = "",
+            bio = "",
+            createPassphrase = "",
+            error = null,
+        )
+    }
+
+    /** From the method hub: bring an existing identity onto this device by importing its key. */
+    fun addFromAnotherDevice() = _uiState.update {
+        it.copy(step = OnboardingStep.ChooseIdentity, allowCreateIdentity = false, error = null)
     }
 
     /** Friendly copy for server-connect failures; TLS trust errors point at the Server ID field. */
@@ -208,7 +253,8 @@ class OnboardingViewModel @Inject constructor(
     // --- Identity choice (O4) ---
 
     /** Create a brand-new identity: collect a profile, then generate + bind a fresh key. */
-    fun chooseCreateNew() = _uiState.update { it.copy(step = OnboardingStep.CreateProfile, error = null) }
+    fun chooseCreateNew() =
+        _uiState.update { it.copy(step = OnboardingStep.CreateProfile, creatingNewAccount = false, error = null) }
 
     fun chooseScanKey() = _uiState.update { it.copy(step = OnboardingStep.ScanKey, error = null) }
 
@@ -296,7 +342,17 @@ class OnboardingViewModel @Inject constructor(
 
     fun onBioChange(value: String) = _uiState.update { it.copy(bio = value) }
 
+    fun onCreatePassphraseChange(value: String) = _uiState.update { it.copy(createPassphrase = value) }
+
+    /**
+     * Finalizes the CreateProfile step. With an OAuth session present the profile is bound to that
+     * account (bind path); without one it is a permissionless account creation via proof-of-work.
+     */
     fun completeProfile() {
+        if (authRepository.isSignedIn()) bindProfileIdentity() else createAccount()
+    }
+
+    private fun bindProfileIdentity() {
         viewModelScope.launch {
             val current = _uiState.value
             _uiState.update { it.copy(loading = true, error = null) }
@@ -304,5 +360,41 @@ class OnboardingViewModel @Inject constructor(
                 .onSuccess { finishIdentitySetup() }
                 .onFailure { e -> _uiState.update { it.copy(loading = false, error = e.message) } }
         }
+    }
+
+    /** The running PoW solve, kept so [cancelSolving] can abort a long/expensive search. */
+    private var solveJob: Job? = null
+
+    /**
+     * Permissionless account creation: runs the memory-hard proof-of-work off the UI thread on the
+     * [OnboardingStep.Solving] screen. On success the account exists and this device is registered
+     * (one call), so the flow jumps straight to Authenticated. Failures return to CreateProfile with a
+     * retryable message; a cancel is silent (the UI already reset).
+     */
+    private fun createAccount() {
+        val current = _uiState.value
+        _uiState.update { it.copy(loading = false, step = OnboardingStep.Solving, error = null) }
+        solveJob = viewModelScope.launch {
+            try {
+                authRepository.createAccountWithPow(current.displayName, current.bio, current.createPassphrase)
+                _uiState.update { it.copy(step = OnboardingStep.Authenticated) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        step = OnboardingStep.CreateProfile,
+                        error = e.message ?: "Couldn't create your account; please try again",
+                    )
+                }
+            }
+        }
+    }
+
+    /** Aborts an in-progress PoW solve and returns to the profile step. */
+    fun cancelSolving() {
+        solveJob?.cancel()
+        solveJob = null
+        _uiState.update { it.copy(loading = false, step = OnboardingStep.CreateProfile, error = null) }
     }
 }

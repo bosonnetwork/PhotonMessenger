@@ -76,17 +76,23 @@ data class TokenDto(
 )
 
 /**
- * POST /api/v1/client/auth device sign-in (Director ClientService.clientAuth). A paired device proves
- * possession of its device key over a fresh `nonce` to obtain a CWT, without OAuth. `userId`/`deviceId`
- * are Base58 Boson ids; `nonce`/`deviceSig` are Base64URL-no-pad (the Director's Jackson byte[] codec).
- * See spec 2.4, M6-4. -> {token}.
+ * POST /api/v1/client/auth sign-in (Director ClientService.clientAuth). Two self-sovereign variants
+ * share one endpoint, distinguished by which signature is present:
+ *  - **Device sign-in:** a paired device proves possession of its device key over a fresh `nonce`
+ *    (`deviceId` + `deviceSig`), used by the pairing flow. See spec 2.4, M6-4.
+ *  - **User sign-in:** a device that holds the imported user identity key proves possession of it
+ *    (`userSig`, no `deviceId`/`deviceSig`), yielding a CLIENT-scoped CWT with no OAuth and no
+ *    pre-registered device - the permissionless returning-device path (`ClientService` user branch).
+ * Exactly one of `userSig` / `deviceSig` is sent. `userId`/`deviceId` are Base58 Boson ids;
+ * `nonce`/`userSig`/`deviceSig` are Base64URL-no-pad (the Director's Jackson byte[] codec). -> {token}.
  */
 @Serializable
 data class ClientAuthRequest(
     val userId: String,
-    val deviceId: String,
     val nonce: String,
-    val deviceSig: String,
+    val deviceId: String? = null,
+    val userSig: String? = null,
+    val deviceSig: String? = null,
 )
 
 /**
@@ -109,9 +115,34 @@ data class AddDeviceRequest(
 )
 
 /**
+ * GET /api/v1/client/users/challenge -> a registration proof-of-work challenge (spec
+ * director/docs/RegistrationPoW.md section 5). Byte fields are Base64URL-no-pad. `challenge` and
+ * `challengeSig` are opaque - relayed back verbatim on the registration request; `nonce` is decoded to
+ * bytes to seed the solver; `n`/`k`/`effort` parameterize the Equihash puzzle and are read from the
+ * (authenticated) challenge, never hardcoded. A 404 on this endpoint means the node is OAuth-only.
+ */
+@Serializable
+data class ChallengeDto(
+    val challenge: String,
+    val challengeSig: String,
+    val alg: String,
+    val n: Int,
+    val k: Int,
+    val effort: Int,
+    val nonce: String,
+    val expiresAt: Long = 0,
+)
+
+/**
  * POST /api/v1/client/usersAndInitialDevice (self-contained, non-OAuth registration; spec 2.5).
- * `userId`/`deviceId` are Base58 Boson ids; `nonce`/`userSig`/`deviceSig` are Base64 (Jackson decodes
- * a JSON string into byte[] via Base64 on the Director). Used by the headless integration harness.
+ * Creates the user AND its initial device in one call, returning {token}. Byte fields are
+ * Base64URL-no-pad (the Director's Jackson byte[] codec uses the URL-safe variant both directions).
+ *
+ * Under a proof-of-work registration policy (`pow`/`either`) the five PoW fields are required and
+ * `nonce` is omitted: `challenge`/`challengeSig` are relayed verbatim from [ChallengeDto], `powNonce`
+ * and `userSig`/`deviceSig` come from RegistrationPowClient, and `solution` is the Equihash index array.
+ * Under the legacy `open` policy the request instead carries `nonce` and nonce-signatures (headless
+ * harness only). `userId`/`deviceId` are Base58 Boson ids.
  */
 @Serializable
 data class SelfRegisterRequest(
@@ -124,7 +155,12 @@ data class SelfRegisterRequest(
     val deviceId: String,
     val deviceName: String,
     val appName: String,
-    val nonce: String,
     val userSig: String,
     val deviceSig: String,
+    /** Legacy `open`-policy nonce; omitted under a proof-of-work policy. */
+    val nonce: String? = null,
+    val challenge: String? = null,
+    val challengeSig: String? = null,
+    val powNonce: String? = null,
+    val solution: List<Int>? = null,
 )

@@ -35,6 +35,8 @@ import io.bosonnetwork.photon.core.security.SecretStore
 import io.mockk.every
 import io.mockk.mockk
 import java.io.File
+import java.security.SecureRandom
+import java.util.Base64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -72,6 +74,7 @@ class AuthRepositoryRegistrationTest {
     private lateinit var configStore: DirectorConfigStore
     private lateinit var profileManager: ProfileManager
     private lateinit var repository: AuthRepository
+    private lateinit var repoTokenStore: FakeTokenStore
 
     /** The super node id the Director's GET /client/id currently reports. */
     private var nodeId = "NODE-1"
@@ -106,10 +109,11 @@ class AuthRepositoryRegistrationTest {
         keyManager = KeyManager(inMemorySecrets())
         configStore = DirectorConfigStore(dataStore)
         profileManager = ProfileManager(tmp.newFolder("files"), tmp.newFolder("cache"))
+        repoTokenStore = FakeTokenStore()
         repository = AuthRepository(
             apiFactory = DirectorApiFactory(FakeTokenStore()),
             configStore = configStore,
-            tokenStore = FakeTokenStore(),
+            tokenStore = repoTokenStore,
             keyManager = keyManager,
             profileManager = profileManager,
         )
@@ -314,5 +318,95 @@ class AuthRepositoryRegistrationTest {
         val state = repository.currentSession()
         assertTrue(state is SessionState.NewProfileForIdentity)
         assertNull((state as SessionState.NewProfileForIdentity).userId)
+    }
+
+    // --- Permissionless proof-of-work registration + self-sovereign key import ---
+
+    private fun realNodeId(): String = BosonCrypto.idOf(BosonCrypto.generateKeyPair()).toString()
+
+    private fun randomNonceB64(): String {
+        val bytes = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+    }
+
+    /** A challenge body with the fast (48,3)/effort-0 params the client PoW tests use. */
+    private fun challengeJson(nonceB64: String, n: Int = 48, k: Int = 3, effort: Int = 0): String =
+        """{"challenge":"Y2g","challengeSig":"c2ln","alg":"equihash","n":$n,"k":$k,""" +
+            """"effort":$effort,"nonce":"$nonceB64","expiresAt":9999999999}"""
+
+    @Test
+    fun `powAvailable is false when the challenge endpoint 404s`() = runTest {
+        configStore.setBaseUrl(baseUrl())
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (request.path!!.endsWith("/client/users/challenge")) MockResponse().setResponseCode(404)
+                else MockResponse().setResponseCode(500)
+        }
+        assertEquals(false, repository.powAvailable())
+    }
+
+    @Test
+    fun `powAvailable is true when the challenge endpoint answers`() = runTest {
+        configStore.setBaseUrl(baseUrl())
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                MockResponse().setBody(challengeJson(randomNonceB64()))
+        }
+        assertTrue(repository.powAvailable())
+    }
+
+    @Test
+    fun `createAccountWithPow solves the challenge and persists identity, token and node`() = runTest {
+        val node = realNodeId()
+        configStore.setBaseUrl(baseUrl())
+        val nonceB64 = randomNonceB64()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when {
+                request.path!!.endsWith("/client/id") -> MockResponse().setBody("""{"id":"$node"}""")
+                request.path!!.endsWith("/client/users/challenge") ->
+                    MockResponse().setBody(challengeJson(nonceB64))
+                request.path!!.endsWith("/client/usersAndInitialDevice") ->
+                    MockResponse().setResponseCode(201).setBody("""{"token":"cwt-pow"}""")
+                else -> MockResponse().setResponseCode(404)
+            }
+        }
+
+        val userId = repository.createAccountWithPow("Alice", "hello", null)
+
+        assertTrue(keyManager.hasUserKey())
+        assertEquals(userId, keyManager.userId()?.toString())
+        assertEquals("cwt-pow", repoTokenStore.token)
+        assertEquals(node, keyManager.registeredNodeId())
+
+        val body = drainRequests().first { it.path!!.endsWith("/client/usersAndInitialDevice") }.body.readUtf8()
+        assertTrue(
+            "the request carries the solved PoW fields",
+            body.contains("solution") && body.contains("powNonce") &&
+                body.contains("userSig") && body.contains("deviceSig"),
+        )
+    }
+
+    @Test
+    fun `importing a key without a session signs in with the user key and never calls auth-me`() = runTest {
+        configStore.setBaseUrl(baseUrl())
+        repoTokenStore.token = null // no OAuth session: the permissionless returning-device path
+        val userKp = BosonCrypto.generateKeyPair()
+        val keyText = BosonCrypto.privateKey64ToBase58(BosonCrypto.privateKeyBytes64(userKp))
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (request.path!!.endsWith("/client/auth")) MockResponse().setBody("""{"token":"cwt-user"}""")
+                else MockResponse().setResponseCode(404)
+        }
+
+        val state = repository.importUserKeyText(keyText)
+
+        assertEquals(BosonCrypto.idOf(userKp).toString(), state.userId)
+        assertEquals("cwt-user", repoTokenStore.token)
+        assertTrue(keyManager.hasUserKey())
+
+        val reqs = drainRequests()
+        val authBody = reqs.first { it.path!!.endsWith("/client/auth") }.body.readUtf8()
+        assertTrue("user sign-in carries userSig", authBody.contains("userSig"))
+        assertTrue("no getMe on the self-sovereign path", reqs.none { it.path!!.endsWith("/auth/me") })
     }
 }

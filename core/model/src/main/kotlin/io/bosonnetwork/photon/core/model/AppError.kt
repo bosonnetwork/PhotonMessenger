@@ -65,6 +65,12 @@ sealed class AppError(message: String?, cause: Throwable? = null) : Exception(me
     /** Target resource not found (HTTP 404). */
     class NotFound(message: String? = null, cause: Throwable? = null) : AppError(message, cause)
 
+    /**
+     * The server is rate-limiting the client (HTTP 429). Transient: the operation can be retried after
+     * a short back-off. Surfaced e.g. by the registration proof-of-work burst limiter.
+     */
+    class RateLimited(message: String? = null, cause: Throwable? = null) : AppError(message, cause)
+
     /** State conflict, e.g. identity already bound (HTTP 409, 412). */
     class Conflict(message: String? = null, cause: Throwable? = null) : AppError(message, cause)
 

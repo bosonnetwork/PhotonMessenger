@@ -54,6 +54,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -266,13 +267,35 @@ fun OnboardingScreen(
                             maxLines = 4,
                             modifier = Modifier.fillMaxWidth(),
                         )
+                        // Setting a passphrase only applies to permissionless account creation; the OAuth
+                        // bind path manages account security differently, so hide it there.
+                        if (state.creatingNewAccount) {
+                            var showAdvanced by remember { mutableStateOf(state.createPassphrase.isNotBlank()) }
+                            Spacer(Modifier.height(8.dp))
+                            if (showAdvanced) {
+                                OutlinedTextField(
+                                    value = state.createPassphrase,
+                                    onValueChange = viewModel::onCreatePassphraseChange,
+                                    label = { Text("Passphrase (optional)") },
+                                    supportingText = {
+                                        Text("Protects sensitive actions like adding a device. You can set this later in Settings.")
+                                    },
+                                    singleLine = true,
+                                    visualTransformation = PasswordVisualTransformation(),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            } else {
+                                TextButton(onClick = { showAdvanced = true }) { Text("Advanced options") }
+                            }
+                        }
                         Spacer(Modifier.height(16.dp))
                         Button(
                             onClick = viewModel::completeProfile,
                             enabled = state.displayName.isNotBlank(),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text("Continue")
+                            Text(if (state.creatingNewAccount) "Create account" else "Continue")
                         }
                     }
 
@@ -304,16 +327,73 @@ fun OnboardingScreen(
                         }
                     }
 
+                    step == OnboardingStep.Solving -> {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.height(16.dp))
+                        Text("Creating your account", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Running a one-time security check on this device. This can take a few " +
+                                "seconds, and the time varies from run to run.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        TextButton(onClick = viewModel::cancelSolving) { Text("Cancel") }
+                    }
+
                     else -> {
-                        state.providers.forEach { provider ->
-                            Button(
-                                onClick = { viewModel.onProviderSelected(provider) },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Text("Continue with ${provider.name}")
+                        // ChooseMethod hub: proof-of-work account creation is the primary, permissionless
+                        // path; importing an existing identity and OAuth sign-in are secondary options.
+                        Text("Set up your account", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(16.dp))
+                        if (state.powAvailable) {
+                            Button(onClick = viewModel::chooseCreateAccount, modifier = Modifier.fillMaxWidth()) {
+                                Text("Create a new account")
                             }
-                            Spacer(Modifier.height(12.dp))
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "No sign-in needed. A quick one-time security check runs on this device.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                            )
+                            Spacer(Modifier.height(20.dp))
                         }
+                        Text(
+                            "Already have an account?",
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = viewModel::addFromAnotherDevice,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Add from another device")
+                        }
+                        if (state.providers.isNotEmpty()) {
+                            Spacer(Modifier.height(20.dp))
+                            HorizontalDivider()
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Other ways to sign in",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            state.providers.forEach { provider ->
+                                OutlinedButton(
+                                    onClick = { viewModel.onProviderSelected(provider) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text("Continue with ${provider.name}")
+                                }
+                                Spacer(Modifier.height(8.dp))
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
                         TextButton(onClick = viewModel::editServer) {
                             Text("Change server")
                         }

@@ -26,6 +26,7 @@ import io.bosonnetwork.photon.core.network.model.AddDeviceRequest
 import io.bosonnetwork.photon.core.network.model.AvatarUriDto
 import io.bosonnetwork.photon.core.network.model.BindIdentityRequest
 import io.bosonnetwork.photon.core.network.model.BindIdentityResponse
+import io.bosonnetwork.photon.core.network.model.ChallengeDto
 import io.bosonnetwork.photon.core.network.model.ClientAuthRequest
 import io.bosonnetwork.photon.core.network.model.DeviceDto
 import io.bosonnetwork.photon.core.network.model.FinishRegistrationRequest
@@ -86,6 +87,13 @@ interface DirectorApi {
     suspend fun signOut()
 
     // --- Client ---
+
+    /**
+     * Public: issue a registration proof-of-work challenge (spec director/docs/RegistrationPoW.md).
+     * Auth-less. 404 means the node is OAuth-only (self-sovereign registration disabled).
+     */
+    @GET("client/users/challenge")
+    suspend fun getRegistrationChallenge(): ChallengeDto
 
     /** Self-contained (non-OAuth) registration of a user + initial device (spec 2.5). Auth-less. */
     @POST("client/usersAndInitialDevice")

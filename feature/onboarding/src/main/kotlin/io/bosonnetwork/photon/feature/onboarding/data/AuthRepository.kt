@@ -24,6 +24,8 @@ package io.bosonnetwork.photon.feature.onboarding.data
 
 import android.os.Build
 import io.bosonnetwork.Id
+import io.bosonnetwork.crypto.Signature
+import io.bosonnetwork.crypto.pow.RegistrationPowClient
 import io.bosonnetwork.photon.core.boson.BosonCrypto
 import io.bosonnetwork.photon.core.boson.KeyManager
 import io.bosonnetwork.photon.core.model.AppError
@@ -36,8 +38,10 @@ import io.bosonnetwork.photon.core.network.DirectorOAuth
 import io.bosonnetwork.photon.core.network.toDirectorError
 import io.bosonnetwork.photon.core.network.model.AddDeviceRequest
 import io.bosonnetwork.photon.core.network.model.BindIdentityRequest
+import io.bosonnetwork.photon.core.network.model.ClientAuthRequest
 import io.bosonnetwork.photon.core.network.model.MeDto
 import io.bosonnetwork.photon.core.network.model.ProviderDto
+import io.bosonnetwork.photon.core.network.model.SelfRegisterRequest
 import io.bosonnetwork.photon.core.network.model.UpdateProfileRequest
 import io.bosonnetwork.photon.core.security.ProfileManager
 import java.security.SecureRandom
@@ -147,6 +151,135 @@ class AuthRepository @Inject constructor(
         DirectorOAuth.authorizeUrl(config(), provider)
 
     /**
+     * True if this node accepts permissionless proof-of-work registration (policy `pow`/`either`/`open`),
+     * i.e. the challenge endpoint answers. A 404 means the node is OAuth-only, so the "Create a new
+     * account" option is hidden. Other failures propagate so a genuine connectivity problem surfaces.
+     */
+    suspend fun powAvailable(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            api().getRegistrationChallenge()
+            true
+        } catch (e: Exception) {
+            if (e.toDirectorError() is AppError.NotFound) false else throw e
+        }
+    }
+
+    /**
+     * Permissionless account creation (no OAuth): fetches a proof-of-work challenge, solves the
+     * memory-hard puzzle off the UI thread, signs it with a freshly generated user key and this
+     * device's key, and creates the user + initial device in one call (spec RegistrationPoW.md). The
+     * user key is generated in memory and persisted ONLY after a 201, so aborting, cancelling, or
+     * switching methods never leaves a stray identity on the device. Returns the new Boson user id.
+     *
+     * The `(n, k)`/effort parameters are always read from the authenticated challenge, never hardcoded.
+     * If the challenge expires between solve and submit (403), it re-fetches and re-solves once. Run on
+     * [Dispatchers.Default]: the solve is CPU/memory-hard with high run-to-run variance by design.
+     */
+    suspend fun createAccountWithPow(name: String?, bio: String?, passphrase: String?): String =
+        withContext(Dispatchers.Default) {
+            val directorApi = api()
+            val nodeIdBase58 = config().nodeId?.takeIf { it.isNotBlank() } ?: directorApi.getNodeId().id
+            val superNodeId = Id.of(nodeIdBase58).bytesUnsafe()
+
+            // A freshly generated user key is by definition a new identity: never carry a device key
+            // registered under a previous one into it.
+            val deviceKey = keyManager.ensureDeviceKeyFor(null)
+            val userKey = BosonCrypto.generateKeyPair()
+            val userIdBase58 = BosonCrypto.idOf(userKey).toString()
+            val deviceIdBase58 = BosonCrypto.idOf(deviceKey).toString()
+
+            val cleanName = name?.trim()?.ifBlank { null }
+            val cleanBio = bio?.trim()?.ifBlank { null }
+            val cleanPass = passphrase?.takeIf { it.isNotBlank() }
+
+            var challenge = directorApi.getRegistrationChallenge()
+            var reSolvedForExpiry = false
+            var token: String? = null
+            while (token == null) {
+                val challengeNonce = B64URL_DEC.decode(challenge.nonce)
+                val result = try {
+                    RegistrationPowClient.solve(
+                        superNodeId, userKey, challenge.n, challenge.k, challenge.effort,
+                        challengeNonce, MAX_POW_NONCES,
+                    )
+                } catch (e: IllegalStateException) {
+                    // No solution within the search budget: retryable (a fresh challenge/nonce may solve).
+                    throw AppError.Timeout("Couldn't complete the security check in time; please try again", e)
+                }
+                // The device co-signs with its own key (bound to the device identity); the Director
+                // verifies deviceSig against the device key, as it verifies userSig against the user key.
+                val deviceSig = RegistrationPowClient.sign(
+                    superNodeId, deviceKey, challengeNonce, result.powNonce, challenge.effort,
+                )
+                val request = SelfRegisterRequest(
+                    userId = userIdBase58,
+                    passphrase = cleanPass,
+                    userName = cleanName,
+                    bio = cleanBio,
+                    deviceId = deviceIdBase58,
+                    deviceName = Build.MODEL?.takeIf { it.isNotBlank() } ?: DEFAULT_DEVICE_NAME,
+                    appName = APP_NAME,
+                    userSig = B64URL.encodeToString(result.signature),
+                    deviceSig = B64URL.encodeToString(deviceSig),
+                    challenge = challenge.challenge,
+                    challengeSig = challenge.challengeSig,
+                    powNonce = B64URL.encodeToString(result.powNonce),
+                    solution = result.solution.toList(),
+                )
+                try {
+                    token = directorApi.register(request).token
+                } catch (e: Exception) {
+                    // Branch on the mapped domain error (the transport HttpException is not on this
+                    // module's classpath). A 403 arrives as Forbidden: the first one is treated as an
+                    // expired challenge and triggers a single re-solve; a second is terminal. A 400
+                    // (malformed / invalid PoW) maps to Unknown.
+                    when (val err = e.toDirectorError()) {
+                        is AppError.Forbidden -> if (!reSolvedForExpiry) {
+                            reSolvedForExpiry = true
+                            challenge = directorApi.getRegistrationChallenge()
+                        } else {
+                            throw AppError.Forbidden("Registration was rejected; please try again", e)
+                        }
+                        is AppError.RateLimited -> throw err
+                        // Our own user already exists: almost always a lost-response resubmit of this very
+                        // solve. Recover by signing in with the user key; a genuine foreign id collision
+                        // (astronomically rare) fails that sign-in and surfaces as a conflict.
+                        is AppError.Conflict ->
+                            token = runCatching { userSignInToken(userKey) }.getOrElse {
+                                throw AppError.Conflict("That identity is already taken; please try again", e)
+                            }
+                        is AppError.Unknown ->
+                            throw AppError.InvalidInput("Couldn't verify the security check; please try again", e)
+                        else -> throw err
+                    }
+                }
+            }
+
+            // Success: persist the identity, store the session, and record the home node so the first
+            // bring-up skips re-registration (usersAndInitialDevice already registered this device).
+            keyManager.storeUserKey(BosonCrypto.privateKeyBytes64(userKey))
+            tokenStore.setToken(token)
+            keyManager.setRegisteredNodeId(nodeIdBase58)
+            userIdBase58
+        }
+
+    /**
+     * Self-sovereign user sign-in: proves possession of [userKey] over a fresh nonce to mint a
+     * CLIENT-scoped CWT with no OAuth and no pre-registered device (Director `clientAuth` user branch).
+     * Used by the permissionless returning-device import and by PoW resubmit recovery.
+     */
+    private suspend fun userSignInToken(userKey: Signature.KeyPair): String {
+        val nonce = ByteArray(NONCE_BYTES).also { SecureRandom().nextBytes(it) }
+        return api().clientAuth(
+            ClientAuthRequest(
+                userId = BosonCrypto.idOf(userKey).toString(),
+                nonce = B64URL.encodeToString(nonce),
+                userSig = B64URL.encodeToString(BosonCrypto.sign(userKey, nonce)),
+            ),
+        ).token
+    }
+
+    /**
      * Consumes the `?token=` from the OAuth deep link: stores the CWT, then resolves the session
      * (identity bound? key present on this device?).
      */
@@ -215,6 +348,21 @@ class AuthRepository @Inject constructor(
             // Never reuse a device key across identity changes: adopting a different identity than
             // the one this device key was registered under rotates the key and drops the stale record.
             adoptIdentity(derivedId)
+
+            // Self-sovereign returning device (no OAuth session yet): prove possession of the imported
+            // user key to mint a CLIENT-scoped CWT directly, then let onboarding register this device
+            // with that session (finishIdentitySetup -> passphrase / connect path). No getMe/bind: that
+            // token has no OAuth auth-identity, so /auth/me would not resolve it - the session id stands
+            // in for the MeDto, which the onboarding flow does not otherwise read on this path.
+            if (tokenStore.currentToken() == null) {
+                keyManager.storeUserKey(privateKey64)
+                val token = userSignInToken(kp)
+                tokenStore.setToken(token)
+                return@withContext SessionState.Authenticated(
+                    MeDto(sessionId = derivedId, userId = derivedId), derivedId,
+                )
+            }
+
             val me = api().getMe()
             val boundId = me.userId
             if (boundId.isNullOrEmpty()) {
@@ -395,6 +543,10 @@ class AuthRepository @Inject constructor(
         const val APP_NAME = "Photon"
         const val DEFAULT_DEVICE_NAME = "Android device"
         const val NONCE_BYTES = 32
+        // Generous proof-of-work search budget (matches the Director E2E reference); solve throws if a
+        // solution is not found within it, which the UI surfaces as a retryable error.
+        const val MAX_POW_NONCES = 1_000_000L
         val B64URL: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()
+        val B64URL_DEC: Base64.Decoder = Base64.getUrlDecoder()
     }
 }

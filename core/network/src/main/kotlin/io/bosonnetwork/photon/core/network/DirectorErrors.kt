@@ -42,6 +42,7 @@ fun Throwable.toDirectorError(): AppError = when (this) {
         408 -> AppError.Timeout("The request timed out", this)
         409, 412 -> AppError.Conflict(message, this)
         428 -> AppError.PassphraseRequired("Passphrase required", this)
+        429 -> AppError.RateLimited("The server is busy; try again in a moment", this)
         else -> AppError.Unknown("Request failed (HTTP ${code()})", this)
     }
     is IOException -> AppError.Network("Can't reach the server", this)
