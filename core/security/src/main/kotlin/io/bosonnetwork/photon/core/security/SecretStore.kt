@@ -61,8 +61,14 @@ class SecretStore(context: Context, fileName: String = FILE_NAME) {
     fun getBytes(key: String): ByteArray? =
         getString(key)?.let { Base64.decode(it, Base64.NO_WRAP) }
 
-    fun putBytes(key: String, value: ByteArray?) {
-        putString(key, value?.let { Base64.encodeToString(it, Base64.NO_WRAP) })
+    fun putBytes(key: String, value: ByteArray?) = putBytes(key, value, commit = false)
+
+    /**
+     * Writes (or removes, when null) a byte value. [commit] forces a synchronous flush to disk: use it
+     * when seeding another profile's store just before an app relaunch (see [putString]).
+     */
+    fun putBytes(key: String, value: ByteArray?, commit: Boolean) {
+        putString(key, value?.let { Base64.encodeToString(it, Base64.NO_WRAP) }, commit)
     }
 
     fun remove(key: String, commit: Boolean = false) {

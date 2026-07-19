@@ -41,6 +41,7 @@ import io.bosonnetwork.photon.core.security.SecretStore
 import io.bosonnetwork.photon.feature.contacts.data.ContactRepository
 import io.bosonnetwork.photon.feature.onboarding.data.AuthRepository
 import io.bosonnetwork.photon.feature.onboarding.data.NodeMigration
+import io.bosonnetwork.photon.feature.onboarding.data.ProfileSeed
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -156,6 +157,30 @@ class AppViewModel @Inject constructor(
             if (token != null) authTokenStoreFor(targetId).seedDurably(token)
             seedDirectorConfig(targetId, cfg.baseUrl, cfg.nodeId)
             if (targetId != sourceId) authTokenStoreFor(sourceId).clearDurably()
+            profileManager.setActive(targetId)
+            AppRelauncher.relaunch(appContext)
+        }
+    }
+
+    /**
+     * Hands a self-sovereign identity (PoW create / key import) to a target profile the app RESOLVED it
+     * belongs to, seeding the key material the target lacks so it comes up ready after the single
+     * relaunch. Unlike [handOffToProfile] this never reads or clears the active (possibly foreign)
+     * profile: the source path deliberately wrote nothing to it, so the previous user's data stays
+     * intact. [existingProfileId] non-null reuses that profile (its key/device are already present, so
+     * only the token is refreshed); null creates a fresh profile seeded with the key (its device
+     * registers itself on first bring-up when [ProfileSeed.registeredNodeId] is null). The target profile
+     * is bound to the identity so the account switcher can name it.
+     */
+    fun handOffSeededProfile(existingProfileId: String?, seed: ProfileSeed) {
+        viewModelScope.launch {
+            val cfg = configStore.config.first()
+            val targetId = existingProfileId ?: profileManager.createProfile()
+            val secrets = SecretStore(appContext, profileManager.secretsFileNameFor(targetId))
+            EncryptedAuthTokenStore(secrets).seedDurably(seed.token)
+            KeyManager.seedInto(secrets, seed.userPrivateKey64, seed.devicePrivateKey64, seed.registeredNodeId)
+            seedDirectorConfig(targetId, cfg.baseUrl, cfg.nodeId)
+            profileManager.bindUserId(targetId, seed.userId, seed.displayName, seed.registeredNodeId)
             profileManager.setActive(targetId)
             AppRelauncher.relaunch(appContext)
         }

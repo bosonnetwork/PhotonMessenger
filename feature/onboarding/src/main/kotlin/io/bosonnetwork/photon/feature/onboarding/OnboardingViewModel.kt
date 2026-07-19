@@ -29,6 +29,7 @@ import io.bosonnetwork.photon.core.network.toDirectorError
 import io.bosonnetwork.photon.feature.onboarding.data.AuthCallback
 import io.bosonnetwork.photon.feature.onboarding.data.AuthDeepLinkBus
 import io.bosonnetwork.photon.feature.onboarding.data.AuthRepository
+import io.bosonnetwork.photon.feature.onboarding.data.ProfileSeed
 import io.bosonnetwork.photon.feature.onboarding.data.SessionState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -78,8 +79,12 @@ data class OnboardingUiState(
  * [existingProfileId] non-null opens that existing profile (reuse); null creates a fresh profile and
  * continues onboarding there. Either way the app seeds the target with the current token + server
  * config before relaunching, so it comes up ready (or ready to continue) without a second sign-in.
+ *
+ * [seed] is set only for self-sovereign paths (PoW create / key import) that hold a key the target
+ * profile lacks: it carries the identity material to seed there. OAuth handoffs leave it null (the
+ * target creates or binds its own key), preserving the existing token-only handoff.
  */
-data class ProfileHandoff(val existingProfileId: String?)
+data class ProfileHandoff(val existingProfileId: String?, val seed: ProfileSeed? = null)
 
 @HiltViewModel
 class OnboardingViewModel @Inject constructor(
@@ -239,8 +244,8 @@ class OnboardingViewModel @Inject constructor(
         when (state) {
             // The identity belongs to (or needs) a different profile: hand off to the app to open the
             // right profile and relaunch. Never touch the active profile's key here.
-            is SessionState.ReuseProfile -> _handoff.trySend(ProfileHandoff(state.profileId))
-            is SessionState.NewProfileForIdentity -> _handoff.trySend(ProfileHandoff(null))
+            is SessionState.ReuseProfile -> _handoff.trySend(ProfileHandoff(state.profileId, state.seed))
+            is SessionState.NewProfileForIdentity -> _handoff.trySend(ProfileHandoff(null, state.seed))
             is SessionState.NeedsIdentity ->
                 _uiState.update { it.copy(loading = false, step = OnboardingStep.ChooseIdentity, allowCreateIdentity = true) }
             is SessionState.NeedsKey ->
@@ -283,7 +288,14 @@ class OnboardingViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(loading = true, error = null) }
             runCatching { authRepository.importUserKeyText(text) }
-                .onSuccess { finishIdentitySetup() }
+                .onSuccess { state ->
+                    // Hosted on the active profile -> finish device setup here; otherwise the identity
+                    // belongs to (or needs) another profile -> hand off (never touch the active profile).
+                    when (state) {
+                        is SessionState.Authenticated -> finishIdentitySetup()
+                        else -> applySession(state)
+                    }
+                }
                 .onFailure { e -> _uiState.update { it.copy(loading = false, error = e.message ?: "Invalid key") } }
         }
     }
@@ -376,8 +388,14 @@ class OnboardingViewModel @Inject constructor(
         _uiState.update { it.copy(loading = false, step = OnboardingStep.Solving, error = null) }
         solveJob = viewModelScope.launch {
             try {
-                authRepository.createAccountWithPow(current.displayName, current.bio, current.createPassphrase)
-                _uiState.update { it.copy(step = OnboardingStep.Authenticated) }
+                // Hosted on the active profile -> Home (the device was registered by usersAndInitialDevice);
+                // otherwise the identity belongs on a fresh profile -> hand off seeded and relaunch there.
+                when (val state = authRepository.createAccountWithPow(
+                    current.displayName, current.bio, current.createPassphrase,
+                )) {
+                    is SessionState.Authenticated -> _uiState.update { it.copy(step = OnboardingStep.Authenticated) }
+                    else -> applySession(state)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

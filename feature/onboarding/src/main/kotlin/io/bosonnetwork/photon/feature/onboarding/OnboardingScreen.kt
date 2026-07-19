@@ -81,7 +81,7 @@ import io.bosonnetwork.photon.core.qr.QrScanner
 @Composable
 fun OnboardingScreen(
     onAuthenticated: () -> Unit,
-    onHandoffProfile: (String?) -> Unit,
+    onHandoffProfile: (ProfileHandoff) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: OnboardingViewModel = hiltViewModel(),
 ) {
@@ -97,7 +97,7 @@ fun OnboardingScreen(
 
     // The signed-in account belongs to a different profile: hand off to the app to open it.
     LaunchedEffect(Unit) {
-        viewModel.handoff.collect { onHandoffProfile(it.existingProfileId) }
+        viewModel.handoff.collect { onHandoffProfile(it) }
     }
 
     LaunchedEffect(state.step) {

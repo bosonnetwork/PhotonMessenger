@@ -107,9 +107,28 @@ class KeyManager(
         secrets.remove(KEY_REG_NODE)
     }
 
-    private companion object {
-        const val KEY_USER = "user_key_64"
-        const val KEY_DEVICE = "device_key_64"
-        const val KEY_REG_NODE = "reg_node_id"
+    companion object {
+        private const val KEY_USER = "user_key_64"
+        private const val KEY_DEVICE = "device_key_64"
+        private const val KEY_REG_NODE = "reg_node_id"
+
+        /**
+         * Durably writes identity material into an ARBITRARY profile's [secrets] store, for seeding a
+         * target profile just before an app relaunch (multi-profile handoff of a self-sovereign identity
+         * whose key the target profile does not yet hold). Mirrors the token seeding in
+         * [io.bosonnetwork.photon.core.security.EncryptedAuthTokenStore.seedDurably]. [devicePrivateKey64]
+         * and [registeredNodeId] are seeded only when non-null: a fresh device that must register itself
+         * on the target passes null for both so no stale registration marker is carried over.
+         */
+        fun seedInto(
+            secrets: SecretStore,
+            userPrivateKey64: ByteArray,
+            devicePrivateKey64: ByteArray?,
+            registeredNodeId: String?,
+        ) {
+            secrets.putBytes(KEY_USER, userPrivateKey64, commit = true)
+            devicePrivateKey64?.let { secrets.putBytes(KEY_DEVICE, it, commit = true) }
+            registeredNodeId?.let { secrets.putBytes(KEY_REG_NODE, it.encodeToByteArray(), commit = true) }
+        }
     }
 }

@@ -371,7 +371,9 @@ class AuthRepositoryRegistrationTest {
             }
         }
 
-        val userId = repository.createAccountWithPow("Alice", "hello", null)
+        // A fresh-scratch active profile hosts the new identity: it is persisted locally.
+        val state = repository.createAccountWithPow("Alice", "hello", null) as SessionState.Authenticated
+        val userId = state.userId
 
         assertTrue(keyManager.hasUserKey())
         assertEquals(userId, keyManager.userId()?.toString())
@@ -398,7 +400,8 @@ class AuthRepositoryRegistrationTest {
                 else MockResponse().setResponseCode(404)
         }
 
-        val state = repository.importUserKeyText(keyText)
+        // A fresh-scratch active profile hosts the imported identity.
+        val state = repository.importUserKeyText(keyText) as SessionState.Authenticated
 
         assertEquals(BosonCrypto.idOf(userKp).toString(), state.userId)
         assertEquals("cwt-user", repoTokenStore.token)
@@ -408,5 +411,101 @@ class AuthRepositoryRegistrationTest {
         val authBody = reqs.first { it.path!!.endsWith("/client/auth") }.body.readUtf8()
         assertTrue("user sign-in carries userSig", authBody.contains("userSig"))
         assertTrue("no getMe on the self-sovereign path", reqs.none { it.path!!.endsWith("/auth/me") })
+    }
+
+    private fun idOfKey64(privateKey64: ByteArray): String =
+        BosonCrypto.idOf(BosonCrypto.keyPairFromPrivate64(privateKey64)).toString()
+
+    @Test
+    fun `createAccountWithPow hands off to a fresh profile without touching a foreign active profile`() = runTest {
+        val node = realNodeId()
+        configStore.setBaseUrl(baseUrl())
+        val existingId = givenSignedInUser() // active profile already holds a DIFFERENT identity's key
+        val nonceB64 = randomNonceB64()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when {
+                request.path!!.endsWith("/client/id") -> MockResponse().setBody("""{"id":"$node"}""")
+                request.path!!.endsWith("/client/users/challenge") ->
+                    MockResponse().setBody(challengeJson(nonceB64))
+                request.path!!.endsWith("/client/usersAndInitialDevice") ->
+                    MockResponse().setResponseCode(201).setBody("""{"token":"cwt-pow"}""")
+                else -> MockResponse().setResponseCode(404)
+            }
+        }
+
+        val state = repository.createAccountWithPow("Bob", null, null) as SessionState.NewProfileForIdentity
+
+        // The seed carries the brand-new identity, its registered initial device, node and token.
+        val seed = state.seed
+        assertNotNull(seed)
+        assertEquals(state.userId, seed!!.userId)
+        assertEquals(state.userId, idOfKey64(seed.userPrivateKey64))
+        assertNotNull(seed.devicePrivateKey64)
+        assertEquals(node, seed.registeredNodeId)
+        assertEquals("cwt-pow", seed.token)
+
+        // The foreign active profile is untouched: its key, token and (absent) registration all stand.
+        assertEquals(existingId, keyManager.userId()?.toString())
+        assertNull(keyManager.registeredNodeId())
+        assertEquals("cwt", repoTokenStore.token)
+    }
+
+    @Test
+    fun `importing a new identity into a foreign active profile hands off to a fresh profile`() = runTest {
+        configStore.setBaseUrl(baseUrl())
+        val existingId = givenSignedInUser() // active profile already holds a DIFFERENT identity's key
+        repoTokenStore.token = null // self-sovereign returning-device path
+        val importedKp = BosonCrypto.generateKeyPair()
+        val importedId = BosonCrypto.idOf(importedKp).toString()
+        val keyText = BosonCrypto.privateKey64ToBase58(BosonCrypto.privateKeyBytes64(importedKp))
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (request.path!!.endsWith("/client/auth")) MockResponse().setBody("""{"token":"cwt-user"}""")
+                else MockResponse().setResponseCode(404)
+        }
+
+        val state = repository.importUserKeyText(keyText) as SessionState.NewProfileForIdentity
+
+        // The seed carries the imported key + token; the device registers itself on the target later.
+        val seed = state.seed
+        assertNotNull(seed)
+        assertEquals(importedId, state.userId)
+        assertEquals(importedId, idOfKey64(seed!!.userPrivateKey64))
+        assertNull(seed.devicePrivateKey64)
+        assertNull(seed.registeredNodeId)
+        assertEquals("cwt-user", seed.token)
+
+        // The foreign active profile keeps its own identity and no session was written to it.
+        assertEquals(existingId, keyManager.userId()?.toString())
+        assertNull(repoTokenStore.token)
+    }
+
+    @Test
+    fun `importing an identity that already has a profile reuses it`() = runTest {
+        configStore.setBaseUrl(baseUrl())
+        givenSignedInUser() // active profile holds identity U
+        repoTokenStore.token = null // self-sovereign path
+        val importedKp = BosonCrypto.generateKeyPair()
+        val importedId = BosonCrypto.idOf(importedKp).toString()
+        val keyText = BosonCrypto.privateKey64ToBase58(BosonCrypto.privateKeyBytes64(importedKp))
+        // A different on-device profile already belongs to the imported identity.
+        val other = profileManager.createProfile()
+        profileManager.bindUserId(other, importedId, displayName = null, homeNodeId = null)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (request.path!!.endsWith("/client/auth")) MockResponse().setBody("""{"token":"cwt-user"}""")
+                else MockResponse().setResponseCode(404)
+        }
+
+        val state = repository.importUserKeyText(keyText) as SessionState.ReuseProfile
+
+        assertEquals(other, state.profileId)
+        assertEquals(importedId, state.userId)
+        // The target already holds this identity's key, so only a fresh token is seeded (no device/node).
+        val seed = state.seed
+        assertNotNull(seed)
+        assertNull(seed!!.devicePrivateKey64)
+        assertNull(seed.registeredNodeId)
+        assertEquals("cwt-user", seed.token)
     }
 }
