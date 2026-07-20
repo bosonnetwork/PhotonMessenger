@@ -440,6 +440,22 @@ class AuthRepository @Inject constructor(
     fun hasUserKey(): Boolean = keyManager.hasUserKey()
 
     /**
+     * The base58 identity private key just generated in [state], for the post-create backup prompt: read
+     * from the local key store when the identity is hosted on the active profile, or from the seed when it
+     * is about to be handed to another profile. Null when [state] carries no freshly created key (an
+     * imported or returning identity), so the backup screen is offered only for a brand-new key.
+     */
+    fun newKeyBackupBase58(state: SessionState): String? = when (state) {
+        is SessionState.Authenticated ->
+            keyManager.userKeyPair()?.let { BosonCrypto.privateKey64ToBase58(BosonCrypto.privateKeyBytes64(it)) }
+        is SessionState.NewProfileForIdentity ->
+            state.seed?.let { BosonCrypto.privateKey64ToBase58(it.userPrivateKey64) }
+        is SessionState.ReuseProfile ->
+            state.seed?.let { BosonCrypto.privateKey64ToBase58(it.userPrivateKey64) }
+        else -> null
+    }
+
+    /**
      * Imports a user key pasted or scanned as raw text (base58 or hex, O4). With no OAuth session this is
      * a self-sovereign returning device: the identity is resolved against the profile registry (like a
      * PoW create) and may hand off to another profile. With an OAuth session, if no identity is bound to

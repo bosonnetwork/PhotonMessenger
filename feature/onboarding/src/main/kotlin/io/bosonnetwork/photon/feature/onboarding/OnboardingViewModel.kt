@@ -46,7 +46,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 enum class OnboardingStep {
-    Server, ChooseMethod, ChooseIdentity, CreateProfile, ScanKey, PasteKey, Passphrase, Solving, Authenticated
+    Server, ChooseMethod, ChooseIdentity, CreateProfile, ScanKey, PasteKey, Passphrase, Solving, BackupKey, Authenticated
 }
 
 data class OnboardingUiState(
@@ -71,6 +71,8 @@ data class OnboardingUiState(
     /** Optional account passphrase collected during permissionless (PoW) account creation. */
     val createPassphrase: String = "",
     val passphraseInput: String = "",
+    /** base58 of a freshly created identity key, shown on the [OnboardingStep.BackupKey] screen. */
+    val backupKeyBase58: String? = null,
     val error: String? = null,
 )
 
@@ -370,15 +372,45 @@ class OnboardingViewModel @Inject constructor(
             _uiState.update { it.copy(loading = true, error = null) }
             runCatching { authRepository.bindIdentity(current.displayName, current.bio) }
                 .onSuccess { state ->
-                    // Hosted on the active profile -> register this device here; otherwise the new identity
-                    // belongs on a fresh/existing profile -> hand off (never touch the active profile).
-                    when (state) {
-                        is SessionState.Authenticated -> finishIdentitySetup()
-                        else -> applySession(state)
+                    // A brand-new key was generated: prompt the user to back it up before finishing. The
+                    // continuation registers this device (hosted here) or hands off (fresh/existing profile).
+                    promptBackupThen(state) {
+                        when (state) {
+                            is SessionState.Authenticated -> finishIdentitySetup()
+                            else -> applySession(state)
+                        }
                     }
                 }
                 .onFailure { e -> _uiState.update { it.copy(loading = false, error = e.message) } }
         }
+    }
+
+    /** Deferred completion to run once the user acknowledges the [OnboardingStep.BackupKey] prompt. */
+    private var afterBackup: (() -> Unit)? = null
+
+    /**
+     * Routes a just-created identity through the key-backup screen before completing. [proceed] is the
+     * path-specific continuation (finish device setup / hand off) and runs when the user taps Continue. If
+     * no fresh key is present (should not happen on the create paths) it proceeds immediately.
+     */
+    private fun promptBackupThen(state: SessionState, proceed: () -> Unit) {
+        val key = authRepository.newKeyBackupBase58(state)
+        if (key == null) {
+            proceed()
+            return
+        }
+        afterBackup = proceed
+        _uiState.update {
+            it.copy(loading = false, step = OnboardingStep.BackupKey, backupKeyBase58 = key, error = null)
+        }
+    }
+
+    /** Continues past the backup screen: clears the shown key and runs the deferred completion. */
+    fun continueFromBackup() {
+        val proceed = afterBackup ?: return
+        afterBackup = null
+        _uiState.update { it.copy(backupKeyBase58 = null) }
+        proceed()
     }
 
     /** The running PoW solve, kept so [cancelSolving] can abort a long/expensive search. */
@@ -397,11 +429,16 @@ class OnboardingViewModel @Inject constructor(
             try {
                 // Hosted on the active profile -> Home (the device was registered by usersAndInitialDevice);
                 // otherwise the identity belongs on a fresh profile -> hand off seeded and relaunch there.
-                when (val state = authRepository.createAccountWithPow(
+                val state = authRepository.createAccountWithPow(
                     current.displayName, current.bio, current.createPassphrase,
-                )) {
-                    is SessionState.Authenticated -> _uiState.update { it.copy(step = OnboardingStep.Authenticated) }
-                    else -> applySession(state)
+                )
+                // A brand-new key was generated: prompt the user to back it up before finishing. The device
+                // is already registered (usersAndInitialDevice), so hosted-here goes straight to Home.
+                promptBackupThen(state) {
+                    when (state) {
+                        is SessionState.Authenticated -> _uiState.update { it.copy(step = OnboardingStep.Authenticated) }
+                        else -> applySession(state)
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
