@@ -213,11 +213,28 @@ class AppViewModel @Inject constructor(
         AppRelauncher.relaunch(appContext)
     }
 
-    /** Switches the active profile and relaunches so the whole graph rebinds to it. */
+    /**
+     * Switches the active profile and relaunches so the whole graph rebinds to it. Selecting an existing
+     * account is an explicit sign-in to that identity, not fresh onboarding: if the target has no persisted
+     * session (e.g. it was signed out of earlier - which clears the token but keeps the key/data - or its
+     * token was dropped), mint a fresh clientAuth session from the target's OWN stored user key so it comes
+     * up ready at Home rather than bouncing to onboarding. Its keys, Director config, and data are left
+     * untouched; a target that still holds a token switches immediately with no network round-trip.
+     */
     fun switchProfile(id: String) {
         if (id == profileManager.activeProfileId()) return
-        profileManager.setActive(id)
-        AppRelauncher.relaunch(appContext)
+        viewModelScope.launch {
+            val secrets = SecretStore(appContext, profileManager.secretsFileNameFor(id))
+            val store = EncryptedAuthTokenStore(secrets)
+            if (store.currentToken() == null) {
+                KeyManager.readUserKey(secrets)?.let { key ->
+                    runCatching { authRepository.mintSessionFor(key) }
+                        .onSuccess { store.seedDurably(it) }
+                }
+            }
+            profileManager.setActive(id)
+            AppRelauncher.relaunch(appContext)
+        }
     }
 
     /** Removes a profile (and its secrets). If it was active, relaunches into another/fresh profile. */

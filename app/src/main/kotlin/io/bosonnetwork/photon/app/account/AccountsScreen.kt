@@ -73,6 +73,7 @@ fun AccountsScreen(
     onBack: () -> Unit,
 ) {
     var confirmRemove by remember { mutableStateOf<Profile?>(null) }
+    var confirmSwitch by remember { mutableStateOf<Profile?>(null) }
 
     Scaffold(
         topBar = {
@@ -113,7 +114,7 @@ fun AccountsScreen(
                                 }
                             }
                         },
-                        modifier = Modifier.clickable(enabled = !active) { onSwitch(profile.id) },
+                        modifier = Modifier.clickable(enabled = !active) { confirmSwitch = profile },
                     )
                     HorizontalDivider()
                 }
@@ -123,6 +124,18 @@ fun AccountsScreen(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
             ) { Text("Add account") }
         }
+    }
+
+    confirmSwitch?.let { profile ->
+        AlertDialog(
+            onDismissRequest = { confirmSwitch = null },
+            title = { Text("Switch account?") },
+            text = { Text("Switch to ${profileTitle(profile)}? The app restarts to open this account.") },
+            confirmButton = {
+                TextButton(onClick = { onSwitch(profile.id); confirmSwitch = null }) { Text("Switch") }
+            },
+            dismissButton = { TextButton(onClick = { confirmSwitch = null }) { Text("Cancel") } },
+        )
     }
 
     confirmRemove?.let { profile ->
