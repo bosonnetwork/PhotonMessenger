@@ -79,10 +79,15 @@ class AuthRepositoryRegistrationTest {
     /** The super node id the Director's GET /client/id currently reports. */
     private var nodeId = "NODE-1"
 
+    /** Mirrors EncryptedAuthTokenStore: an in-memory-only session token takes precedence over the
+     *  persisted [token]; setToken persists (and drops the override); clear wipes both. */
     private class FakeTokenStore(@Volatile var token: String? = "cwt") : AuthTokenStore {
-        override fun currentToken(): String? = token
-        override suspend fun setToken(token: String?) { this.token = token }
-        override suspend fun clear() { token = null }
+        @Volatile private var session: String? = null
+        override fun currentToken(): String? = session ?: token
+        override suspend fun setToken(token: String?) { this.token = token; session = null }
+        override suspend fun clear() { token = null; session = null }
+        override fun setSessionOnly(token: String?) { session = token }
+        override fun clearSessionOnly() { session = null }
     }
 
     private fun inMemorySecrets(): SecretStore {
@@ -270,17 +275,21 @@ class AuthRepositoryRegistrationTest {
         assertEquals("NODE-2", migration?.toNodeId)
     }
 
-    /** Serves auth/me with the given bound identity (null = the account has no bound identity). */
+    /**
+     * Serves auth/me with the given bound identity (null = no bound identity), plus client/auth (the
+     * Authenticated branch of currentSession re-mints a Boson-identity session from the local key).
+     */
     private fun serveMe(userId: String?) {
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse =
-                if (request.path!!.endsWith("/auth/me")) {
+            override fun dispatch(request: RecordedRequest): MockResponse = when {
+                request.path!!.endsWith("/auth/me") -> {
                     val body = if (userId != null) """{"sessionId":"s1","userId":"$userId"}"""
                     else """{"sessionId":"s1"}"""
                     MockResponse().setBody(body)
-                } else {
-                    MockResponse().setResponseCode(404)
                 }
+                request.path!!.endsWith("/client/auth") -> MockResponse().setBody("""{"token":"cwt-user"}""")
+                else -> MockResponse().setResponseCode(404)
+            }
         }
     }
 
@@ -304,20 +313,19 @@ class AuthRepositoryRegistrationTest {
     }
 
     @Test
-    fun `currentSession needs a new profile when a bound profile signs in as a different identity`() = runTest {
+    fun `currentSession imports the key in-context when a bound account's identity is not on this device`() = runTest {
         givenSignedInUser() // active profile key = some identity U (no profile for the account's identity)
         serveMe("USER-OTHER") // the account is bound to a different identity
+        // No pre-key handoff: import in the current context and let the commit resolve the profile.
         val state = repository.currentSession()
-        assertEquals("USER-OTHER", (state as? SessionState.NewProfileForIdentity)?.userId)
+        assertEquals("USER-OTHER", (state as? SessionState.NeedsKey)?.userId)
     }
 
     @Test
-    fun `currentSession needs a new profile when a bound profile signs in with an unbound account`() = runTest {
+    fun `currentSession creates an identity in-context for an unbound account`() = runTest {
         givenSignedInUser()
         serveMe(null) // the account has no bound identity
-        val state = repository.currentSession()
-        assertTrue(state is SessionState.NewProfileForIdentity)
-        assertNull((state as SessionState.NewProfileForIdentity).userId)
+        assertTrue(repository.currentSession() is SessionState.NeedsIdentity)
     }
 
     // --- Permissionless proof-of-work registration + self-sovereign key import ---
@@ -507,5 +515,60 @@ class AuthRepositoryRegistrationTest {
         assertNull(seed!!.devicePrivateKey64)
         assertNull(seed.registeredNodeId)
         assertEquals("cwt-user", seed.token)
+    }
+
+    // --- OAuth create (bindIdentity): commit-at-end + persist ONLY a clientAuth session ---
+
+    /** Answers the OAuth bind flow (nonce, bind, profile write) and the clientAuth finalize. */
+    private fun serveBind() {
+        val nonceB58 = realNodeId() // any valid base58 string works as the binding nonce
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when {
+                request.path!!.endsWith("/auth/user-identity/nonce") ->
+                    MockResponse().setBody("""{"nonce":"$nonceB58"}""")
+                request.path!!.endsWith("/auth/user-identity") ->
+                    MockResponse().setBody("""{"token":"bound-cwt","userId":"IGNORED"}""")
+                request.path!!.endsWith("/client/auth") -> MockResponse().setBody("""{"token":"cwt-user"}""")
+                request.path!!.endsWith("/client/profile") -> MockResponse().setResponseCode(200)
+                else -> MockResponse().setResponseCode(404)
+            }
+        }
+    }
+
+    @Test
+    fun `bindIdentity on a fresh profile stores the key and persists a clientAuth session`() = runTest {
+        configStore.setBaseUrl(baseUrl())
+        repoTokenStore.setSessionOnly("oauth-token") // OAuth session held in memory only
+        serveBind()
+
+        val state = repository.bindIdentity("Alice", "hi") as SessionState.Authenticated
+
+        assertTrue(keyManager.hasUserKey())
+        assertEquals(state.userId, keyManager.userId()?.toString())
+        // The PERSISTED session is the clientAuth token, never the OAuth/bind token.
+        assertEquals("cwt-user", repoTokenStore.token)
+        assertTrue("finalize re-mints via client/auth", drainRequests().any { it.path!!.endsWith("/client/auth") })
+    }
+
+    @Test
+    fun `bindIdentity into a foreign active profile seeds a fresh profile and leaves the active untouched`() = runTest {
+        configStore.setBaseUrl(baseUrl())
+        val existingId = givenSignedInUser() // active profile already holds identity U
+        repoTokenStore.token = null
+        repoTokenStore.setSessionOnly("oauth-token")
+        serveBind()
+
+        val state = repository.bindIdentity("Bob", null) as SessionState.NewProfileForIdentity
+
+        val seed = state.seed
+        assertNotNull(seed)
+        assertEquals(state.userId, idOfKey64(seed!!.userPrivateKey64))
+        assertEquals("Bob", seed.displayName)
+        assertEquals("cwt-user", seed.token) // Boson-identity session, never the OAuth token
+        assertNull(seed.devicePrivateKey64)
+        assertNull(seed.registeredNodeId)
+        // The foreign active profile is untouched: its key stands and nothing was persisted to its slot.
+        assertEquals(existingId, keyManager.userId()?.toString())
+        assertNull(repoTokenStore.token)
     }
 }

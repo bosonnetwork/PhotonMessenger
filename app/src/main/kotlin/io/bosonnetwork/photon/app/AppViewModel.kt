@@ -75,7 +75,7 @@ class AppViewModel @Inject constructor(
     private val keyManager: KeyManager,
     private val tokenStore: AuthTokenStore,
     private val configStore: DirectorConfigStore,
-    authRepository: AuthRepository,
+    private val authRepository: AuthRepository,
 ) : ViewModel() {
 
     /**
@@ -109,7 +109,15 @@ class AppViewModel @Inject constructor(
         profileManager.gcUnboundInactiveProfiles().forEach {
             appContext.deleteSharedPreferences(profileManager.secretsFileNameFor(it))
         }
-        if (authRepository.isReady()) sessionController.ensureConnected()
+        if (authRepository.isReady()) {
+            sessionController.ensureConnected()
+            // A profile seeded via handoff (e.g. an imported identity) lands at Home without a name; fill
+            // it in from the Director profile so the account switcher shows a name, not a bare id.
+            val active = profileManager.activeProfileId()
+            if (profileManager.listProfiles().find { it.id == active }?.displayName.isNullOrBlank()) {
+                syncActiveProfileName()
+            }
+        }
     }
 
     /** The profiles available on this device, and which one is active (for the account switcher). */
@@ -131,64 +139,63 @@ class AppViewModel @Inject constructor(
         val existing = profileManager.findByUserId(userId)
         if (existing != null && existing.id != active) {
             // This identity already has its own profile (a rare duplicate, e.g. re-imported into a
-            // freshly added account): hand off to it - carrying the session - rather than keep a copy.
+            // freshly added account): hand off to it - re-minting a session from its own key.
             handOffToProfile(existing.id)
             return true
         }
+        // Bind immediately (short-id fallback), then fill in the display name from the Director profile.
         profileManager.bindUserId(active, userId, displayName = null, homeNodeId = keyManager.registeredNodeId())
+        syncActiveProfileName()
         return false
     }
 
     /**
-     * Hands the just-authenticated session to the target profile and relaunches into it so the whole
-     * singleton graph rebinds. [existingProfileId] non-null reuses that profile (comes up ready at Home);
-     * null creates a fresh profile and continues onboarding there (a new identity the active, already
-     * bound, profile cannot host). The target is seeded with the current token + Director config so it
-     * needs no second sign-in; the source profile's token is cleared, since the freshly obtained token
-     * authorizes the TARGET identity, not the source. Selection is driven only by the resolved identity
-     * (see AuthRepository.currentSession), never by stale local state.
+     * Names the active profile from the Director profile so the account switcher shows a name rather than
+     * a bare id (covers the host-here create/import that binds a placeholder, and a seeded profile whose
+     * name was not known at seed time). No-op when unreachable - the switcher falls back to the short id.
      */
-    fun handOffToProfile(existingProfileId: String?) {
+    private fun syncActiveProfileName() {
+        val userId = keyManager.userId()?.toString() ?: return
+        val active = profileManager.activeProfileId()
         viewModelScope.launch {
-            val sourceId = profileManager.activeProfileId()
-            val token = tokenStore.currentToken()
-            val cfg = configStore.config.first()
-            val targetId = existingProfileId ?: profileManager.createProfile()
-            if (token != null) authTokenStoreFor(targetId).seedDurably(token)
-            seedDirectorConfig(targetId, cfg.baseUrl, cfg.nodeId)
-            if (targetId != sourceId) authTokenStoreFor(sourceId).clearDurably()
-            profileManager.setActive(targetId)
-            AppRelauncher.relaunch(appContext)
+            runCatching { authRepository.currentProfileName() }.getOrNull()?.let { name ->
+                profileManager.bindUserId(active, userId, name, keyManager.registeredNodeId())
+            }
         }
     }
 
     /**
-     * Hands a self-sovereign identity (PoW create / key import) to a target profile the app RESOLVED it
-     * belongs to, seeding the key material the target lacks so it comes up ready after the single
-     * relaunch. Unlike [handOffToProfile] this never reads or clears the active (possibly foreign)
-     * profile: the source path deliberately wrote nothing to it, so the previous user's data stays
-     * intact. [existingProfileId] non-null reuses that profile (its key/device are already present, so
-     * only the token is refreshed); null creates a fresh profile seeded with the key (its device
-     * registers itself on first bring-up when [ProfileSeed.registeredNodeId] is null). The target profile
-     * is bound to the identity so the account switcher can name it.
+     * Hands the resolved identity to [existingProfileId] (or a fresh profile when null) and relaunches so
+     * the whole singleton graph rebinds. The active/source profile is never modified: onboarding kept its
+     * session in memory only, so the previous user's data and disk session stay intact (no source clear).
+     *
+     * With a [seed] (a create/import completed in the current context) the target is seeded with the Boson
+     * identity + its clientAuth session so it comes up ready. Without a seed (reusing a profile that
+     * ALREADY holds this identity's key) a fresh clientAuth session is minted from that profile's own key.
+     * No OAuth token is ever relocated.
      */
-    fun handOffSeededProfile(existingProfileId: String?, seed: ProfileSeed) {
+    fun handOffToProfile(existingProfileId: String?, seed: ProfileSeed? = null) {
         viewModelScope.launch {
             val cfg = configStore.config.first()
             val targetId = existingProfileId ?: profileManager.createProfile()
             val secrets = SecretStore(appContext, profileManager.secretsFileNameFor(targetId))
-            EncryptedAuthTokenStore(secrets).seedDurably(seed.token)
-            KeyManager.seedInto(secrets, seed.userPrivateKey64, seed.devicePrivateKey64, seed.registeredNodeId)
+            if (seed != null) {
+                EncryptedAuthTokenStore(secrets).seedDurably(seed.token)
+                KeyManager.seedInto(secrets, seed.userPrivateKey64, seed.devicePrivateKey64, seed.registeredNodeId)
+                profileManager.bindUserId(targetId, seed.userId, seed.displayName, seed.registeredNodeId)
+            } else {
+                // Reuse: the target already holds its key + device; mint a fresh Boson-identity session
+                // from that key so it comes up ready (renewed later via client/auth, never OAuth).
+                KeyManager.readUserKey(secrets)?.let { key ->
+                    runCatching { authRepository.mintSessionFor(key) }
+                        .onSuccess { EncryptedAuthTokenStore(secrets).seedDurably(it) }
+                }
+            }
             seedDirectorConfig(targetId, cfg.baseUrl, cfg.nodeId)
-            profileManager.bindUserId(targetId, seed.userId, seed.displayName, seed.registeredNodeId)
             profileManager.setActive(targetId)
             AppRelauncher.relaunch(appContext)
         }
     }
-
-    /** Token store for an ARBITRARY profile (used to seed/clear a profile that is not the active one). */
-    private fun authTokenStoreFor(id: String): EncryptedAuthTokenStore =
-        EncryptedAuthTokenStore(SecretStore(appContext, profileManager.secretsFileNameFor(id)))
 
     /** Writes the Director base URL + pin node id into a target profile's settings (merges, not clobbers). */
     private suspend fun seedDirectorConfig(id: String, baseUrl: String, nodeId: String?) {

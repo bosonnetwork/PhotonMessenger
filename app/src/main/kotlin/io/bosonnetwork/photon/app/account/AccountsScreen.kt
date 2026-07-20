@@ -93,7 +93,8 @@ fun AccountsScreen(
                     ListItem(
                         headlineContent = { Text(profileTitle(profile)) },
                         supportingContent = {
-                            Text(if (active) "Active" else profile.userId?.let(::shortId) ?: "Not signed in")
+                            // Always the short id; the active profile is marked by the trailing check icon.
+                            Text(profile.userId?.let(::shortId) ?: "Not signed in")
                         },
                         trailingContent = {
                             if (active) {

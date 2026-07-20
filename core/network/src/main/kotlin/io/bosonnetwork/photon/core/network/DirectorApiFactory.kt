@@ -48,6 +48,12 @@ class DirectorApiFactory(
      * trust, which is all that unit tests and cleartext dev endpoints need.
      */
     private val trustManagerProvider: DirectorTrustManagerProvider? = null,
+    /**
+     * Renews an expired session on a 401 by re-minting from the device's Boson identity (see
+     * [SessionReminter]). Null (the default) leaves the client on the `auth/refresh` endpoint, which is
+     * all tests and OAuth-lineage sessions need.
+     */
+    private val sessionReminter: SessionReminter? = null,
 ) {
     private val json: Json = DEFAULT_JSON
 
@@ -59,7 +65,7 @@ class DirectorApiFactory(
     fun createHttpClient(config: DirectorConfig): OkHttpClient =
         OkHttpClient.Builder()
             .addInterceptor(AuthInterceptor(tokenStore))
-            .authenticator(TokenAuthenticator(tokenStore, "${config.authPrefix}/refresh", json))
+            .authenticator(TokenAuthenticator(tokenStore, "${config.authPrefix}/refresh", json, sessionReminter))
             .apply { certificatePinner(config)?.let { certificatePinner(it) } }
             .apply { applyIdentityPinning(config) }
             .build()

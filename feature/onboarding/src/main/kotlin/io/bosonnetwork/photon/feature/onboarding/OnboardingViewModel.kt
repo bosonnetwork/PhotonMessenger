@@ -369,7 +369,14 @@ class OnboardingViewModel @Inject constructor(
             val current = _uiState.value
             _uiState.update { it.copy(loading = true, error = null) }
             runCatching { authRepository.bindIdentity(current.displayName, current.bio) }
-                .onSuccess { finishIdentitySetup() }
+                .onSuccess { state ->
+                    // Hosted on the active profile -> register this device here; otherwise the new identity
+                    // belongs on a fresh/existing profile -> hand off (never touch the active profile).
+                    when (state) {
+                        is SessionState.Authenticated -> finishIdentitySetup()
+                        else -> applySession(state)
+                    }
+                }
                 .onFailure { e -> _uiState.update { it.copy(loading = false, error = e.message) } }
         }
     }

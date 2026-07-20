@@ -47,6 +47,16 @@ class EncryptedAuthTokenStore(
         secrets.remove(KEY_ACCESS_TOKEN)
     }
 
+    /** In-memory only: the interceptor sees [token] via [currentToken], but nothing is written to disk. */
+    override fun setSessionOnly(token: String?) {
+        cached = token
+    }
+
+    /** Reverts [currentToken] to the persisted value, discarding any in-memory-only session token. */
+    override fun clearSessionOnly() {
+        cached = secrets.getString(KEY_ACCESS_TOKEN)
+    }
+
     /**
      * Durably writes [token] straight to disk (synchronous commit). Used to seed a DIFFERENT profile's
      * token store just before an app relaunch, where an async apply() could be lost when the process

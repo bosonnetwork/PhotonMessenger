@@ -128,7 +128,7 @@ fun OnboardingScreen(
         Spacer(Modifier.height(16.dp))
         Text(text = "Photon", style = MaterialTheme.typography.headlineMedium)
         Text(
-            text = "Decentralized messaging on Boson",
+            text = "Federated messaging powered by BosonNetwork",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -151,7 +151,7 @@ fun OnboardingScreen(
                     loading -> CircularProgressIndicator()
 
                     step == OnboardingStep.Server -> {
-                        Text("Connect to your server", style = MaterialTheme.typography.titleMedium)
+                        Text("Connect to your super node", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(12.dp))
                         OutlinedTextField(
                             value = state.serverUrl,
@@ -395,7 +395,7 @@ fun OnboardingScreen(
                         }
                         Spacer(Modifier.height(8.dp))
                         TextButton(onClick = viewModel::editServer) {
-                            Text("Change server")
+                            Text("Change super node")
                         }
                     }
                 }

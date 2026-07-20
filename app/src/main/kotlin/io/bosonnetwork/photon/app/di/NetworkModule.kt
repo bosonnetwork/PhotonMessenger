@@ -25,7 +25,9 @@ package io.bosonnetwork.photon.app.di
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import io.bosonnetwork.photon.app.session.ClientAuthReminter
 import io.bosonnetwork.photon.core.boson.BosonDirectorTrustManagerProvider
+import io.bosonnetwork.photon.core.boson.KeyManager
 import io.bosonnetwork.photon.core.security.ProfileManager
 import io.bosonnetwork.photon.core.model.AuthTokenStore
 import io.bosonnetwork.photon.core.model.ProfileResolver
@@ -34,6 +36,7 @@ import io.bosonnetwork.photon.core.network.DirectorConfigStore
 import io.bosonnetwork.photon.core.network.DirectorProfileResolver
 import io.bosonnetwork.photon.core.network.DirectorTrustManagerProvider
 import io.bosonnetwork.photon.core.network.NotificationPreferencesStore
+import io.bosonnetwork.photon.core.network.SessionReminter
 import io.bosonnetwork.photon.core.network.ThemePreferencesStore
 import dagger.Module
 import dagger.Provides
@@ -76,11 +79,19 @@ object NetworkModule {
 
     @Provides
     @Singleton
+    fun provideSessionReminter(
+        configStore: DirectorConfigStore,
+        keyManager: KeyManager,
+    ): SessionReminter = ClientAuthReminter(configStore, keyManager)
+
+    @Provides
+    @Singleton
     fun provideDirectorApiFactory(
         tokenStore: AuthTokenStore,
         trustManagerProvider: DirectorTrustManagerProvider,
+        sessionReminter: SessionReminter,
     ): DirectorApiFactory =
-        DirectorApiFactory(tokenStore, trustManagerProvider)
+        DirectorApiFactory(tokenStore, trustManagerProvider, sessionReminter)
 
     /**
      * Resolves public profiles (name/bio/avatar) for ANY user id from the Director's

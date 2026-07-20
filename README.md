@@ -1,6 +1,6 @@
 # Photon
 
-Decentralized Android messenger built on the Boson Network stack (Messaging Client + Ion Store)
+Federated Android messenger built on the Boson Network stack (Messaging Client + Ion Store)
 and the Boson Director REST API. Jetpack Compose + Material 3, Clean Architecture + MVVM, Hilt DI,
 multi-module Gradle.
 

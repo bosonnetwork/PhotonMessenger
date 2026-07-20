@@ -340,23 +340,44 @@ class AuthRepository @Inject constructor(
     }
 
     /**
-     * Consumes the `?token=` from the OAuth deep link: stores the CWT, then resolves the session
-     * (identity bound? key present on this device?).
+     * Mints a self-sovereign clientAuth CWT from a stored key so a session can be renewed (or a reused
+     * profile brought up) using ONLY the Boson identity - no OAuth, no `auth/refresh`. Exposed for the
+     * app-layer session re-minter (401 recovery) and the reuse-profile handoff.
+     */
+    suspend fun mintSessionFor(privateKey64: ByteArray): String =
+        userSignInToken(BosonCrypto.keyPairFromPrivate64(privateKey64))
+
+    /**
+     * Mints a self-sovereign clientAuth CWT from [userKey] and installs it as the IN-MEMORY-ONLY session
+     * (so any remaining onboarding call uses it), replacing the transient OAuth token. It is persisted
+     * only by the commit step that hosts the identity ([commitIdentity]/[bindIdentity] HostHere); on a
+     * foreign active profile it is carried in the [ProfileSeed] and never written to that profile's disk.
+     * Returns the minted token.
+     */
+    private suspend fun finalizeSession(userKey: Signature.KeyPair): String =
+        userSignInToken(userKey).also { tokenStore.setSessionOnly(it) }
+
+    /**
+     * Consumes the `?token=` from the OAuth deep link. The OAuth token is held IN MEMORY ONLY (never
+     * written to disk) - it is onboarding-time KYC that authorizes the identity bind; the persisted
+     * session is always the Boson-identity clientAuth token minted at completion. Then resolves the
+     * session (identity bound? key present on this device?).
      */
     suspend fun onAuthToken(token: String): SessionState {
-        tokenStore.setToken(token)
+        tokenStore.setSessionOnly(token)
         return currentSession()
     }
 
     /**
-     * Resolves which profile the signed-in account belongs to, driven ONLY by the Boson user id from
-     * `/me` (never stale local state):
+     * Resolves which profile the OAuth-signed-in account belongs to, driven ONLY by the Boson user id
+     * from `/me` (never stale local state):
      * - [Authenticated] when the account's identity is the active profile's identity (proceed here);
-     * - [ReuseProfile] when it already has its OWN profile elsewhere (the app opens that one);
-     * - [NeedsIdentity]/[NeedsKey] when the active profile is a fresh scratch that can host the identity
-     *   (create/import here);
-     * - [NewProfileForIdentity] when the active profile is bound to a different identity and cannot host
-     *   this one (the app opens a fresh profile and continues onboarding there).
+     * - [ReuseProfile] when it already has its OWN profile elsewhere (the app opens that one directly,
+     *   re-minting a session from that profile's own key - no key/import needed);
+     * - [NeedsIdentity]/[NeedsKey] otherwise: create/import the identity in the CURRENT context. The
+     *   create ([bindIdentity]) / import ([importUserKey]) step then resolves the profile at completion
+     *   and commits (or seeds a fresh profile), so a foreign active profile is never overwritten. This is
+     *   the same resolve-and-commit-at-end pattern the self-sovereign paths use.
      */
     suspend fun currentSession(): SessionState {
         val me = api().getMe()
@@ -364,10 +385,14 @@ class AuthRepository @Inject constructor(
         val localId = keyManager.userId()?.toString()          // identity of the active profile's key
         val activeId = profileManager.activeProfileId()
 
-        // Same identity as the active profile: proceed here.
-        if (accountId != null && accountId == localId) return SessionState.Authenticated(me, accountId)
+        // Same identity as the active profile: persist a Boson-identity session (dropping the in-memory
+        // OAuth token) so the re-login survives a restart, then proceed here.
+        if (accountId != null && accountId == localId) {
+            keyManager.userKeyPair()?.let { tokenStore.setToken(userSignInToken(it)) }
+            return SessionState.Authenticated(me, accountId)
+        }
 
-        // The account's identity already has its own profile: reuse it, never rehost.
+        // The account's identity already has its own profile: open it directly (it holds its own key).
         if (accountId != null) {
             val existing = profileManager.findByUserId(accountId)
             if (existing != null && existing.id != activeId) {
@@ -375,14 +400,9 @@ class AuthRepository @Inject constructor(
             }
         }
 
-        // Active profile is a fresh scratch (no local identity): host the account's identity here.
-        if (localId == null) {
-            return if (accountId == null) SessionState.NeedsIdentity(me) else SessionState.NeedsKey(me, accountId)
-        }
-
-        // Active profile is bound to a different identity and has no profile for this account: a new
-        // profile is required so the active one is never overwritten.
-        return SessionState.NewProfileForIdentity(accountId)
+        // Create (unbound account) or import (bound account whose key is not on this device) in the current
+        // context; completion commits to the right profile without touching a foreign active one.
+        return if (accountId == null) SessionState.NeedsIdentity(me) else SessionState.NeedsKey(me, accountId)
     }
 
     /** Where a self-sovereign identity (derived from a key we hold) belongs relative to the active profile. */
@@ -436,67 +456,69 @@ class AuthRepository @Inject constructor(
             val kp = BosonCrypto.keyPairFromPrivate64(privateKey64)
             val derivedId = BosonCrypto.idOf(kp).toString()
 
-            // Self-sovereign returning device (no OAuth session yet): resolve where this identity belongs
-            // BEFORE writing anything, so importing it never overwrites a different active profile. Mint a
-            // CLIENT-scoped CWT by proving possession of the imported key (no getMe/bind: that token has no
-            // OAuth auth-identity, so /auth/me would not resolve it - the session id stands in for MeDto).
+            // Self-sovereign returning device (no OAuth session yet): mint a CLIENT-scoped CWT by proving
+            // possession of the imported key (no getMe/bind: that token has no OAuth auth-identity, so
+            // /auth/me would not resolve it - the session id stands in for MeDto), then commit-at-end.
             if (tokenStore.currentToken() == null) {
-                val target = resolveProfileTarget(derivedId)
                 val token = userSignInToken(kp)
-                return@withContext when (target) {
-                    is ProfileTarget.HostHere -> {
-                        // The active profile hosts this identity: rotate a stale device key if needed,
-                        // persist the key + session, and let onboarding register this device.
-                        adoptIdentity(derivedId)
-                        keyManager.storeUserKey(privateKey64)
-                        tokenStore.setToken(token)
-                        SessionState.Authenticated(MeDto(sessionId = derivedId, userId = derivedId), derivedId)
-                    }
-                    else -> {
-                        // The active profile is a different identity: seed the imported key into a fresh
-                        // (or its own existing) profile without touching the active one. No device key or
-                        // registered node is seeded - the target registers its own device on first bring-up.
-                        val seed = ProfileSeed(
-                            userId = derivedId,
-                            displayName = null,
-                            token = token,
-                            userPrivateKey64 = privateKey64,
-                            devicePrivateKey64 = null,
-                            registeredNodeId = null,
-                        )
-                        when (target) {
-                            is ProfileTarget.Existing ->
-                                SessionState.ReuseProfile(target.profileId, derivedId, seed)
-                            else -> SessionState.NewProfileForIdentity(derivedId, seed)
-                        }
-                    }
-                }
+                return@withContext commitIdentity(privateKey64, derivedId, token, displayName = null)
             }
 
-            // OAuth session present: currentSession already resolved the profile, so the active one is a
-            // valid host. Rotate a device key registered under a different identity before adopting this.
-            adoptIdentity(derivedId)
-            val me = api().getMe()
-            val boundId = me.userId
+            // OAuth session present. Establish/confirm the account's identity, then finalize to a
+            // Boson-identity session and commit-at-end (never overwrite a foreign active profile).
+            val boundId = api().getMe().userId
             if (boundId.isNullOrEmpty()) {
-                // No identity bound to this account yet: bind the imported key as this account's identity.
-                keyManager.storeUserKey(privateKey64)
+                // No identity bound to this account yet: bind the imported key as the account identity.
                 val nonce = api().getBindingNonce().nonce
-                val bound = api().bindUserIdentity(
+                api().bindUserIdentity(
                     BindIdentityRequest(
                         publicKey = BosonCrypto.publicKeyBase58(kp),
                         signature = BosonCrypto.signNonceBase58(kp, nonce),
                     ),
                 )
-                tokenStore.setToken(bound.token)
-                SessionState.Authenticated(api().getMe(), bound.userId)
-            } else {
+            } else if (derivedId != boundId) {
                 // An identity is already bound: the imported key must match it, or we would fork identity.
-                if (derivedId != boundId) {
-                    throw AppError.InvalidInput("This key does not match your account identity")
-                }
+                throw AppError.InvalidInput("This key does not match your account identity")
+            }
+            val token = finalizeSession(kp) // drop the OAuth-lineage token; authenticate by the Boson key
+            commitIdentity(privateKey64, derivedId, token, displayName = null)
+        }
+
+    /**
+     * Commits an identity ([privateKey64]/[userId]) for which a Boson-identity session [token] has already
+     * been minted (via bind or key import - no device registered yet): stored on the active profile when
+     * it can host the identity, else returned as a [ProfileSeed] for a handoff with NOTHING written to the
+     * (foreign) active profile. The device is registered on the target's first bring-up (no device key /
+     * node is seeded). [displayName] names the profile when known (the entered name on create; null on
+     * import, where the name is fetched from the Director profile on the target's first bring-up).
+     */
+    private suspend fun commitIdentity(
+        privateKey64: ByteArray,
+        userId: String,
+        token: String,
+        displayName: String?,
+    ): SessionState =
+        when (val target = resolveProfileTarget(userId)) {
+            is ProfileTarget.HostHere -> {
+                adoptIdentity(userId) // rotate a device key registered under a different identity
                 keyManager.storeUserKey(privateKey64)
-                SessionState.Authenticated(me, boundId)
+                tokenStore.setToken(token) // persist the Boson-identity session on the home profile
+                SessionState.Authenticated(MeDto(sessionId = userId, userId = userId), userId)
+            }
+            else -> {
+                val seed = ProfileSeed(
+                    userId = userId,
+                    displayName = displayName,
+                    token = token,
+                    userPrivateKey64 = privateKey64,
+                    devicePrivateKey64 = null,
+                    registeredNodeId = null,
+                )
+                tokenStore.clearSessionOnly() // drop the in-memory session; never touch the foreign disk
+                when (target) {
+                    is ProfileTarget.Existing -> SessionState.ReuseProfile(target.profileId, userId, seed)
+                    else -> SessionState.NewProfileForIdentity(userId, seed)
+                }
             }
         }
 
@@ -515,33 +537,41 @@ class AuthRepository @Inject constructor(
     }
 
     /**
-     * Completes registration: generates the user keypair, signs the Director nonce, and binds the
-     * public key as this session's Boson identity. Stores the returned post-bind CWT (spec 2.2).
-     * A non-blank [name] or [bio] is then written to the profile so onboarding actually persists the
-     * user's chosen identity (M1-11); avatar setup lives in Settings.
+     * Completes OAuth registration: generates a fresh user keypair IN MEMORY, binds its public key as
+     * this session's Boson identity (authorized by the OAuth session), writes the chosen name/bio, then
+     * replaces the OAuth-lineage token with a self-sovereign clientAuth CWT ([finalizeSession]) so no
+     * OAuth token is persisted past onboarding. The identity is then resolved against the profile
+     * registry and committed at the end (like the self-sovereign paths):
+     * - [SessionState.Authenticated] with the key stored locally when the active profile can host it;
+     * - a [SessionState.ReuseProfile]/[SessionState.NewProfileForIdentity] carrying a Boson-identity
+     *   [ProfileSeed] otherwise, with NOTHING written to the (foreign) active profile.
+     * The device is registered afterwards by the existing finish/connect path (this bind does not
+     * register a device), so the seed carries no device key / node.
      */
-    suspend fun bindIdentity(name: String? = null, bio: String? = null): SessionState.Authenticated =
+    suspend fun bindIdentity(name: String? = null, bio: String? = null): SessionState =
         withContext(Dispatchers.IO) {
-            // A freshly generated user key is by definition a new identity: never carry a device key
-            // registered under a previous one into it.
-            adoptIdentity(null)
             val directorApi = api()
-            val nonce = directorApi.getBindingNonce().nonce
-            val userKey = keyManager.generateUserKey()
-            val request = BindIdentityRequest(
-                publicKey = BosonCrypto.publicKeyBase58(userKey),
-                signature = BosonCrypto.signNonceBase58(userKey, nonce),
-            )
-            val bound = directorApi.bindUserIdentity(request)
-            tokenStore.setToken(bound.token)
-
             val cleanName = name?.trim()?.ifBlank { null }
             val cleanBio = bio?.trim()?.ifBlank { null }
+
+            // Generate the identity key in memory: it is persisted only if the active profile hosts it,
+            // so binding on a foreign active profile never overwrites its key.
+            val userKey = BosonCrypto.generateKeyPair()
+            val userId = BosonCrypto.idOf(userKey).toString()
+            val nonce = directorApi.getBindingNonce().nonce
+            directorApi.bindUserIdentity(
+                BindIdentityRequest(
+                    publicKey = BosonCrypto.publicKeyBase58(userKey),
+                    signature = BosonCrypto.signNonceBase58(userKey, nonce),
+                ),
+            )
+            // The identity now exists: switch to a Boson-identity session (dropping the OAuth token) and
+            // write the profile with it, then commit-at-end.
+            val clientToken = finalizeSession(userKey)
             if (cleanName != null || cleanBio != null) {
                 directorApi.updateProfile(UpdateProfileRequest(name = cleanName, bio = cleanBio))
             }
-
-            SessionState.Authenticated(directorApi.getMe(), bound.userId)
+            commitIdentity(BosonCrypto.privateKeyBytes64(userKey), userId, clientToken, cleanName)
         }
 
     /**
@@ -551,6 +581,13 @@ class AuthRepository @Inject constructor(
      */
     suspend fun isPassphraseProtected(): Boolean =
         withContext(Dispatchers.IO) { api().getProfile().passphraseProtected }
+
+    /**
+     * The account's display name from the Director profile, used to name the on-device profile in the
+     * account switcher. Null when unset or unreachable; the switcher then falls back to the short id.
+     */
+    suspend fun currentProfileName(): String? =
+        withContext(Dispatchers.IO) { api().getProfile().name?.trim()?.ifBlank { null } }
 
     /**
      * Registers THIS device under the signed-in user so the messaging service will authorize its mqtts

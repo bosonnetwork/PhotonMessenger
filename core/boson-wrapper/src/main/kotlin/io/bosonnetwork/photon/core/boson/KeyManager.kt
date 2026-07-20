@@ -130,5 +130,11 @@ class KeyManager(
             devicePrivateKey64?.let { secrets.putBytes(KEY_DEVICE, it, commit = true) }
             registeredNodeId?.let { secrets.putBytes(KEY_REG_NODE, it.encodeToByteArray(), commit = true) }
         }
+
+        /**
+         * Reads the 64-byte user private key from an ARBITRARY profile's [secrets] store (null when that
+         * profile has no identity yet). Used to mint a fresh session from a reused profile's own key.
+         */
+        fun readUserKey(secrets: SecretStore): ByteArray? = secrets.getBytes(KEY_USER)
     }
 }

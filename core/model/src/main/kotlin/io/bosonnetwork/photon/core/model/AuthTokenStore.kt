@@ -36,4 +36,17 @@ interface AuthTokenStore {
 
     /** Wipes the token (sign-out). */
     suspend fun clear()
+
+    /**
+     * Sets an IN-MEMORY-ONLY session token that is NEVER written to disk - the transient OAuth token (and
+     * the freshly minted Boson-identity token) used DURING onboarding, before the identity is committed to
+     * a profile. This keeps onboarding atomic: a foreign active profile never gets a stray token on its
+     * disk, so an abandoned or killed onboarding leaves no persisted session. Persisting implementations
+     * MUST override so [currentToken] reflects it without a disk write; the default is a no-op suitable for
+     * in-memory test doubles that set their token field directly.
+     */
+    fun setSessionOnly(token: String?) {}
+
+    /** Drops any in-memory-only override, reverting [currentToken] to the persisted value. Default no-op. */
+    fun clearSessionOnly() {}
 }

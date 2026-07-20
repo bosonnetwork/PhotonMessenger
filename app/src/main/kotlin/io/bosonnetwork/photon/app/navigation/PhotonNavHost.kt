@@ -182,11 +182,7 @@ fun PhotonNavHost(
                         }
                     },
                     onHandoffProfile = { handoff ->
-                        // A self-sovereign handoff carries key material to seed into the target; an OAuth
-                        // handoff carries none (token + config only).
-                        val seed = handoff.seed
-                        if (seed != null) appViewModel.handOffSeededProfile(handoff.existingProfileId, seed)
-                        else appViewModel.handOffToProfile(handoff.existingProfileId)
+                        appViewModel.handOffToProfile(handoff.existingProfileId, handoff.seed)
                     },
                 )
             }

@@ -34,15 +34,17 @@ import okhttp3.Response
 import okhttp3.Route
 
 /**
- * Refreshes the CWT and retries once on a 401 (M1-10). OkHttp invokes [authenticate] when a request
- * comes back 401; we swap in a fresh token - or one another thread already refreshed - and retry.
- * If the refresh itself fails, we clear the token and give up (return null) so the app falls back to
- * re-authentication rather than looping.
+ * Renews the CWT and retries once on a 401 (M1-10). OkHttp invokes [authenticate] when a request comes
+ * back 401; we swap in a fresh token - or one another thread already renewed - and retry. Renewal uses
+ * the injected [reminter] (re-mint from the device's Boson identity via `client/auth`) when present;
+ * otherwise it falls back to the `auth/refresh` endpoint (OAuth-lineage sessions / tests). If renewal
+ * fails, we clear the token and give up (return null) so the app falls back to re-authentication.
  */
 class TokenAuthenticator(
     private val tokenStore: AuthTokenStore,
     private val refreshUrl: String,
     private val json: Json,
+    private val reminter: SessionReminter? = null,
 ) : Authenticator {
     // A bare client with no authenticator, so the refresh call can't recurse into this one.
     private val refreshClient = OkHttpClient()
@@ -65,19 +67,9 @@ class TokenAuthenticator(
         }
     }
 
-    /** POSTs to the refresh endpoint with the stale token; stores + returns a new token, or null. */
+    /** Renews the CWT (Boson-identity re-mint, else the refresh endpoint); stores + returns it, or null. */
     private fun refresh(staleToken: String?): String? {
-        val builder = Request.Builder().url(refreshUrl).post(EMPTY_BODY)
-        if (!staleToken.isNullOrEmpty()) builder.header("Authorization", "Bearer $staleToken")
-
-        val newToken = runCatching {
-            refreshClient.newCall(builder.build()).execute().use { resp ->
-                if (!resp.isSuccessful) return@use null
-                val body = resp.body?.string().orEmpty()
-                json.decodeFromString(TokenDto.serializer(), body).token
-            }
-        }.getOrNull()
-
+        val newToken = if (reminter != null) reminter.remint() else refreshViaEndpoint(staleToken)
         return if (newToken.isNullOrEmpty()) {
             runBlocking { tokenStore.clear() }
             null
@@ -85,6 +77,18 @@ class TokenAuthenticator(
             runBlocking { tokenStore.setToken(newToken) }
             newToken
         }
+    }
+
+    /** POSTs to the `auth/refresh` endpoint with the stale token; returns a new token, or null. */
+    private fun refreshViaEndpoint(staleToken: String?): String? {
+        val builder = Request.Builder().url(refreshUrl).post(EMPTY_BODY)
+        if (!staleToken.isNullOrEmpty()) builder.header("Authorization", "Bearer $staleToken")
+        return runCatching {
+            refreshClient.newCall(builder.build()).execute().use { resp ->
+                if (!resp.isSuccessful) return@use null
+                json.decodeFromString(TokenDto.serializer(), resp.body?.string().orEmpty()).token
+            }
+        }.getOrNull()
     }
 
     private fun responseCount(response: Response): Int {
