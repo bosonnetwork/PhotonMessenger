@@ -89,7 +89,7 @@ class ChannelViewModelsTest {
 
     @Test
     fun `create requires a name`() {
-        val vm = CreateChannelViewModel(FakeChannelRepository())
+        val vm = CreateChannelViewModel(FakeChannelRepository(), fakeContext())
         assertFalse(vm.uiState.value.canSubmit)
         vm.setName("Friends")
         assertTrue(vm.uiState.value.canSubmit)
@@ -97,7 +97,7 @@ class ChannelViewModelsTest {
 
     @Test
     fun `create success emits Created with channel id`() = runTest {
-        val vm = CreateChannelViewModel(FakeChannelRepository(createResult = Result.success("CHAN9")))
+        val vm = CreateChannelViewModel(FakeChannelRepository(createResult = Result.success("CHAN9")), fakeContext())
         vm.setName("Team")
         vm.events.test {
             vm.create()
@@ -107,7 +107,7 @@ class ChannelViewModelsTest {
 
     @Test
     fun `create failure emits Error`() = runTest {
-        val vm = CreateChannelViewModel(FakeChannelRepository(createResult = Result.failure(RuntimeException("nope"))))
+        val vm = CreateChannelViewModel(FakeChannelRepository(createResult = Result.failure(RuntimeException("nope"))), fakeContext())
         vm.setName("Team")
         vm.events.test {
             vm.create()
@@ -117,7 +117,7 @@ class ChannelViewModelsTest {
 
     @Test
     fun `detail exposes channel and members`() = runTest {
-        val vm = ChannelDetailViewModel(FakeChannelRepository(), FakeProfileResolver(), SavedStateHandle(mapOf("channelId" to "CHAN1")))
+        val vm = ChannelDetailViewModel(FakeChannelRepository(), FakeProfileResolver(), SavedStateHandle(mapOf("channelId" to "CHAN1")), fakeContext())
         vm.uiState.test {
             val state = awaitItem()
             assertEquals("Team", state.detail?.channel?.name)
@@ -132,6 +132,7 @@ class ChannelViewModelsTest {
             FakeChannelRepository(actionResult = Result.failure(RuntimeException("denied"))),
             FakeProfileResolver(),
             SavedStateHandle(mapOf("channelId" to "CHAN1")),
+            fakeContext(),
         )
         vm.messages.test {
             vm.kick("MEMBER2")

@@ -1,0 +1,211 @@
+<resources>
+    <!-- Shared actions (dialog buttons, menu items) used across multiple contacts screens -->
+    <string name="contacts_action_cancel">Cancel</string>
+    <string name="contacts_action_save">Save</string>
+    <string name="contacts_action_send">Send</string>
+    <string name="contacts_action_remove">Remove</string>
+    <string name="contacts_action_block">Block</string>
+    <string name="contacts_action_accept">Accept</string>
+    <string name="contacts_action_decline">Decline</string>
+    <string name="contacts_action_copy">Copy</string>
+    <string name="contacts_action_share">Share</string>
+    <string name="contacts_action_done">Done</string>
+    <string name="contacts_action_join">Join</string>
+    <string name="contacts_action_leave">Leave</string>
+    <string name="contacts_action_delete">Delete</string>
+    <string name="contacts_action_ban">Ban</string>
+    <string name="contacts_action_transfer">Transfer</string>
+    <string name="contacts_action_message">Message</string>
+    <string name="contacts_action_grant_camera_access">Grant camera access</string>
+    <string name="contacts_action_create_channel">Create channel</string>
+    <string name="contacts_action_creating">Creating...</string>
+    <string name="contacts_action_create_invite_ticket">Create invite ticket</string>
+    <string name="contacts_action_rotate_session_key">Rotate session key</string>
+    <string name="contacts_action_make_moderator">Make moderator</string>
+    <string name="contacts_action_remove_moderator">Remove moderator</string>
+    <string name="contacts_action_unban">Unban</string>
+    <string name="contacts_action_remove_from_channel">Remove from channel</string>
+    <string name="contacts_action_mute">Mute</string>
+    <string name="contacts_action_unmute">Unmute</string>
+    <string name="contacts_action_unblock">Unblock</string>
+    <string name="contacts_action_view_profile">View profile</string>
+    <string name="contacts_action_edit_alias">Edit alias</string>
+    <string name="contacts_action_channel_info">Channel info</string>
+    <string name="contacts_button_remove_contact">Remove contact</string>
+
+    <!-- Content descriptions -->
+    <string name="contacts_cd_back">Back</string>
+    <string name="contacts_cd_close">Close</string>
+    <string name="contacts_cd_join_channel">Join channel with a ticket</string>
+    <string name="contacts_cd_new_channel">New channel</string>
+    <string name="contacts_cd_add_friend">Add friend</string>
+    <string name="contacts_cd_actions">Actions</string>
+    <string name="contacts_cd_channel_actions">Channel actions</string>
+    <string name="contacts_cd_member_actions">Member actions</string>
+    <string name="contacts_cd_paste_user_id">Paste user ID</string>
+    <string name="contacts_cd_scan_qr_code">Scan QR code</string>
+    <string name="contacts_cd_copy_user_id">Copy user ID</string>
+    <string name="contacts_cd_open_chat">Open chat</string>
+
+    <!-- Screen / dialog titles -->
+    <string name="contacts_title">Contacts</string>
+    <string name="contacts_detail_title">Contact</string>
+    <string name="contacts_channel_title_fallback">Channel</string>
+    <string name="contacts_new_channel_title">New channel</string>
+    <string name="contacts_invite_to_channel_title">Invite to channel</string>
+    <string name="contacts_add_friend_title">Add friend</string>
+    <string name="contacts_scan_qr_title">Scan QR code</string>
+    <string name="contacts_join_channel_title">Join channel</string>
+    <string name="contacts_create_invite_title">Create invite</string>
+    <string name="contacts_invite_ticket_title">Invite ticket</string>
+
+    <!-- ContactsScreen: tabs -->
+    <string name="contacts_tab_friends">Friends</string>
+    <string name="contacts_tab_channels">Channels</string>
+    <string name="contacts_tab_requests">Requests</string>
+    <!-- Tab label with a trailing count, e.g. "Friends (3)" -->
+    <string name="contacts_tab_count_format">%1$s (%2$d)</string>
+
+    <!-- Empty / error states -->
+    <string name="contacts_empty_friends">No friends yet.\nShare your user ID (Settings) or add a friend with theirs.</string>
+    <string name="contacts_empty_channels">No channels yet.\nCreate one with the group icon, or join with an invite ticket.</string>
+    <string name="contacts_empty_requests">No pending requests.</string>
+    <string name="contacts_contact_removed">This contact is no longer in your list</string>
+    <string name="contacts_channel_not_found">Channel not found</string>
+    <string name="contacts_no_contacts_match">No contacts match \"%1$s\"</string>
+    <string name="contacts_no_contacts_to_invite">No contacts to invite yet.</string>
+    <string name="contacts_error_generic">Error</string>
+
+    <!-- Status flags shown on a contact/channel row -->
+    <string name="contacts_status_muted">Muted</string>
+    <string name="contacts_status_blocked">Blocked</string>
+
+    <!-- Friend request row -->
+    <string name="contacts_request_hello_format">\"%1$s\"</string>
+
+    <!-- Add friend dialog -->
+    <string name="contacts_add_friend_description">Enter your friend\'s user ID, or paste/scan it. Their ID and QR are in their Settings.</string>
+    <string name="contacts_label_boson_id">Boson ID</string>
+    <string name="contacts_label_say_hello">Say hello (optional)</string>
+
+    <!-- QR scan dialog -->
+    <string name="contacts_scan_qr_instruction">Point the camera at your friend\'s user ID QR code.</string>
+    <string name="contacts_camera_permission_needed">Camera permission is needed to scan a QR code.</string>
+
+    <!-- Join channel dialog -->
+    <string name="contacts_join_channel_description">Paste the invite ticket you were given.</string>
+    <string name="contacts_label_invite_ticket">Invite ticket</string>
+
+    <!-- Edit alias dialog -->
+    <string name="contacts_edit_alias_description">Set a local alias for this contact. Leave blank to clear it.</string>
+    <string name="contacts_label_alias">Alias</string>
+
+    <!-- Block / remove contact confirmation dialogs -->
+    <string name="contacts_block_contact_title">Block %1$s?</string>
+    <string name="contacts_block_contact_message">You will no longer receive messages from this contact.</string>
+    <string name="contacts_remove_contact_title">Remove contact?</string>
+    <string name="contacts_remove_contact_message">%1$s will be removed from your contacts. You can add them again later with their ID.</string>
+
+    <!-- ContactDetailScreen -->
+    <string name="contacts_label_user_id">User ID</string>
+    <string name="contacts_user_id_copied">User ID copied</string>
+    <string name="contacts_alias_none_hint">None - tap to set a local name</string>
+    <string name="contacts_label_mute">Mute</string>
+    <string name="contacts_mute_description">Silence notifications from this contact</string>
+    <string name="contacts_block_description">Stop receiving messages from this contact</string>
+
+    <!-- ChannelDetailScreen -->
+    <string name="contacts_members_header_format">%1$d MEMBERS</string>
+    <string name="contacts_your_role">Your role: %1$s</string>
+    <string name="contacts_member_you_suffix">%1$s (you)</string>
+    <string name="contacts_menu_transfer_ownership">Transfer ownership</string>
+    <string name="contacts_menu_create_invite">Create invite</string>
+    <string name="contacts_menu_delete_channel">Delete channel</string>
+    <string name="contacts_menu_leave_channel">Leave channel</string>
+
+    <plurals name="contacts_member_count">
+        <item quantity="one">%1$d member</item>
+        <item quantity="other">%1$d members</item>
+    </plurals>
+
+    <!-- Member moderation confirmation dialogs -->
+    <string name="contacts_ban_member_title">Ban %1$s?</string>
+    <string name="contacts_ban_member_message">They will be removed and can\'t rejoin until unbanned.</string>
+    <string name="contacts_remove_member_title">Remove %1$s?</string>
+    <string name="contacts_remove_member_message">They will be removed from the channel but can be invited again.</string>
+    <string name="contacts_transfer_ownership_title">Transfer ownership?</string>
+    <string name="contacts_transfer_ownership_message">%1$s becomes the owner. You keep your membership but can no longer manage or delete the channel.</string>
+
+    <!-- Leave / delete channel confirmation dialogs -->
+    <string name="contacts_leave_channel_title">Leave channel?</string>
+    <string name="contacts_leave_channel_message">You will stop receiving messages from this channel. You can rejoin later with an invite.</string>
+    <string name="contacts_delete_channel_title">Delete channel?</string>
+    <string name="contacts_delete_channel_message">The channel and its messages are deleted for every member. This cannot be undone.</string>
+
+    <!-- Invite type chooser dialog -->
+    <string name="contacts_invite_a_contact">Invite a contact</string>
+    <string name="contacts_invite_contact_description">Send an invitation straight to someone in your contacts</string>
+    <string name="contacts_create_shareable_link">Create a shareable link</string>
+    <string name="contacts_shareable_link_description">Anyone with the link can join</string>
+
+    <!-- Invite ticket dialog -->
+    <string name="contacts_invite_ticket_description">Send this ticket to the person you want to invite. They can join from Contacts with \"Join channel\".</string>
+    <string name="contacts_share_invite_ticket_chooser">Share invite ticket</string>
+
+    <!-- Channel permission labels (ChannelDetailScreen chip) -->
+    <string name="contacts_permission_public">Anyone can join</string>
+    <string name="contacts_permission_member_invite">Members can invite</string>
+    <string name="contacts_permission_moderator_invite">Moderators can invite</string>
+    <string name="contacts_permission_owner_invite">Owner invites only</string>
+
+    <!-- Channel member role labels -->
+    <string name="contacts_role_owner">Owner</string>
+    <string name="contacts_role_moderator">Moderator</string>
+    <string name="contacts_role_member">Member</string>
+    <string name="contacts_role_banned">Banned</string>
+
+    <!-- CreateChannelScreen -->
+    <string name="contacts_label_name">Name</string>
+    <string name="contacts_label_notice_optional">Notice (optional)</string>
+    <string name="contacts_who_can_join">Who can join</string>
+    <string name="contacts_create_permission_public">Anyone (public)</string>
+    <string name="contacts_create_permission_owner_invite">Only the owner can invite</string>
+    <string name="contacts_announce_publicly">Announce channel publicly</string>
+    <string name="contacts_announce_publicly_description">Publish the channel profile to the network so others can discover and join it.</string>
+
+    <!-- InviteContactPickerScreen -->
+    <string name="contacts_search_placeholder">Search</string>
+    <string name="contacts_invitation_sent">Invitation sent to %1$s</string>
+
+    <!-- ViewModel / repository user-facing error and status messages -->
+    <string name="contacts_error_format">%1$s: %2$s</string>
+    <string name="contacts_error_unknown">unknown error</string>
+    <string name="contacts_error_prefix_send_friend_request">Couldn\'t send friend request</string>
+    <string name="contacts_error_prefix_accept_request">Couldn\'t accept request</string>
+    <string name="contacts_error_prefix_decline_request">Couldn\'t decline request</string>
+    <string name="contacts_error_prefix_update_contact">Couldn\'t update contact</string>
+    <string name="contacts_error_prefix_update_alias">Couldn\'t update alias</string>
+    <string name="contacts_error_prefix_remove_contact">Couldn\'t remove contact</string>
+    <string name="contacts_error_prefix_join_channel">Couldn\'t join channel</string>
+    <string name="contacts_error_prefix_change_role">Couldn\'t change role</string>
+    <string name="contacts_error_prefix_ban_member">Couldn\'t ban member</string>
+    <string name="contacts_error_prefix_unban_member">Couldn\'t unban member</string>
+    <string name="contacts_error_prefix_remove_member">Couldn\'t remove member</string>
+    <string name="contacts_error_prefix_leave_channel">Couldn\'t leave channel</string>
+    <string name="contacts_error_prefix_delete_channel">Couldn\'t delete channel</string>
+    <string name="contacts_error_prefix_transfer_ownership">Couldn\'t transfer ownership</string>
+    <string name="contacts_error_prefix_update_channel">Couldn\'t update channel</string>
+    <string name="contacts_error_prefix_rotate_session_key">Couldn\'t rotate session key</string>
+    <string name="contacts_error_prefix_create_invite">Couldn\'t create invite</string>
+    <string name="contacts_error_no_permission">You don\'t have permission to do that</string>
+    <string name="contacts_error_not_channel_member">You\'re not a member of this channel</string>
+    <string name="contacts_error_channel_no_longer_exists">This channel no longer exists</string>
+    <string name="contacts_error_create_channel_failed">Couldn\'t create channel</string>
+    <string name="contacts_error_send_invitation_failed">Couldn\'t send invitation</string>
+
+    <!-- Repository-level errors (surfaced via AppError.message) -->
+    <string name="contacts_error_not_connected">Not connected to the messaging service</string>
+    <string name="contacts_error_contact_not_found">Contact not found</string>
+    <string name="contacts_error_invalid_boson_id">Invalid Boson ID</string>
+    <string name="contacts_error_invalid_invite_ticket">Invalid invite ticket</string>
+</resources>

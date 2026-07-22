@@ -22,6 +22,8 @@
 
 package io.bosonnetwork.photon.feature.settings.data
 
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.bosonnetwork.photon.core.boson.BosonCrypto
 import io.bosonnetwork.photon.core.boson.DevicePairing
 import io.bosonnetwork.photon.core.boson.KeyManager
@@ -37,6 +39,7 @@ import io.bosonnetwork.photon.core.network.model.FinishRegistrationRequest
 import io.bosonnetwork.photon.core.network.model.RegisterDeviceRequest
 import io.bosonnetwork.photon.core.network.model.ReplyRegistrationRequest
 import io.bosonnetwork.photon.core.network.toDirectorError
+import io.bosonnetwork.photon.feature.settings.R
 import io.bosonnetwork.crypto.CryptoBox
 import io.bosonnetwork.crypto.Signature
 import java.security.SecureRandom
@@ -96,6 +99,7 @@ class DevicePairingRepositoryImpl @Inject constructor(
     private val configStore: DirectorConfigStore,
     private val keyManager: KeyManager,
     private val tokenStore: AuthTokenStore,
+    @ApplicationContext private val context: Context,
 ) : DevicePairingRepository {
 
     /** State the new device must keep between showing its QR and finishing the pairing. */
@@ -129,8 +133,8 @@ class DevicePairingRepositoryImpl @Inject constructor(
             val nonce = newNonce()
             val request = RegisterDeviceRequest(
                 deviceId = deviceId,
-                deviceName = deviceName.ifBlank { DEFAULT_DEVICE_NAME },
-                appName = APP_NAME,
+                deviceName = deviceName.ifBlank { context.getString(R.string.settings_default_device_name) },
+                appName = context.getString(R.string.settings_about_app_name),
                 nonce = b64(nonce),
                 sig = b64(BosonCrypto.sign(deviceKey, nonce)),
             )
@@ -145,7 +149,8 @@ class DevicePairingRepositoryImpl @Inject constructor(
 
     override suspend fun awaitApproval(): Result<String> = runCatching {
         withContext(Dispatchers.IO) {
-            val pairing = active ?: throw AppError.InvalidInput("No pairing in progress")
+            val pairing = active
+                ?: throw AppError.InvalidInput(context.getString(R.string.settings_pairing_error_no_active))
             val deviceId = BosonCrypto.idOf(pairing.deviceKey).toString()
 
             // finishRegistration long-polls server-side until the request is approved/denied/timed out.
@@ -190,8 +195,10 @@ class DevicePairingRepositoryImpl @Inject constructor(
         PairingRequestInfo(
             registrationId = payload.registrationId,
             deviceId = info.deviceId,
-            deviceName = info.deviceName?.takeIf { it.isNotBlank() } ?: DEFAULT_DEVICE_NAME,
-            appName = info.appName?.takeIf { it.isNotBlank() } ?: APP_NAME,
+            deviceName = info.deviceName?.takeIf { it.isNotBlank() }
+                ?: context.getString(R.string.settings_default_device_name),
+            appName = info.appName?.takeIf { it.isNotBlank() }
+                ?: context.getString(R.string.settings_about_app_name),
         )
     }
 
@@ -199,7 +206,7 @@ class DevicePairingRepositoryImpl @Inject constructor(
         withContext(Dispatchers.IO) {
             val payload = decodePayload(qrText)
             val userKey = keyManager.userKeyPair()
-                ?: throw AppError.InvalidInput("No user identity on this device")
+                ?: throw AppError.InvalidInput(context.getString(R.string.settings_pairing_error_no_identity))
             val userKey64 = BosonCrypto.privateKeyBytes64(userKey)
             val sealed = DevicePairing.sealUserKey(userKey64, payload.ephemeralPublicKey)
             api().replyRegistration(
@@ -220,7 +227,8 @@ class DevicePairingRepositoryImpl @Inject constructor(
     }
 
     private fun decodePayload(qrText: String): PairingPayload =
-        PairingPayload.decode(qrText) ?: throw AppError.InvalidInput("Not a Photon pairing code")
+        PairingPayload.decode(qrText)
+            ?: throw AppError.InvalidInput(context.getString(R.string.settings_pairing_error_invalid_code))
 
     private fun newNonce(): ByteArray = ByteArray(NONCE_BYTES).also { RANDOM.nextBytes(it) }
 
@@ -233,8 +241,6 @@ class DevicePairingRepositoryImpl @Inject constructor(
         recoverCatching { throw it.toDirectorError() }
 
     private companion object {
-        const val APP_NAME = "Photon"
-        const val DEFAULT_DEVICE_NAME = "New device"
         const val NONCE_BYTES = 32
         val RANDOM = SecureRandom()
         val B64URL: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()

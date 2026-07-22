@@ -22,15 +22,18 @@
 
 package io.bosonnetwork.photon.feature.chat
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.bosonnetwork.photon.core.model.ProfileResolver
 import io.bosonnetwork.photon.core.model.displayProfile
+import io.bosonnetwork.photon.feature.chat.R
 import io.bosonnetwork.photon.feature.chat.data.ChatRepository
 import io.bosonnetwork.photon.feature.chat.data.ForwardPayload
 import io.bosonnetwork.photon.feature.chat.data.ForwardPayloadStore
 import io.bosonnetwork.photon.feature.chat.model.UiForwardTarget
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -71,13 +74,14 @@ class ForwardViewModel @Inject constructor(
     private val repository: ChatRepository,
     private val profileResolver: ProfileResolver,
     private val forwardPayloadStore: ForwardPayloadStore,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     private val payload: ForwardPayload? = forwardPayloadStore.peek()
 
     /** A short description of what is being forwarded, for the screen header. */
     val forwardingLabel: String = when (val p = payload) {
-        is ForwardPayload.Attachment -> p.attachment.name.ifBlank { "attachment" }
+        is ForwardPayload.Attachment -> p.attachment.name.ifBlank { context.getString(R.string.chat_forward_label_attachment_fallback) }
         is ForwardPayload.Text -> p.text
         null -> ""
     }
@@ -104,7 +108,8 @@ class ForwardViewModel @Inject constructor(
                 .onSuccess { targets.value = it }
                 .onFailure { e ->
                     targets.value = emptyList()
-                    _messages.tryEmit("Couldn't load contacts: ${e.message ?: "unknown error"}")
+                    val reason = e.message ?: context.getString(R.string.chat_error_unknown)
+                    _messages.tryEmit(context.getString(R.string.chat_error_load_contacts, reason))
                 }
         }
     }
@@ -166,7 +171,10 @@ class ForwardViewModel @Inject constructor(
             }
             result
                 .onSuccess { forwardPayloadStore.clear(); _forwarded.tryEmit(targetId) }
-                .onFailure { e -> _messages.tryEmit("Couldn't forward: ${e.message ?: "unknown error"}") }
+                .onFailure { e ->
+                    val reason = e.message ?: context.getString(R.string.chat_error_unknown)
+                    _messages.tryEmit(context.getString(R.string.chat_error_forward, reason))
+                }
         }
     }
 }

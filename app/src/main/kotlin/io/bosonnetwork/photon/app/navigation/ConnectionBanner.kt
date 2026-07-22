@@ -37,13 +37,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import io.bosonnetwork.photon.app.R
 import io.bosonnetwork.photon.app.session.SessionPhase
 import io.bosonnetwork.photon.app.session.SessionStatus
-import io.bosonnetwork.photon.app.session.bannerLabel
+import io.bosonnetwork.photon.app.session.bannerLabelRes
 import io.bosonnetwork.photon.app.session.isBannerVisible
 
 /**
@@ -84,13 +86,17 @@ fun ConnectionBanner(
                 )
             }
             Text(
-                text = status.bannerLabel(),
+                text = status.message?.takeIf { failed }
+                    ?: status.bannerLabelRes()?.let { stringResource(it) }
+                    ?: "",
                 color = foreground,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f),
             )
             if (failed) {
-                TextButton(onClick = onRetry) { Text("Retry", color = foreground) }
+                TextButton(onClick = onRetry) {
+                    Text(stringResource(R.string.app_connection_banner_retry), color = foreground)
+                }
             }
         }
     }

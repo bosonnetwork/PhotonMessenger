@@ -22,6 +22,7 @@
 
 package io.bosonnetwork.photon.feature.chat
 
+import android.content.Context
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -32,6 +33,7 @@ import io.bosonnetwork.photon.core.model.InviteAction
 import io.bosonnetwork.photon.core.model.ProfileResolver
 import io.bosonnetwork.photon.core.model.shortId
 import io.bosonnetwork.photon.core.model.toDisplay
+import io.bosonnetwork.photon.feature.chat.R
 import io.bosonnetwork.photon.feature.chat.data.ChatRepository
 import io.bosonnetwork.photon.feature.chat.data.ForwardPayload
 import io.bosonnetwork.photon.feature.chat.data.ForwardPayloadStore
@@ -48,6 +50,7 @@ import io.bosonnetwork.photon.feature.chat.model.VOICE_MIME
 import io.bosonnetwork.photonmessaging.exceptions.MessageTimeoutException
 import io.bosonnetwork.photonmessaging.exceptions.NotConnectedException
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.io.InputStream
 import javax.inject.Inject
@@ -114,6 +117,7 @@ class ChatViewModel @Inject constructor(
     private val voiceRecorder: VoiceRecorder,
     private val voicePlayer: VoicePlayer,
     private val channelInviteStore: ChannelInviteStore,
+    @ApplicationContext private val context: Context,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -251,7 +255,10 @@ class ChatViewModel @Inject constructor(
                     if (page.size < ChatRepository.PAGE_SIZE) reachedStart = true
                     olderMessages.update { it + page }
                 }
-                .onFailure { e -> _messages.tryEmit("Couldn't load older messages: ${e.message ?: "unknown error"}") }
+                .onFailure { e ->
+                    val reason = e.message ?: context.getString(R.string.chat_error_unknown)
+                    _messages.tryEmit(context.getString(R.string.chat_error_load_older, reason))
+                }
             _loadingOlder.value = false
         }
     }
@@ -303,10 +310,10 @@ class ChatViewModel @Inject constructor(
      * is reported as a not-connected state and every other cause collapses to a generic prompt. The
      * caller pairs this with a Retry affordance (the snackbar action, or the FAILED bubble's tap).
      */
-    private fun sendErrorMessage(e: Throwable, what: String = "message"): String = when {
-        e.isNotConnected() -> "Not connected. Your $what wasn't sent - retry once you're back online."
-        e is MessageTimeoutException -> "Your $what timed out."
-        else -> "Couldn't send your $what."
+    private fun sendErrorMessage(e: Throwable, what: String = context.getString(R.string.chat_noun_message)): String = when {
+        e.isNotConnected() -> context.getString(R.string.chat_error_not_connected_send, what)
+        e is MessageTimeoutException -> context.getString(R.string.chat_error_send_timeout, what)
+        else -> context.getString(R.string.chat_error_send_failed, what)
     }
 
     // A transient "the client isn't connected right now" failure: the transport dropped and a
@@ -329,7 +336,8 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             repository.removeMessage(rid).onFailure { e ->
                 removedIds.update { it - message.id }
-                _messages.tryEmit("Couldn't delete message: ${e.message ?: "unknown error"}")
+                val reason = e.message ?: context.getString(R.string.chat_error_unknown)
+                _messages.tryEmit(context.getString(R.string.chat_error_delete_message, reason))
             }
         }
     }
@@ -353,7 +361,10 @@ class ChatViewModel @Inject constructor(
                     )
                     _joinedChannel.tryEmit(it)
                 }
-                .onFailure { e -> _messages.tryEmit("Couldn't join channel: ${e.message ?: "unknown error"}") }
+                .onFailure { e ->
+                    val reason = e.message ?: context.getString(R.string.chat_error_unknown)
+                    _messages.tryEmit(context.getString(R.string.chat_error_join_channel, reason))
+                }
         }
     }
 
@@ -408,7 +419,7 @@ class ChatViewModel @Inject constructor(
                     pending.update { list ->
                         list.map { if (it.id == pendingId) it.copy(status = MessageStatus.FAILED) else it }
                     }
-                    _messages.tryEmit(sendErrorMessage(e, "attachment"))
+                    _messages.tryEmit(sendErrorMessage(e, context.getString(R.string.chat_noun_attachment)))
                 }
         }
     }
@@ -427,7 +438,7 @@ class ChatViewModel @Inject constructor(
         val started = runCatching { voiceRecorder.start() }.isSuccess
         if (!started) {
             voiceRecorder.onMaxDuration = null
-            _messages.tryEmit("Couldn't start recording")
+            _messages.tryEmit(context.getString(R.string.chat_error_start_recording))
             return
         }
         recordingStartedAt = System.currentTimeMillis()
@@ -460,7 +471,7 @@ class ChatViewModel @Inject constructor(
             val rec = voiceRecorder.stop()
             if (rec == null) {
                 _recording.value = RecordingState.Idle
-                _messages.tryEmit("Recording failed")
+                _messages.tryEmit(context.getString(R.string.chat_error_recording_failed))
                 return@launch
             }
             recordedReady = rec
@@ -536,7 +547,7 @@ class ChatViewModel @Inject constructor(
                     pending.update { list ->
                         list.map { if (it.id == pendingId) it.copy(status = MessageStatus.FAILED) else it }
                     }
-                    _messages.tryEmit(sendErrorMessage(e, "voice message"))
+                    _messages.tryEmit(sendErrorMessage(e, context.getString(R.string.chat_noun_voice_message)))
                 }
         }
     }
@@ -549,7 +560,10 @@ class ChatViewModel @Inject constructor(
             else -> viewModelScope.launch {
                 repository.localFile(attachment)
                     .onSuccess { file -> voicePlayer.toggle(message.id, file) }
-                    .onFailure { e -> _messages.tryEmit("Couldn't play: ${e.message ?: "unavailable"}") }
+                    .onFailure { e ->
+                        val reason = e.message ?: context.getString(R.string.chat_error_unavailable)
+                        _messages.tryEmit(context.getString(R.string.chat_error_play, reason))
+                    }
             }
         }
     }
@@ -577,7 +591,8 @@ class ChatViewModel @Inject constructor(
                 is AttachmentSource.Inline -> ({ src.bytes.inputStream() })
                 is AttachmentSource.Remote -> {
                     val file = repository.downloadAttachment(attachment).getOrElse { e ->
-                        _messages.tryEmit("Couldn't save: ${e.message ?: "download failed"}")
+                        val reason = e.message ?: context.getString(R.string.chat_error_download_failed)
+                        _messages.tryEmit(context.getString(R.string.chat_error_save, reason))
                         return@launch
                     }
                     ({ file.inputStream() })
@@ -585,8 +600,11 @@ class ChatViewModel @Inject constructor(
                 is AttachmentSource.Local -> return@launch
             }
             mediaSaver.save(attachment.name, attachment.mime, attachment.kind, open)
-                .onSuccess { label -> _messages.tryEmit("Saved to $label") }
-                .onFailure { e -> _messages.tryEmit("Couldn't save: ${e.message ?: "unknown error"}") }
+                .onSuccess { label -> _messages.tryEmit(context.getString(R.string.chat_saved_to, label)) }
+                .onFailure { e ->
+                    val reason = e.message ?: context.getString(R.string.chat_error_unknown)
+                    _messages.tryEmit(context.getString(R.string.chat_error_save, reason))
+                }
         }
     }
 
@@ -597,7 +615,10 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             repository.localFile(attachment)
                 .onSuccess { file -> _openFile.tryEmit(AttachmentOpen(file, attachment.mime)) }
-                .onFailure { e -> _messages.tryEmit("Couldn't open: ${e.message ?: "download failed"}") }
+                .onFailure { e ->
+                    val reason = e.message ?: context.getString(R.string.chat_error_download_failed)
+                    _messages.tryEmit(context.getString(R.string.chat_error_open, reason))
+                }
         }
     }
 
@@ -608,7 +629,10 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             repository.localFile(attachment)
                 .onSuccess { file -> _shareFile.tryEmit(AttachmentOpen(file, attachment.mime)) }
-                .onFailure { e -> _messages.tryEmit("Couldn't share: ${e.message ?: "unknown error"}") }
+                .onFailure { e ->
+                    val reason = e.message ?: context.getString(R.string.chat_error_unknown)
+                    _messages.tryEmit(context.getString(R.string.chat_error_share, reason))
+                }
         }
     }
 
@@ -625,7 +649,8 @@ class ChatViewModel @Inject constructor(
             repository.downloadAttachment(attachment)
                 .onSuccess { file -> _downloads.update { it + (key to AttachmentDownload.Ready(file)) } }
                 .onFailure { e ->
-                    _downloads.update { it + (key to AttachmentDownload.Failed(e.message ?: "Download failed")) }
+                    val reason = e.message ?: context.getString(R.string.chat_error_download_failed)
+                    _downloads.update { it + (key to AttachmentDownload.Failed(reason)) }
                 }
         }
     }

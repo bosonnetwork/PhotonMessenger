@@ -59,10 +59,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import io.bosonnetwork.photon.feature.chat.R
 import io.bosonnetwork.photon.feature.chat.model.UiAttachment
 import kotlin.math.abs
 
@@ -162,27 +164,27 @@ fun ImageViewerDialog(
                     },
                     navigationIcon = {
                         IconButton(onClick = onDismiss, colors = iconColors) {
-                            Icon(Icons.Filled.Close, contentDescription = "Close")
+                            Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.chat_cd_close))
                         }
                     },
                     actions = {
                         Box {
                             IconButton(onClick = { menuOpen = true }, colors = iconColors) {
-                                Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                                Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.chat_cd_more))
                             }
                             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                                 DropdownMenuItem(
-                                    text = { Text("Save") },
+                                    text = { Text(stringResource(R.string.chat_action_save)) },
                                     leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
                                     onClick = { menuOpen = false; onSaveAs() },
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("Share") },
+                                    text = { Text(stringResource(R.string.chat_action_share)) },
                                     leadingIcon = { Icon(Icons.Filled.Share, contentDescription = null) },
                                     onClick = { menuOpen = false; onShare() },
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("Forward") },
+                                    text = { Text(stringResource(R.string.chat_action_forward)) },
                                     leadingIcon = { Icon(Icons.AutoMirrored.Filled.Forward, contentDescription = null) },
                                     onClick = { menuOpen = false; onForward() },
                                 )

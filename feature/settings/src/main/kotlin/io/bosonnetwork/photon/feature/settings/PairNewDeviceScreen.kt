@@ -45,10 +45,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.bosonnetwork.photon.feature.settings.R
 
 /**
  * "Add this device" - shows a pairing QR for a trusted device to scan, then waits for it to relay the
@@ -66,10 +68,13 @@ fun PairNewDeviceScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Add this device") },
+                title = { Text(stringResource(R.string.settings_add_device_action)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.settings_back_content_description),
+                        )
                     }
                 },
             )
@@ -82,11 +87,11 @@ fun PairNewDeviceScreen(
         ) {
             when (val s = state) {
                 is PairNewDeviceUiState.Preparing ->
-                    LoadingState(label = "Preparing pairing code...")
+                    LoadingState(label = stringResource(R.string.settings_pair_preparing))
 
                 is PairNewDeviceUiState.WaitingForApproval -> {
                     Text(
-                        "Scan this code from a device that is already signed in",
+                        stringResource(R.string.settings_pair_scan_hint),
                         style = MaterialTheme.typography.titleMedium,
                         textAlign = TextAlign.Center,
                     )
@@ -94,12 +99,12 @@ fun PairNewDeviceScreen(
                     if (qr != null) {
                         Image(
                             bitmap = qr,
-                            contentDescription = "Pairing QR code",
+                            contentDescription = stringResource(R.string.settings_pair_qr_content_description),
                             modifier = Modifier.padding(top = 24.dp).size(280.dp),
                         )
                     }
                     Text(
-                        "Waiting for approval...",
+                        stringResource(R.string.settings_pair_waiting),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(top = 24.dp),
                     )
@@ -108,12 +113,12 @@ fun PairNewDeviceScreen(
 
                 is PairNewDeviceUiState.Paired -> {
                     Text(
-                        "This device is now paired",
+                        stringResource(R.string.settings_pair_success),
                         style = MaterialTheme.typography.titleMedium,
                         textAlign = TextAlign.Center,
                     )
                     Button(onClick = onPaired, modifier = Modifier.padding(top = 24.dp)) {
-                        Text("Continue")
+                        Text(stringResource(R.string.settings_continue_action))
                     }
                 }
 
@@ -124,7 +129,7 @@ fun PairNewDeviceScreen(
                         textAlign = TextAlign.Center,
                     )
                     Button(onClick = { viewModel.start() }, modifier = Modifier.padding(top = 24.dp)) {
-                        Text("Try again")
+                        Text(stringResource(R.string.settings_try_again_action))
                     }
                 }
             }

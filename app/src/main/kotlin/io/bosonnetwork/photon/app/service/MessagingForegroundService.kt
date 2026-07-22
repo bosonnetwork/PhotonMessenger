@@ -29,6 +29,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.ServiceCompat
+import io.bosonnetwork.photon.app.R
 import io.bosonnetwork.photon.app.notification.LocalNotificationGateway
 import io.bosonnetwork.photon.app.notification.NotificationGateway
 import io.bosonnetwork.photon.core.boson.BosonSessionManager
@@ -62,7 +63,8 @@ class MessagingForegroundService : Service() {
         // service is only ever started once a messaging session is actually live (see
         // SessionController), so it is never started-then-immediately-stopped on a failing bring-up -
         // which is what previously raced into ForegroundServiceDidNotStartInTimeException.
-        val notification = notificationGateway.foregroundNotification("Connected")
+        val notification =
+            notificationGateway.foregroundNotification(getString(R.string.app_notif_foreground_content_text))
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ServiceCompat.startForeground(
                 this,

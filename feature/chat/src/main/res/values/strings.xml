@@ -1,0 +1,129 @@
+<resources>
+    <!-- ChatScreen: permissions / file-open snackbars -->
+    <string name="chat_storage_permission_needed">Storage permission is needed to save</string>
+    <string name="chat_mic_permission_needed">Microphone permission is needed to record voice messages</string>
+    <string name="chat_no_app_to_open_file">No app can open this file</string>
+
+    <!-- ChatScreen: common actions -->
+    <string name="chat_action_retry">Retry</string>
+    <string name="chat_action_delete">Delete</string>
+    <string name="chat_action_copy">Copy</string>
+    <string name="chat_action_save">Save</string>
+    <string name="chat_action_forward">Forward</string>
+    <string name="chat_action_open">Open</string>
+    <string name="chat_action_join">Join</string>
+    <string name="chat_action_ignore">Ignore</string>
+    <string name="chat_action_share">Share</string>
+
+    <!-- ChatScreen: content descriptions -->
+    <string name="chat_cd_back">Back</string>
+    <string name="chat_cd_scroll_to_newest">Scroll to newest</string>
+    <string name="chat_cd_attach">Attach</string>
+    <string name="chat_cd_delete_recording">Delete recording</string>
+    <string name="chat_cd_send_voice_message">Send voice message</string>
+    <string name="chat_cd_send">Send</string>
+    <string name="chat_cd_record_voice_message">Record voice message</string>
+    <string name="chat_cd_recording_locked">Recording locked</string>
+    <string name="chat_cd_close">Close</string>
+    <string name="chat_cd_more">More</string>
+    <string name="chat_cd_channel">Channel</string>
+
+    <!-- ChatScreen: delete-message dialog -->
+    <string name="chat_delete_message_title">Delete message?</string>
+    <string name="chat_delete_message_text">This removes the message from this device only.</string>
+    <string name="chat_not_delivered_tap_retry">Not delivered. Tap to retry</string>
+
+    <!-- ChatScreen: channel-invite bubble -->
+    <string name="chat_invite_label">Channel invitation</string>
+    <string name="chat_channel_fallback_name">Channel</string>
+    <string name="chat_invite_status_sent">Invitation sent</string>
+    <string name="chat_invite_status_joined">Joined</string>
+    <string name="chat_invite_status_expired">Invitation expired</string>
+    <string name="chat_invite_status_dismissed">Invitation dismissed</string>
+
+    <!-- ChatScreen: message delivery status -->
+    <string name="chat_status_sending">Sending</string>
+    <string name="chat_status_sent">Sent</string>
+    <string name="chat_status_failed">Failed</string>
+
+    <!-- ChatScreen: voice / file attachment bubbles -->
+    <string name="chat_a11y_voice_playing">Voice message, %1$s, playing, tap to pause</string>
+    <string name="chat_a11y_voice_paused">Voice message, %1$s, tap to play</string>
+    <string name="chat_status_sending_ellipsis">Sending...</string>
+    <string name="chat_status_downloading_ellipsis">Downloading...</string>
+    <string name="chat_tap_to_retry">Tap to retry</string>
+
+    <!-- ChatScreen: composer -->
+    <string name="chat_composer_placeholder">Message</string>
+    <string name="chat_slide_to_cancel">Slide to cancel</string>
+    <string name="chat_hold_to_record_hint">Hold to record, release to send</string>
+
+    <!-- ConversationsScreen -->
+    <string name="chat_conversations_title">Chats</string>
+    <string name="chat_new_chat">New chat</string>
+    <string name="chat_search_placeholder">Search</string>
+    <string name="chat_no_conversations_match">No conversations match \"%1$s\"</string>
+    <string name="chat_no_conversations_yet">No conversations yet.\nStart one from your contacts.</string>
+    <string name="chat_delete_conversation_title">Delete conversation?</string>
+    <string name="chat_delete_conversation_text">This removes the message history for \"%1$s\" from your account. The %2$s is not removed.</string>
+    <string name="chat_channel_word">channel</string>
+    <string name="chat_contact_word">contact</string>
+    <string name="chat_no_messages_yet">No messages yet</string>
+    <string name="chat_delete_conversation_action">Delete conversation</string>
+
+    <!-- ForwardScreen -->
+    <string name="chat_no_chats_match">No chats match \"%1$s\"</string>
+    <string name="chat_no_contacts_to_forward">No contacts to forward to yet.</string>
+    <string name="chat_section_recent_chats">Recent chats</string>
+    <string name="chat_section_contacts">Contacts</string>
+    <string name="chat_forward_to_title">Forward to</string>
+
+    <!-- ViewModel-surfaced errors / status (ChatViewModel, ConversationsViewModel, ForwardViewModel) -->
+    <string name="chat_error_unknown">unknown error</string>
+    <string name="chat_error_unavailable">unavailable</string>
+    <string name="chat_error_download_failed">download failed</string>
+    <string name="chat_error_load_older">Couldn\'t load older messages: %1$s</string>
+    <string name="chat_error_delete_message">Couldn\'t delete message: %1$s</string>
+    <string name="chat_error_join_channel">Couldn\'t join channel: %1$s</string>
+    <string name="chat_error_play">Couldn\'t play: %1$s</string>
+    <string name="chat_error_save">Couldn\'t save: %1$s</string>
+    <string name="chat_error_open">Couldn\'t open: %1$s</string>
+    <string name="chat_error_share">Couldn\'t share: %1$s</string>
+    <string name="chat_saved_to">Saved to %1$s</string>
+    <string name="chat_error_start_recording">Couldn\'t start recording</string>
+    <string name="chat_error_recording_failed">Recording failed</string>
+    <string name="chat_error_not_connected_send">Not connected. Your %1$s wasn\'t sent - retry once you\'re back online.</string>
+    <string name="chat_error_send_timeout">Your %1$s timed out.</string>
+    <string name="chat_error_send_failed">Couldn\'t send your %1$s.</string>
+    <string name="chat_noun_message">message</string>
+    <string name="chat_noun_attachment">attachment</string>
+    <string name="chat_noun_voice_message">voice message</string>
+    <string name="chat_error_delete_conversation">Couldn\'t delete conversation: %1$s</string>
+    <string name="chat_error_load_contacts">Couldn\'t load contacts: %1$s</string>
+    <string name="chat_error_forward">Couldn\'t forward: %1$s</string>
+    <string name="chat_forward_label_attachment_fallback">attachment</string>
+
+    <!-- Repository / MediaSaver-surfaced errors (shown via e.message in the ViewModel snackbars above) -->
+    <string name="chat_error_not_connected_messaging">Not connected to the messaging service</string>
+    <string name="chat_error_not_connected_storage">Not connected to the storage service</string>
+    <string name="chat_error_invalid_invite_ticket">Invalid invite ticket</string>
+    <string name="chat_error_attachment_still_sending">Attachment is still sending</string>
+    <string name="chat_error_malformed_content_id">Malformed content id</string>
+    <string name="chat_error_content_id_mismatch">Attachment content id mismatch</string>
+    <string name="chat_error_attachment_unavailable">Attachment is no longer available</string>
+    <string name="chat_error_create_destination_file">Couldn\'t create the destination file</string>
+    <string name="chat_error_open_destination_file">Couldn\'t open the destination file</string>
+    <string name="chat_folder_pictures">Pictures</string>
+    <string name="chat_folder_downloads">Downloads</string>
+
+    <!-- MediaPreparer-surfaced errors -->
+    <string name="chat_error_cannot_open_image">Cannot open image</string>
+    <string name="chat_error_unsupported_or_corrupt_image">Unsupported or corrupt image</string>
+    <string name="chat_error_cannot_open_file">Cannot open file</string>
+    <string name="chat_error_file_too_large">File too large (max %1$d MB)</string>
+
+    <plurals name="chat_channel_member_count">
+        <item quantity="one">%1$d member</item>
+        <item quantity="other">%1$d members</item>
+    </plurals>
+</resources>

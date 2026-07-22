@@ -55,28 +55,28 @@ class LocalNotificationGateway(
     override fun ensureChannels() {
         val service = NotificationChannel(
             CHANNEL_SERVICE,
-            "Connection",
+            context.getString(R.string.app_notif_channel_service_name),
             NotificationManager.IMPORTANCE_LOW,
-        ).apply { description = "Keeps Photon connected for new messages" }
+        ).apply { description = context.getString(R.string.app_notif_channel_service_description) }
 
         // IMPORTANCE_HIGH gives the system defaults the request asks for - default sound, heads-up
         // (floating) banners, and lock-screen display - all still overridable per-channel by the user.
         // setShowBadge(true) opts the app icon into the launcher badge.
         val messages = NotificationChannel(
             CHANNEL_MESSAGES,
-            "Messages",
+            context.getString(R.string.app_notif_channel_messages_name),
             NotificationManager.IMPORTANCE_HIGH,
         ).apply {
-            description = "New message notifications"
+            description = context.getString(R.string.app_notif_channel_messages_description)
             setShowBadge(true)
         }
 
         val requests = NotificationChannel(
             CHANNEL_REQUESTS,
-            "Friend requests",
+            context.getString(R.string.app_notif_channel_requests_name),
             NotificationManager.IMPORTANCE_HIGH,
         ).apply {
-            description = "New friend request notifications"
+            description = context.getString(R.string.app_notif_channel_requests_description)
             setShowBadge(true)
         }
 
@@ -88,7 +88,7 @@ class LocalNotificationGateway(
     override fun foregroundNotification(contentText: String): Notification =
         NotificationCompat.Builder(context, CHANNEL_SERVICE)
             .setSmallIcon(R.drawable.ic_launcher)
-            .setContentTitle("Photon")
+            .setContentTitle(context.getString(R.string.app_name))
             .setContentText(contentText)
             .setOngoing(true)
             .setContentIntent(openAppIntent())
@@ -100,8 +100,8 @@ class LocalNotificationGateway(
         if (!prefs.enabled) return
 
         // When previews are off, hide the sender and content behind a generic message.
-        val shownTitle = if (prefs.showPreview) title else "Photon"
-        val shownBody = if (prefs.showPreview) body else "You have a new message"
+        val shownTitle = if (prefs.showPreview) title else context.getString(R.string.app_name)
+        val shownBody = if (prefs.showPreview) body else context.getString(R.string.app_notif_generic_message_body)
 
         val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
             .setSmallIcon(R.drawable.ic_launcher)
@@ -121,8 +121,9 @@ class LocalNotificationGateway(
 
         // Mirror the message path's preview handling: with previews off, hide the sender behind a
         // generic prompt. Lock-screen visibility of the shown content stays a system-config concern.
-        val shownTitle = if (prefs.showPreview) title else "Photon"
-        val shownBody = if (prefs.showPreview) body else "You have a new friend request"
+        val shownTitle = if (prefs.showPreview) title else context.getString(R.string.app_name)
+        val shownBody = if (prefs.showPreview) body
+        else context.getString(R.string.app_notif_generic_friend_request_body)
 
         val notification = NotificationCompat.Builder(context, CHANNEL_REQUESTS)
             .setSmallIcon(R.drawable.ic_launcher)

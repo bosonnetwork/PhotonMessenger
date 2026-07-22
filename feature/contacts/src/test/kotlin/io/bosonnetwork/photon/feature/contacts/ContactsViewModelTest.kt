@@ -117,7 +117,7 @@ class ContactsViewModelTest {
             UiContact("c", "Team", isChannel = true, muted = false, blocked = false),
         )
         requestsFlow.value = listOf(UiFriendRequest("r", "hi"))
-        val vm = ContactsViewModel(FakeRepo(contactsFlow, requestsFlow), FakeChannelRepo(), FakeProfileResolver())
+        val vm = ContactsViewModel(FakeRepo(contactsFlow, requestsFlow), FakeChannelRepo(), FakeProfileResolver(), fakeContext())
 
         vm.uiState.test {
             // skip initial loading state, take the first loaded state
@@ -135,7 +135,7 @@ class ContactsViewModelTest {
     fun `friend requests are enriched with resolved profiles`() = runTest {
         requestsFlow.value = listOf(UiFriendRequest("USER-R", "hello there"))
         val resolver = FakeProfileResolver()
-        val vm = ContactsViewModel(FakeRepo(contactsFlow, requestsFlow), FakeChannelRepo(), resolver)
+        val vm = ContactsViewModel(FakeRepo(contactsFlow, requestsFlow), FakeChannelRepo(), resolver, fakeContext())
 
         vm.uiState.test {
             var state = awaitItem()
@@ -161,7 +161,7 @@ class ContactsViewModelTest {
     @Test
     fun `failed add emits a message`() = runTest {
         val repo = FakeRepo(contactsFlow, requestsFlow, sendResult = Result.failure(IllegalStateException("boom")))
-        val vm = ContactsViewModel(repo, FakeChannelRepo(), FakeProfileResolver())
+        val vm = ContactsViewModel(repo, FakeChannelRepo(), FakeProfileResolver(), fakeContext())
 
         vm.messages.test {
             vm.addFriend("bad-id", "hi")
@@ -174,7 +174,7 @@ class ContactsViewModelTest {
     @Test
     fun `setRemark forwards the alias to the repository`() = runTest {
         val repo = FakeRepo(contactsFlow, requestsFlow)
-        val vm = ContactsViewModel(repo, FakeChannelRepo(), FakeProfileResolver())
+        val vm = ContactsViewModel(repo, FakeChannelRepo(), FakeProfileResolver(), fakeContext())
 
         vm.setRemark("a", "Ali")
         assertEquals("a" to "Ali", repo.remarkArgs)
@@ -186,6 +186,7 @@ class ContactsViewModelTest {
             FakeRepo(contactsFlow, requestsFlow),
             FakeChannelRepo(joinResult = Result.success("CHAN9")),
             FakeProfileResolver(),
+            fakeContext(),
         )
         vm.joinedChannel.test {
             vm.joinChannel(" ticket-json ")
@@ -200,6 +201,7 @@ class ContactsViewModelTest {
             FakeRepo(contactsFlow, requestsFlow),
             FakeChannelRepo(joinResult = Result.failure(IllegalStateException("bad ticket"))),
             FakeProfileResolver(),
+            fakeContext(),
         )
         vm.messages.test {
             vm.joinChannel("nope")
@@ -221,6 +223,7 @@ class ContactsViewModelTest {
             channelRepo,
             FakeProfileResolver(),
             SavedStateHandle(mapOf("channelId" to "CHAN1")),
+            fakeContext(),
         )
 
         vm.uiState.test {

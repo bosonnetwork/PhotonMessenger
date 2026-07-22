@@ -56,6 +56,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,6 +67,7 @@ import io.bosonnetwork.photon.core.designsystem.component.ErrorState
 import io.bosonnetwork.photon.core.designsystem.component.LoadingState
 import io.bosonnetwork.photon.core.designsystem.component.PhotonAvatar
 import io.bosonnetwork.photon.core.designsystem.component.ResponsiveContent
+import io.bosonnetwork.photon.feature.chat.R
 import io.bosonnetwork.photon.feature.chat.model.UiForwardTarget
 
 /** Destination picker for forwarding a message (screen: Forward to...). */
@@ -91,7 +93,7 @@ fun ForwardScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("Forward to")
+                        Text(stringResource(R.string.chat_forward_to_title))
                         val label = viewModel.forwardingLabel
                         if (label.isNotBlank()) {
                             Text(
@@ -106,7 +108,7 @@ fun ForwardScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.Close, contentDescription = "Close")
+                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.chat_cd_close))
                     }
                 },
                 scrollBehavior = topBarScroll,
@@ -123,22 +125,22 @@ fun ForwardScreen(
                     singleLine = true,
                     shape = RoundedCornerShape(24.dp),
                     leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                    placeholder = { Text("Search") },
+                    placeholder = { Text(stringResource(R.string.chat_search_placeholder)) },
                 )
                 when {
                     state.loading -> LoadingState()
                     state.error != null -> ErrorState(state.error!!)
-                    state.filteredEmpty -> EmptyState("No chats match \"${query.trim()}\"")
-                    state.isEmpty -> EmptyState("No contacts to forward to yet.")
+                    state.filteredEmpty -> EmptyState(stringResource(R.string.chat_no_chats_match, query.trim()))
+                    state.isEmpty -> EmptyState(stringResource(R.string.chat_no_contacts_to_forward))
                     else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
                         if (state.recent.isNotEmpty()) {
-                            item(key = "header-recent") { SectionHeader("Recent chats") }
+                            item(key = "header-recent") { SectionHeader(stringResource(R.string.chat_section_recent_chats)) }
                             items(state.recent, key = { "recent-${it.id}" }) { target ->
                                 ForwardTargetRow(target = target, onClick = { viewModel.forward(target.id) })
                             }
                         }
                         if (state.others.isNotEmpty()) {
-                            item(key = "header-contacts") { SectionHeader("Contacts") }
+                            item(key = "header-contacts") { SectionHeader(stringResource(R.string.chat_section_contacts)) }
                             items(state.others, key = { "contact-${it.id}" }) { target ->
                                 ForwardTargetRow(target = target, onClick = { viewModel.forward(target.id) })
                             }
@@ -183,7 +185,7 @@ private fun ForwardTargetRow(
                 if (target.isChannel) {
                     Icon(
                         Icons.Outlined.Groups,
-                        contentDescription = "Channel",
+                        contentDescription = stringResource(R.string.chat_cd_channel),
                         modifier = Modifier.size(16.dp).padding(end = 2.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

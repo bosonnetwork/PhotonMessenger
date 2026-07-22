@@ -22,10 +22,13 @@
 
 package io.bosonnetwork.photon.feature.settings
 
+import android.content.Context
 import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.feature.settings.data.DevicePairingRepository
 import io.bosonnetwork.photon.feature.settings.data.PairingInvite
 import io.bosonnetwork.photon.feature.settings.data.PairingRequestInfo
+import io.mockk.every
+import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -38,6 +41,15 @@ import org.junit.Before
 import org.junit.Test
 
 class PairingViewModelsTest {
+
+    /**
+     * Relaxed: resolves the user-facing strings the ViewModels build via [Context.getString], whose
+     * exact text no test checks - except [R.string.settings_wrong_passphrase], pinned to its real text
+     * since a test asserts on it exactly.
+     */
+    private fun fakeContext(): Context = mockk(relaxed = true) {
+        every { getString(R.string.settings_wrong_passphrase) } returns "Wrong passphrase"
+    }
 
     private class FakePairingRepo(
         var invite: Result<PairingInvite> = Result.success(PairingInvite("reg1", "pmpair:1:reg1:AAAA")),
@@ -71,7 +83,7 @@ class PairingViewModelsTest {
 
     @Test
     fun `new device shows QR then reaches paired on approval`() {
-        val vm = PairNewDeviceViewModel(FakePairingRepo())
+        val vm = PairNewDeviceViewModel(FakePairingRepo(), fakeContext())
         // With an unconfined dispatcher the init chain runs to completion synchronously.
         val state = vm.uiState.value
         assertTrue(state is PairNewDeviceUiState.Paired)
@@ -81,7 +93,7 @@ class PairingViewModelsTest {
     @Test
     fun `new device surfaces a registration failure`() {
         val repo = FakePairingRepo(invite = Result.failure(IllegalStateException("offline")))
-        val vm = PairNewDeviceViewModel(repo)
+        val vm = PairNewDeviceViewModel(repo, fakeContext())
         val state = vm.uiState.value
         assertTrue(state is PairNewDeviceUiState.Failed)
         assertEquals("offline", (state as PairNewDeviceUiState.Failed).message)
@@ -90,14 +102,14 @@ class PairingViewModelsTest {
     @Test
     fun `new device surfaces an approval failure`() {
         val repo = FakePairingRepo(approval = Result.failure(IllegalStateException("denied by user")))
-        val vm = PairNewDeviceViewModel(repo)
+        val vm = PairNewDeviceViewModel(repo, fakeContext())
         val state = vm.uiState.value
         assertTrue(state is PairNewDeviceUiState.Failed)
     }
 
     @Test
     fun `approver scans then confirms request details`() {
-        val vm = ApproveDeviceViewModel(FakePairingRepo())
+        val vm = ApproveDeviceViewModel(FakePairingRepo(), fakeContext())
         vm.onScanned("pmpair:1:reg1:AAAA")
         val state = vm.uiState.value
         assertTrue(state is ApproveDeviceUiState.Confirm)
@@ -107,7 +119,7 @@ class PairingViewModelsTest {
     @Test
     fun `approver approves and reaches done`() {
         val repo = FakePairingRepo()
-        val vm = ApproveDeviceViewModel(repo)
+        val vm = ApproveDeviceViewModel(repo, fakeContext())
         vm.onScanned("pmpair:1:reg1:AAAA")
         vm.approve()
         val state = vm.uiState.value
@@ -119,7 +131,7 @@ class PairingViewModelsTest {
     @Test
     fun `approver is prompted for a passphrase when the account is protected`() {
         val repo = FakePairingRepo(approveResult = Result.failure(AppError.PassphraseRequired("Passphrase required")))
-        val vm = ApproveDeviceViewModel(repo)
+        val vm = ApproveDeviceViewModel(repo, fakeContext())
         vm.onScanned("pmpair:1:reg1:AAAA")
         vm.approve()
         val state = vm.uiState.value
@@ -130,7 +142,7 @@ class PairingViewModelsTest {
     @Test
     fun `approver retries approval with the supplied passphrase`() {
         val repo = FakePairingRepo()
-        val vm = ApproveDeviceViewModel(repo)
+        val vm = ApproveDeviceViewModel(repo, fakeContext())
         vm.onScanned("pmpair:1:reg1:AAAA")
         vm.approve("secret")
         assertTrue(vm.uiState.value is ApproveDeviceUiState.Done)
@@ -140,7 +152,7 @@ class PairingViewModelsTest {
     @Test
     fun `wrong passphrase keeps the approver on the confirm step with an error`() {
         val repo = FakePairingRepo(approveResult = Result.failure(AppError.Forbidden("Wrong passphrase")))
-        val vm = ApproveDeviceViewModel(repo)
+        val vm = ApproveDeviceViewModel(repo, fakeContext())
         vm.onScanned("pmpair:1:reg1:AAAA")
         vm.approve("wrong")
         val state = vm.uiState.value
@@ -151,7 +163,7 @@ class PairingViewModelsTest {
     @Test
     fun `approver denies and reaches done not approved`() {
         val repo = FakePairingRepo()
-        val vm = ApproveDeviceViewModel(repo)
+        val vm = ApproveDeviceViewModel(repo, fakeContext())
         vm.onScanned("pmpair:1:reg1:AAAA")
         vm.deny()
         val state = vm.uiState.value
@@ -163,7 +175,7 @@ class PairingViewModelsTest {
     @Test
     fun `second scan is ignored while loading`() {
         val repo = FakePairingRepo(request = Result.failure(IllegalStateException("bad code")))
-        val vm = ApproveDeviceViewModel(repo)
+        val vm = ApproveDeviceViewModel(repo, fakeContext())
         vm.onScanned("pmpair:1:reg1:AAAA")
         // Now in Failed; a stray scan should not start a new load until rescan().
         assertTrue(vm.uiState.value is ApproveDeviceUiState.Failed)

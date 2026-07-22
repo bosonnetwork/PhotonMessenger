@@ -47,6 +47,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -76,10 +77,13 @@ fun CreateChannelScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("New channel") },
+                title = { Text(stringResource(R.string.contacts_new_channel_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.contacts_cd_back),
+                        )
                     }
                 },
             )
@@ -96,18 +100,21 @@ fun CreateChannelScreen(
             OutlinedTextField(
                 value = state.name,
                 onValueChange = viewModel::setName,
-                label = { Text("Name") },
+                label = { Text(stringResource(R.string.contacts_label_name)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
                 value = state.notice,
                 onValueChange = viewModel::setNotice,
-                label = { Text("Notice (optional)") },
+                label = { Text(stringResource(R.string.contacts_label_notice_optional)) },
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            Text("Who can join", style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
+            Text(
+                stringResource(R.string.contacts_who_can_join),
+                style = androidx.compose.material3.MaterialTheme.typography.titleSmall,
+            )
             UiChannelPermission.entries.forEach { permission ->
                 Row(
                     modifier = Modifier
@@ -123,7 +130,7 @@ fun CreateChannelScreen(
                         selected = state.permission == permission,
                         onClick = { viewModel.setPermission(permission) },
                     )
-                    Text(permission.label, modifier = Modifier.padding(start = 8.dp))
+                    Text(permission.label(), modifier = Modifier.padding(start = 8.dp))
                 }
             }
 
@@ -133,9 +140,9 @@ fun CreateChannelScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                    Text("Announce channel publicly")
+                    Text(stringResource(R.string.contacts_announce_publicly))
                     Text(
-                        "Publish the channel profile to the network so others can discover and join it.",
+                        stringResource(R.string.contacts_announce_publicly_description),
                         style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                         color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -148,16 +155,21 @@ fun CreateChannelScreen(
                 enabled = state.canSubmit,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(if (state.submitting) "Creating..." else "Create channel", textAlign = TextAlign.Center)
+                Text(
+                    stringResource(
+                        if (state.submitting) R.string.contacts_action_creating else R.string.contacts_action_create_channel,
+                    ),
+                    textAlign = TextAlign.Center,
+                )
             }
         }
     }
 }
 
-private val UiChannelPermission.label: String
-    get() = when (this) {
-        UiChannelPermission.PUBLIC -> "Anyone (public)"
-        UiChannelPermission.MEMBER_INVITE -> "Members can invite"
-        UiChannelPermission.MODERATOR_INVITE -> "Moderators can invite"
-        UiChannelPermission.OWNER_INVITE -> "Only the owner can invite"
-    }
+@Composable
+private fun UiChannelPermission.label(): String = when (this) {
+    UiChannelPermission.PUBLIC -> stringResource(R.string.contacts_create_permission_public)
+    UiChannelPermission.MEMBER_INVITE -> stringResource(R.string.contacts_permission_member_invite)
+    UiChannelPermission.MODERATOR_INVITE -> stringResource(R.string.contacts_permission_moderator_invite)
+    UiChannelPermission.OWNER_INVITE -> stringResource(R.string.contacts_create_permission_owner_invite)
+}

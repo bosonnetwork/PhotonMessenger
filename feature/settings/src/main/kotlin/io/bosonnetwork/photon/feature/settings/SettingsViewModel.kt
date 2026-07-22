@@ -22,11 +22,15 @@
 
 package io.bosonnetwork.photon.feature.settings
 
+import android.content.Context
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.bosonnetwork.photon.core.model.NotificationPreferences
 import io.bosonnetwork.photon.core.model.ThemeMode
 import io.bosonnetwork.photon.core.model.ThemePreferences
+import io.bosonnetwork.photon.feature.settings.R
 import io.bosonnetwork.photon.feature.settings.data.SettingsRepository
 import io.bosonnetwork.photon.feature.settings.model.UiProfile
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -50,6 +54,7 @@ data class SettingsUiState(
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val repository: SettingsRepository,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -96,7 +101,9 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(savingProfile = true)
             repository.updateProfile(name = name, bio = bio, email = email, passphrase = passphrase)
-                .onFailure { _messages.tryEmit("Couldn't save profile: ${it.reason()}") }
+                .onFailure {
+                    _messages.tryEmit(context.getString(R.string.settings_profile_save_error, it.reason()))
+                }
             _uiState.value = _uiState.value.copy(savingProfile = false)
             refresh()
         }
@@ -108,10 +115,12 @@ class SettingsViewModel @Inject constructor(
             repository.setPassphrase(newPassphrase, currentPassphrase)
                 .onSuccess {
                     _passphraseUpdated.tryEmit(Unit)
-                    _messages.tryEmit("Passphrase saved")
+                    _messages.tryEmit(context.getString(R.string.settings_passphrase_saved_message))
                     refresh()
                 }
-                .onFailure { _messages.tryEmit("Couldn't set passphrase: ${it.reason()}") }
+                .onFailure {
+                    _messages.tryEmit(context.getString(R.string.settings_passphrase_set_error, it.reason()))
+                }
         }
     }
 
@@ -121,32 +130,36 @@ class SettingsViewModel @Inject constructor(
             repository.clearPassphrase(currentPassphrase)
                 .onSuccess {
                     _passphraseUpdated.tryEmit(Unit)
-                    _messages.tryEmit("Passphrase removed")
+                    _messages.tryEmit(context.getString(R.string.settings_passphrase_removed_message))
                     refresh()
                 }
-                .onFailure { _messages.tryEmit("Couldn't remove passphrase: ${it.reason()}") }
+                .onFailure {
+                    _messages.tryEmit(context.getString(R.string.settings_passphrase_remove_error, it.reason()))
+                }
         }
     }
 
-    fun updateAvatar(uriString: String) = run("Couldn't update photo") {
+    fun updateAvatar(uriString: String) = run(R.string.settings_photo_update_error) {
         repository.updateAvatar(uriString).also { if (it.isSuccess) refresh() }
     }
 
-    fun removeAvatar() = run("Couldn't remove photo") {
+    fun removeAvatar() = run(R.string.settings_photo_remove_error) {
         repository.removeAvatar().also { if (it.isSuccess) refresh() }
     }
 
-    fun setThemeMode(mode: ThemeMode) = run("Couldn't change theme") { repository.setThemeMode(mode) }
+    fun setThemeMode(mode: ThemeMode) = run(R.string.settings_theme_change_error) {
+        repository.setThemeMode(mode)
+    }
 
-    fun setDynamicColor(enabled: Boolean) = run("Couldn't change theme") {
+    fun setDynamicColor(enabled: Boolean) = run(R.string.settings_theme_change_error) {
         repository.setDynamicColor(enabled)
     }
 
-    fun setNotificationsEnabled(enabled: Boolean) = run("Couldn't update notifications") {
+    fun setNotificationsEnabled(enabled: Boolean) = run(R.string.settings_notifications_update_error) {
         repository.setNotificationsEnabled(enabled)
     }
 
-    fun setNotificationPreview(showPreview: Boolean) = run("Couldn't update notifications") {
+    fun setNotificationPreview(showPreview: Boolean) = run(R.string.settings_notifications_update_error) {
         repository.setNotificationPreview(showPreview)
     }
 
@@ -154,15 +167,17 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             repository.signOut()
                 .onSuccess { _signedOut.tryEmit(Unit) }
-                .onFailure { _messages.tryEmit("Couldn't sign out: ${it.reason()}") }
+                .onFailure { _messages.tryEmit(context.getString(R.string.settings_sign_out_error, it.reason())) }
         }
     }
 
-    private fun run(failurePrefix: String, action: suspend () -> Result<*>) {
+    private fun run(@StringRes failureMessageRes: Int, action: suspend () -> Result<*>) {
         viewModelScope.launch {
-            action().onFailure { _messages.tryEmit("$failurePrefix: ${it.reason()}") }
+            action().onFailure {
+                _messages.tryEmit(context.getString(failureMessageRes, it.reason()))
+            }
         }
     }
 
-    private fun Throwable.reason() = message ?: "unknown error"
+    private fun Throwable.reason() = message ?: context.getString(R.string.settings_unknown_error)
 }

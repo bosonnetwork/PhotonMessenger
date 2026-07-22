@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Accounts screen (account switcher) -->
+    <string name="app_accounts_title">账户</string>
+    <string name="app_accounts_back">返回</string>
+    <string name="app_accounts_not_signed_in">未登录</string>
+    <string name="app_accounts_active">当前</string>
+    <string name="app_accounts_remove_account_cd">移除账户</string>
+    <string name="app_accounts_add_account">添加账户</string>
+    <string name="app_accounts_switch_dialog_title">切换账户？</string>
+    <string name="app_accounts_switch_dialog_message">切换到 %1$s？应用将重启以打开此账户。</string>
+    <string name="app_accounts_switch">切换</string>
+    <string name="app_accounts_cancel">取消</string>
+    <string name="app_accounts_remove_dialog_title">移除账户？</string>
+    <string name="app_accounts_remove_dialog_message">这将删除 %1$s 及其在此设备上的所有本地数据（对话、联系人、设置和密钥）。如果其身份密钥未在其他位置备份，将无法再访问该身份。此操作无法撤销。</string>
+    <string name="app_accounts_remove">移除</string>
+    <string name="app_accounts_new_account">新账户</string>
+
+    <!-- Connection banner -->
+    <string name="app_connection_banner_retry">重试</string>
+
+    <!-- Session status banner text -->
+    <string name="app_session_status_connecting">连接中…</string>
+    <string name="app_session_status_securing_connection">正在建立安全连接…</string>
+    <string name="app_session_status_reconnecting">重新连接中…</string>
+    <string name="app_session_status_could_not_connect">无法连接</string>
+
+    <!-- Bottom navigation -->
+    <string name="app_nav_chats">聊天</string>
+    <string name="app_nav_contacts">联系人</string>
+    <string name="app_nav_settings">设置</string>
+
+    <!-- Home super node migration dialog -->
+    <string name="app_navhost_migration_dialog_title">迁移您的主超级节点？</string>
+    <string name="app_navhost_migration_dialog_message">您正在通过与此设备注册时不同的超级节点登录。要将主超级节点迁移到这里吗？您的对话、联系人和身份将保留在此设备上——只有消息服务提供方会更改。</string>
+    <string name="app_navhost_migration_move">迁移</string>
+    <string name="app_navhost_migration_not_now">暂不</string>
+
+    <!-- Notification channels (shown in system notification settings) -->
+    <string name="app_notif_channel_service_name">连接</string>
+    <string name="app_notif_channel_service_description">保持 Photon 连接以接收新消息</string>
+    <string name="app_notif_channel_messages_name">消息</string>
+    <string name="app_notif_channel_messages_description">新消息通知</string>
+    <string name="app_notif_channel_requests_name">好友请求</string>
+    <string name="app_notif_channel_requests_description">新好友请求通知</string>
+
+    <!-- Notification bodies shown when message previews are disabled -->
+    <string name="app_notif_generic_message_body">您有一条新消息</string>
+    <string name="app_notif_generic_friend_request_body">您有一条新好友请求</string>
+
+    <!-- Foreground service (ongoing connection) notification -->
+    <string name="app_notif_foreground_content_text">已连接</string>
+
+    <!-- Message notification preview text -->
+    <string name="app_notif_new_message">新消息</string>
+    <string name="app_notif_sent_attachment">发送了一个附件</string>
+
+    <!-- Friend request notification body -->
+    <string name="app_notif_friend_request_quoted">“%1$s”</string>
+    <string name="app_notif_friend_request_default_body">想与您建立联系</string>
+</resources>

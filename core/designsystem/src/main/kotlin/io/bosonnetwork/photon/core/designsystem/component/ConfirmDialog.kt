@@ -27,6 +27,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import io.bosonnetwork.photon.core.designsystem.R
 
 /**
  * Confirmation dialog for consequential actions. Destructive actions (remove, delete, ban, sign
@@ -54,6 +56,6 @@ fun ConfirmDialog(
                 )
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.ds_action_cancel)) } },
     )
 }

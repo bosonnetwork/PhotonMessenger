@@ -1,0 +1,77 @@
+<resources>
+    <string name="onb_welcome_title">Photon</string>
+    <string name="onb_welcome_tagline">基于 BosonNetwork 的联邦消息服务</string>
+
+    <string name="onb_server_step_title">连接到您的超级节点</string>
+    <string name="onb_server_url_label">服务器地址</string>
+    <string name="onb_server_url_placeholder">https://your-node:9000</string>
+    <string name="onb_server_id_label">服务器 ID(高级)</string>
+    <string name="onb_server_id_placeholder">Boson 节点 ID(用于自签名服务器)</string>
+    <string name="onb_server_id_supporting_text">信任自签名 HTTPS 服务器时必填;使用公共 CA 证书时留空。</string>
+    <string name="onb_advanced_options">高级选项</string>
+    <string name="onb_continue">继续</string>
+
+    <string name="onb_choose_identity_title">设置您的身份</string>
+    <string name="onb_choose_identity_desc_can_create">创建新的身份密钥,或从其他设备导入现有密钥。</string>
+    <string name="onb_choose_identity_desc_import_only">此设备需要您的身份密钥。请从已登录的设备导入。</string>
+    <string name="onb_create_new_identity">创建新身份</string>
+    <string name="onb_scan_qr_another_device">扫描其他设备上的二维码</string>
+    <string name="onb_enter_key_manually">手动输入密钥</string>
+
+    <string name="onb_enter_identity_key_title">输入您的身份密钥</string>
+    <string name="onb_paste_key_desc">粘贴来自其他设备的用户私钥(base58 或十六进制格式)。</string>
+    <string name="onb_private_key_label">私钥</string>
+    <string name="onb_import_identity">导入身份</string>
+    <string name="onb_back">返回</string>
+
+    <string name="onb_create_profile_title">创建您的资料</string>
+    <string name="onb_display_name_label">显示名称</string>
+    <string name="onb_bio_label">简介(可选)</string>
+    <string name="onb_passphrase_optional_label">口令(可选)</string>
+    <string name="onb_passphrase_optional_supporting">用于保护添加设备等敏感操作,您可以稍后在设置中进行设置。</string>
+    <string name="onb_create_account">创建账户</string>
+
+    <string name="onb_passphrase_title">输入您的账户口令</string>
+    <string name="onb_passphrase_desc">您的账户受口令保护。请输入口令以注册此设备。</string>
+    <string name="onb_passphrase_label">口令</string>
+    <string name="onb_register_device">注册此设备</string>
+
+    <string name="onb_solving_title">正在创建您的账户</string>
+    <string name="onb_solving_desc">正在此设备上运行一次性安全检查。此过程可能需要几秒钟,具体时长因运行而异。</string>
+    <string name="onb_cancel">取消</string>
+
+    <string name="onb_setup_account_title">设置您的账户</string>
+    <string name="onb_create_new_account">创建新账户</string>
+    <string name="onb_pow_no_signin_desc">无需登录,此设备将运行一次快速的一次性安全检查。</string>
+    <string name="onb_already_have_account">已有账户?</string>
+    <string name="onb_add_from_another_device">从其他设备添加</string>
+    <string name="onb_other_sign_in_ways">其他登录方式</string>
+    <string name="onb_continue_with_provider">使用 %1$s 继续</string>
+    <string name="onb_change_super_node">更改超级节点</string>
+
+    <string name="onb_backup_key_title">备份您的身份密钥</string>
+    <string name="onb_backup_key_desc">此密钥是您在 BosonNetwork 上的身份,是您在其他设备上访问和恢复账户的唯一方式,一旦丢失将无法找回。请在继续之前将其保存到安全、私密的地方。</string>
+    <string name="onb_identity_key_qr_cd">身份密钥二维码</string>
+    <string name="onb_copied">已复制</string>
+    <string name="onb_copy_key">复制密钥</string>
+    <string name="onb_saved_key_ack">我已将身份密钥保存到安全的地方。</string>
+
+    <string name="onb_scan_identity_qr_title">扫描身份二维码</string>
+    <string name="onb_camera_permission_needed">需要相机权限才能扫描二维码。</string>
+    <string name="onb_grant_camera_access">授予相机权限</string>
+
+    <!-- ViewModel / repository user-facing error and status messages -->
+    <string name="onb_error_secure_connection">无法建立安全连接。如果此服务器使用自签名证书,请在高级选项中输入其服务器 ID。</string>
+    <string name="onb_error_cant_reach_server">无法连接到该服务器</string>
+    <string name="onb_error_invalid_key">密钥无效</string>
+    <string name="onb_error_register_device_failed">无法注册此设备</string>
+    <string name="onb_error_create_account_failed">无法创建您的账户,请重试</string>
+
+    <string name="onb_error_invalid_server_id">服务器 ID 无效(应为 Boson 节点 ID)</string>
+    <string name="onb_error_pow_timeout">安全检查未能及时完成,请重试</string>
+    <string name="onb_error_registration_rejected">注册被拒绝,请重试</string>
+    <string name="onb_error_identity_taken">该身份已被占用,请重试</string>
+    <string name="onb_error_pow_verify_failed">无法验证安全检查,请重试</string>
+    <string name="onb_error_key_mismatch">此密钥与您的账户身份不匹配</string>
+    <string name="onb_error_no_user_identity">此设备上没有用户身份</string>
+</resources>

@@ -54,6 +54,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -90,7 +91,7 @@ fun InviteContactPickerScreen(
                 is InvitePickerEvent.Sent -> {
                     Toast.makeText(
                         context,
-                        "Invitation sent to ${event.contactName}",
+                        context.getString(R.string.contacts_invitation_sent, event.contactName),
                         Toast.LENGTH_SHORT,
                     ).show()
                     onInvited()
@@ -105,10 +106,10 @@ fun InviteContactPickerScreen(
         modifier = modifier.nestedScroll(topBarScroll.nestedScrollConnection),
         topBar = {
             TopAppBar(
-                title = { Text("Invite to channel") },
+                title = { Text(stringResource(R.string.contacts_invite_to_channel_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.Close, contentDescription = "Close")
+                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.contacts_cd_close))
                     }
                 },
                 scrollBehavior = topBarScroll,
@@ -125,15 +126,17 @@ fun InviteContactPickerScreen(
                     singleLine = true,
                     shape = RoundedCornerShape(24.dp),
                     leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                    placeholder = { Text("Search") },
+                    placeholder = { Text(stringResource(R.string.contacts_search_placeholder)) },
                 )
                 when {
                     state.loading -> LoadingState()
                     state.error != null -> ErrorState(state.error!!)
-                    state.filteredEmpty -> EmptyState("No contacts match \"${query.trim()}\"")
-                    state.isEmpty -> EmptyState("No contacts to invite yet.")
+                    state.filteredEmpty -> EmptyState(
+                        stringResource(R.string.contacts_no_contacts_match, query.trim()),
+                    )
+                    state.isEmpty -> EmptyState(stringResource(R.string.contacts_no_contacts_to_invite))
                     else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        item(key = "header-contacts") { SectionHeader("Contacts") }
+                        item(key = "header-contacts") { SectionHeader(stringResource(R.string.contacts_title)) }
                         items(state.contacts, key = { it.id }) { contact ->
                             InviteContactRow(
                                 contact = contact,

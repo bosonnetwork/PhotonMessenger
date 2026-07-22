@@ -22,8 +22,11 @@
 
 package io.bosonnetwork.photon.feature.contacts
 
+import android.content.Context
 import io.bosonnetwork.photon.core.model.ProfileResolver
 import io.bosonnetwork.photon.core.model.ResolvedProfile
+import io.mockk.every
+import io.mockk.mockk
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
@@ -40,4 +43,18 @@ internal class FakeProfileResolver(
     override fun cached(userId: String): ResolvedProfile? = profiles.value[userId]
 
     override fun prefetch(userId: String) = Unit
+}
+
+/**
+ * A relaxed [Context] test double whose formatted [Context.getString] echoes the arguments it is given.
+ * The ViewModels now build their snackbar copy from string resources (`context.getString(format, prefix,
+ * reason)`), so echoing the args keeps assertions that a message contains the underlying failure reason
+ * (e.g. "boom", "denied") valid without pinning exact localized text.
+ */
+internal fun fakeContext(): Context = mockk(relaxed = true) {
+    every { getString(any(), *anyVararg()) } answers {
+        invocation.args.drop(1)
+            .flatMap { if (it is Array<*>) it.toList() else listOf(it) }
+            .joinToString(": ") { it?.toString().orEmpty() }
+    }
 }

@@ -22,8 +22,11 @@
 
 package io.bosonnetwork.photon.feature.contacts
 
+import android.content.Context
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.bosonnetwork.photon.core.model.ProfileResolver
 import io.bosonnetwork.photon.core.model.displayProfile
 import io.bosonnetwork.photon.feature.contacts.data.ChannelRepository
@@ -59,6 +62,7 @@ class ContactsViewModel @Inject constructor(
     private val repository: ContactRepository,
     private val channelRepository: ChannelRepository,
     private val profileResolver: ProfileResolver,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     val uiState: StateFlow<ContactsUiState> =
@@ -134,42 +138,52 @@ class ContactsViewModel @Inject constructor(
     private val _joinedChannel = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val joinedChannel = _joinedChannel.asSharedFlow()
 
-    fun addFriend(idText: String, hello: String) = run("Couldn't send friend request") {
+    fun addFriend(idText: String, hello: String) = run(R.string.contacts_error_prefix_send_friend_request) {
         repository.sendFriendRequest(idText, hello)
     }
 
-    fun accept(userId: String) = run("Couldn't accept request") { repository.acceptFriendRequest(userId) }
+    fun accept(userId: String) =
+        run(R.string.contacts_error_prefix_accept_request) { repository.acceptFriendRequest(userId) }
 
-    fun decline(userId: String) = run("Couldn't decline request") { repository.declineFriendRequest(userId) }
+    fun decline(userId: String) =
+        run(R.string.contacts_error_prefix_decline_request) { repository.declineFriendRequest(userId) }
 
-    fun setMuted(contactId: String, muted: Boolean) = run("Couldn't update contact") {
+    fun setMuted(contactId: String, muted: Boolean) = run(R.string.contacts_error_prefix_update_contact) {
         repository.setMuted(contactId, muted)
     }
 
-    fun setBlocked(contactId: String, blocked: Boolean) = run("Couldn't update contact") {
+    fun setBlocked(contactId: String, blocked: Boolean) = run(R.string.contacts_error_prefix_update_contact) {
         repository.setBlocked(contactId, blocked)
     }
 
-    fun setRemark(contactId: String, remark: String?) = run("Couldn't update alias") {
+    fun setRemark(contactId: String, remark: String?) = run(R.string.contacts_error_prefix_update_alias) {
         repository.setRemark(contactId, remark)
     }
 
-    fun remove(contactId: String) = run("Couldn't remove contact") { repository.removeContact(contactId) }
+    fun remove(contactId: String) =
+        run(R.string.contacts_error_prefix_remove_contact) { repository.removeContact(contactId) }
 
     /** Joins a channel from a shared invite-ticket string; opens it on success via [joinedChannel]. */
     fun joinChannel(ticket: String) {
         viewModelScope.launch {
             channelRepository.joinChannel(ticket.trim())
                 .onSuccess { _joinedChannel.tryEmit(it) }
-                .onFailure { _messages.tryEmit("Couldn't join channel: ${it.message ?: "unknown error"}") }
+                .onFailure { _messages.tryEmit(errorMessage(R.string.contacts_error_prefix_join_channel, it)) }
         }
     }
 
-    private fun run(failurePrefix: String, action: suspend () -> Result<Unit>) {
+    private fun run(@StringRes failurePrefixRes: Int, action: suspend () -> Result<Unit>) {
         viewModelScope.launch {
             action().onFailure { e ->
-                _messages.tryEmit("$failurePrefix: ${e.message ?: "unknown error"}")
+                _messages.tryEmit(errorMessage(failurePrefixRes, e))
             }
         }
     }
+
+    private fun errorMessage(@StringRes failurePrefixRes: Int, e: Throwable): String =
+        context.getString(
+            R.string.contacts_error_format,
+            context.getString(failurePrefixRes),
+            e.message ?: context.getString(R.string.contacts_error_unknown),
+        )
 }

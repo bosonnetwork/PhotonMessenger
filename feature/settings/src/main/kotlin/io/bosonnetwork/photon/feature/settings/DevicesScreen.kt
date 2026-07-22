@@ -59,6 +59,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -68,6 +69,7 @@ import io.bosonnetwork.photon.core.designsystem.component.EmptyState
 import io.bosonnetwork.photon.core.designsystem.component.ErrorState
 import io.bosonnetwork.photon.core.designsystem.component.LoadingState
 import io.bosonnetwork.photon.core.designsystem.component.ResponsiveContent
+import io.bosonnetwork.photon.feature.settings.R
 import io.bosonnetwork.photon.feature.settings.model.UiDevice
 
 /**
@@ -98,10 +100,13 @@ fun DevicesScreen(
         topBar = {
             TopAppBar(
                 scrollBehavior = topBarScroll,
-                title = { Text("Devices") },
+                title = { Text(stringResource(R.string.settings_devices_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.settings_back_content_description),
+                        )
                     }
                 },
             )
@@ -113,9 +118,13 @@ fun DevicesScreen(
                 Box(Modifier.weight(1f)) {
                     when {
                         state.loading -> LoadingState()
-                        state.error != null -> ErrorState(state.error ?: "Error")
+                        state.error != null ->
+                            ErrorState(state.error ?: stringResource(R.string.settings_unknown_error))
                         state.devices.isEmpty() ->
-                            EmptyState("No registered devices", icon = Icons.Outlined.Devices)
+                            EmptyState(
+                                stringResource(R.string.settings_devices_empty),
+                                icon = Icons.Outlined.Devices,
+                            )
                         else -> LazyColumn(Modifier.fillMaxSize()) {
                             items(state.devices, key = { it.deviceId }) { device ->
                                 DeviceRow(
@@ -136,10 +145,9 @@ fun DevicesScreen(
 
     removeTarget?.let { device ->
         ConfirmDialog(
-            title = "Remove ${device.name}?",
-            text = "The device is deregistered from your account and can no longer sign in with " +
-                "its device key. Any active session it has is ended when it next reconnects.",
-            confirmLabel = "Remove",
+            title = stringResource(R.string.settings_device_remove_confirm_title, device.name),
+            text = stringResource(R.string.settings_device_remove_confirm_body),
+            confirmLabel = stringResource(R.string.settings_action_remove),
             onConfirm = {
                 viewModel.removeDevice(device.deviceId)
                 removeTarget = null
@@ -165,10 +173,10 @@ private fun DevicePairingActions(onAddDevice: () -> Unit, onApproveDevice: () ->
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         OutlinedButton(onClick = onAddDevice, modifier = Modifier.weight(1f)) {
-            Text("Add this device")
+            Text(stringResource(R.string.settings_add_device_action))
         }
         OutlinedButton(onClick = onApproveDevice, modifier = Modifier.weight(1f)) {
-            Text("Approve a device")
+            Text(stringResource(R.string.settings_approve_device_action))
         }
     }
 }
@@ -183,14 +191,14 @@ internal fun RemoveDevicePassphraseDialog(
     var passphrase by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Enter passphrase") },
+        title = { Text(stringResource(R.string.settings_enter_passphrase_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Your account is protected by a passphrase. Enter it to remove this device.")
+                Text(stringResource(R.string.settings_enter_passphrase_body))
                 OutlinedTextField(
                     value = passphrase,
                     onValueChange = { passphrase = it },
-                    label = { Text("Passphrase") },
+                    label = { Text(stringResource(R.string.settings_passphrase_label)) },
                     singleLine = true,
                     isError = error != null,
                     visualTransformation = PasswordVisualTransformation(),
@@ -203,10 +211,10 @@ internal fun RemoveDevicePassphraseDialog(
         },
         confirmButton = {
             TextButton(onClick = { onSubmit(passphrase) }, enabled = passphrase.isNotBlank()) {
-                Text("Remove")
+                Text(stringResource(R.string.settings_action_remove))
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.settings_action_cancel)) } },
     )
 }
 
@@ -224,7 +232,7 @@ private fun DeviceRow(device: UiDevice, onRemove: (UiDevice) -> Unit, onShowKey:
                 IconButton(onClick = onShowKey) {
                     Icon(
                         Icons.Filled.Smartphone,
-                        contentDescription = "This device - show identity key",
+                        contentDescription = stringResource(R.string.settings_device_current_content_description),
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 }
@@ -232,7 +240,7 @@ private fun DeviceRow(device: UiDevice, onRemove: (UiDevice) -> Unit, onShowKey:
                 IconButton(onClick = { onRemove(device) }) {
                     Icon(
                         Icons.Filled.DeleteOutline,
-                        contentDescription = "Remove device",
+                        contentDescription = stringResource(R.string.settings_device_remove_content_description),
                         tint = MaterialTheme.colorScheme.error,
                     )
                 }

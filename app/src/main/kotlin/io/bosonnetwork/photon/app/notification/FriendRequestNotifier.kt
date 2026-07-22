@@ -23,12 +23,15 @@
 package io.bosonnetwork.photon.app.notification
 
 import io.bosonnetwork.photon.app.AppForegroundState
+import io.bosonnetwork.photon.app.R
 import io.bosonnetwork.photon.core.model.ProfileResolver
 import io.bosonnetwork.photon.core.model.cachedDisplay
 import io.bosonnetwork.photon.core.model.displayProfile
 import io.bosonnetwork.Id
 import io.bosonnetwork.photonmessaging.FriendRequestListener
 import io.bosonnetwork.photonmessaging.MessagingClient
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
@@ -47,6 +50,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 @Singleton
 class FriendRequestNotifier @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val gateway: NotificationGateway,
     private val foreground: AppForegroundState,
     private val profileResolver: ProfileResolver,
@@ -80,7 +84,9 @@ class FriendRequestNotifier @Inject constructor(
         if (foreground.isForeground) return
 
         val key = userId.toString()
-        val body = hello.takeIf { it.isNotBlank() }?.let { "\"$it\"" } ?: "Wants to connect with you"
+        val body = hello.takeIf { it.isNotBlank() }
+            ?.let { context.getString(R.string.app_notif_friend_request_quoted, it) }
+            ?: context.getString(R.string.app_notif_friend_request_default_body)
 
         // The sender is not a contact yet (no local name), so resolve a Director profile name via the
         // shared identity policy off the event loop; bounded so an unknown/slow profile still notifies

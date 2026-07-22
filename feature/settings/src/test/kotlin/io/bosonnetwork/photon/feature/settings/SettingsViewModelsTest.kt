@@ -22,6 +22,7 @@
 
 package io.bosonnetwork.photon.feature.settings
 
+import android.content.Context
 import app.cash.turbine.test
 import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.core.model.NotificationPreferences
@@ -30,6 +31,8 @@ import io.bosonnetwork.photon.core.model.ThemePreferences
 import io.bosonnetwork.photon.feature.settings.data.SettingsRepository
 import io.bosonnetwork.photon.feature.settings.model.UiDevice
 import io.bosonnetwork.photon.feature.settings.model.UiProfile
+import io.mockk.every
+import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,6 +50,25 @@ import org.junit.Test
 class SettingsViewModelsTest {
 
     private val themeFlow = MutableStateFlow(ThemePreferences())
+
+    /**
+     * Relaxed: resolves the user-facing strings the ViewModels build via [Context.getString]. Calls
+     * with a single format arg answer with that arg (so assertions like `.contains("nope")` on a
+     * propagated exception reason still hold); zero-arg lookups fall back to the relaxed default.
+     * [R.string.settings_wrong_passphrase] is pinned to its real text since a test asserts on it exactly.
+     */
+    private fun fakeContext(): Context = mockk(relaxed = true) {
+        every { getString(R.string.settings_wrong_passphrase) } returns "Wrong passphrase"
+        every { getString(any(), any()) } answers {
+            // The vararg formatArgs parameter arrives as its raw Array<out Any?> at this position;
+            // unwrap it so the reason text ends up directly in the returned message.
+            when (val raw = args.getOrNull(1)) {
+                is Array<*> -> raw.joinToString(" ")
+                null -> ""
+                else -> raw.toString()
+            }
+        }
+    }
 
     private class FakeSettingsRepo(
         private val theme: Flow<ThemePreferences>,
@@ -106,7 +128,7 @@ class SettingsViewModelsTest {
 
     @Test
     fun `profile loads into state`() = runTest {
-        val vm = SettingsViewModel(FakeSettingsRepo(themeFlow))
+        val vm = SettingsViewModel(FakeSettingsRepo(themeFlow), fakeContext())
         vm.uiState.test {
             var state = awaitItem()
             while (state.loading) state = awaitItem()
@@ -119,7 +141,7 @@ class SettingsViewModelsTest {
     @Test
     fun `theme changes are forwarded to the repository`() = runTest {
         val repo = FakeSettingsRepo(themeFlow)
-        val vm = SettingsViewModel(repo)
+        val vm = SettingsViewModel(repo, fakeContext())
         vm.setThemeMode(ThemeMode.DARK)
         assertEquals(ThemeMode.DARK, repo.lastThemeMode)
     }
@@ -127,7 +149,7 @@ class SettingsViewModelsTest {
     @Test
     fun `notification toggle is forwarded to the repository`() = runTest {
         val repo = FakeSettingsRepo(themeFlow)
-        val vm = SettingsViewModel(repo)
+        val vm = SettingsViewModel(repo, fakeContext())
         vm.setNotificationsEnabled(false)
         assertEquals(false, repo.notificationsEnabled)
     }
@@ -135,7 +157,7 @@ class SettingsViewModelsTest {
     @Test
     fun `sign out emits a signed-out event`() = runTest {
         val repo = FakeSettingsRepo(themeFlow)
-        val vm = SettingsViewModel(repo)
+        val vm = SettingsViewModel(repo, fakeContext())
         vm.signedOut.test {
             vm.signOut()
             awaitItem()
@@ -147,7 +169,7 @@ class SettingsViewModelsTest {
     @Test
     fun `failed profile save emits a message`() = runTest {
         val repo = FakeSettingsRepo(themeFlow, actionResult = Result.failure(IllegalStateException("nope")))
-        val vm = SettingsViewModel(repo)
+        val vm = SettingsViewModel(repo, fakeContext())
         vm.messages.test {
             vm.saveProfile("a", "b", "c")
             assertTrue(awaitItem().contains("nope"))
@@ -159,7 +181,7 @@ class SettingsViewModelsTest {
     fun `sessions load into state`() = runTest {
         val session = UiDevice("d1", "Pixel", "PhotonMessenger", true, 100, null, 50, isCurrent = true)
         val repo = FakeSettingsRepo(themeFlow, sessions = Result.success(listOf(session)))
-        val vm = SessionsViewModel(repo)
+        val vm = SessionsViewModel(repo, fakeContext())
         vm.uiState.test {
             var state = awaitItem()
             while (state.loading) state = awaitItem()
@@ -171,7 +193,7 @@ class SettingsViewModelsTest {
     @Test
     fun `revoke session calls the repository without removing the device`() = runTest {
         val repo = FakeSettingsRepo(themeFlow)
-        val vm = SessionsViewModel(repo)
+        val vm = SessionsViewModel(repo, fakeContext())
         vm.revokeSession("d9", alsoRemoveDevice = false)
         assertEquals("d9", repo.revoked)
         assertEquals(null, repo.removed)
@@ -180,7 +202,7 @@ class SettingsViewModelsTest {
     @Test
     fun `revoke session with also-remove deregisters the device`() = runTest {
         val repo = FakeSettingsRepo(themeFlow)
-        val vm = SessionsViewModel(repo)
+        val vm = SessionsViewModel(repo, fakeContext())
         vm.revokeSession("d1", alsoRemoveDevice = true)
         assertEquals("d1", repo.revoked)
         assertEquals("d1", repo.removed)
@@ -189,7 +211,7 @@ class SettingsViewModelsTest {
     @Test
     fun `set passphrase forwards args and signals success`() = runTest {
         val repo = FakeSettingsRepo(themeFlow)
-        val vm = SettingsViewModel(repo)
+        val vm = SettingsViewModel(repo, fakeContext())
         vm.passphraseUpdated.test {
             vm.setPassphrase("newpass", "oldpass")
             awaitItem()
@@ -204,7 +226,7 @@ class SettingsViewModelsTest {
             themeFlow,
             passphraseResult = Result.failure(AppError.Forbidden("Wrong passphrase")),
         )
-        val vm = SettingsViewModel(repo)
+        val vm = SettingsViewModel(repo, fakeContext())
         vm.messages.test {
             vm.setPassphrase("newpass", "bad")
             assertTrue(awaitItem().contains("Wrong passphrase"))
@@ -215,7 +237,7 @@ class SettingsViewModelsTest {
     @Test
     fun `clear passphrase forwards the current passphrase`() = runTest {
         val repo = FakeSettingsRepo(themeFlow)
-        val vm = SettingsViewModel(repo)
+        val vm = SettingsViewModel(repo, fakeContext())
         vm.passphraseUpdated.test {
             vm.clearPassphrase("oldpass")
             awaitItem()
@@ -230,7 +252,7 @@ class SettingsViewModelsTest {
             themeFlow,
             removeResult = Result.failure(AppError.PassphraseRequired("Passphrase required")),
         )
-        val vm = DevicesViewModel(repo)
+        val vm = DevicesViewModel(repo, fakeContext())
         vm.uiState.test {
             var state = awaitItem()
             while (state.loading) state = awaitItem()
@@ -248,7 +270,7 @@ class SettingsViewModelsTest {
             themeFlow,
             removeResult = Result.failure(AppError.PassphraseRequired("Passphrase required")),
         )
-        val vm = DevicesViewModel(repo)
+        val vm = DevicesViewModel(repo, fakeContext())
         vm.uiState.test {
             var state = awaitItem()
             while (state.loading) state = awaitItem()
@@ -269,7 +291,7 @@ class SettingsViewModelsTest {
     fun `registered devices load into state`() = runTest {
         val device = UiDevice("d1", "Old phone", "Photon", false, 100, null, 50, isCurrent = false)
         val repo = FakeSettingsRepo(themeFlow, devices = Result.success(listOf(device)))
-        val vm = DevicesViewModel(repo)
+        val vm = DevicesViewModel(repo, fakeContext())
         vm.uiState.test {
             var state = awaitItem()
             while (state.loading) state = awaitItem()

@@ -36,8 +36,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import io.bosonnetwork.photon.core.designsystem.R
 
 /**
  * Shared full-screen state placeholders (X-A2). Every feature screen previously rolled its own
@@ -115,7 +117,7 @@ fun ErrorState(
         )
         if (onRetry != null) {
             TextButton(onClick = onRetry, modifier = Modifier.padding(top = 8.dp)) {
-                Text("Retry")
+                Text(stringResource(R.string.ds_action_retry))
             }
         }
     }

@@ -23,6 +23,7 @@
 package io.bosonnetwork.photon.app.session
 
 import android.content.Context
+import io.bosonnetwork.photon.app.R
 import io.bosonnetwork.photon.app.notification.FriendRequestNotifier
 import io.bosonnetwork.photon.app.notification.MessageNotifier
 import io.bosonnetwork.photon.app.service.MessagingForegroundService
@@ -166,7 +167,10 @@ class SessionController @Inject constructor(
                 // network-regain doesn't silently retry a hard rejection behind the user's back.
                 val error = e.toDirectorError()
                 terminalFailure = error is AppError.SessionLimitExceeded || error is AppError.ConnectionRejected
-                own.value = SessionStatus(SessionPhase.FAILED, error.message ?: "Couldn't connect")
+                own.value = SessionStatus(
+                    SessionPhase.FAILED,
+                    error.message ?: context.getString(R.string.app_session_status_could_not_connect),
+                )
                 // No foreground service is started until a connection succeeds, so a failed bring-up
                 // (including every background retry) leaves nothing to tear down and never touches the
                 // service - that is what keeps a retry loop from resurfacing the app.

@@ -22,9 +22,12 @@
 
 package io.bosonnetwork.photon.feature.contacts
 
+import android.content.Context
+import androidx.annotation.StringRes
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.bosonnetwork.photon.core.model.ProfileResolver
 import io.bosonnetwork.photon.core.model.toDisplay
 import io.bosonnetwork.photon.feature.contacts.data.ChannelRepository
@@ -61,6 +64,7 @@ class ChannelDetailViewModel @Inject constructor(
     private val repository: ChannelRepository,
     private val profileResolver: ProfileResolver,
     savedStateHandle: SavedStateHandle,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     val channelId: String = checkNotNull(savedStateHandle["channelId"]) { "channelId arg missing" }
@@ -116,17 +120,22 @@ class ChannelDetailViewModel @Inject constructor(
     val inviteTicket = _inviteTicket.asSharedFlow()
 
     fun setRole(memberId: String, role: UiChannelRole) =
-        run("Couldn't change role") { repository.setRole(channelId, memberId, role) }
+        run(R.string.contacts_error_prefix_change_role) { repository.setRole(channelId, memberId, role) }
 
-    fun ban(memberId: String) = run("Couldn't ban member") { repository.ban(channelId, memberId) }
-    fun unban(memberId: String) = run("Couldn't unban member") { repository.unban(channelId, memberId) }
-    fun kick(memberId: String) = run("Couldn't remove member") { repository.kick(channelId, memberId) }
+    fun ban(memberId: String) =
+        run(R.string.contacts_error_prefix_ban_member) { repository.ban(channelId, memberId) }
+    fun unban(memberId: String) =
+        run(R.string.contacts_error_prefix_unban_member) { repository.unban(channelId, memberId) }
+    fun kick(memberId: String) =
+        run(R.string.contacts_error_prefix_remove_member) { repository.kick(channelId, memberId) }
 
     fun leave() {
         viewModelScope.launch {
             repository.leave(channelId)
                 .onSuccess { _closed.tryEmit(Unit) }
-                .onFailure { e -> _messages.tryEmit(e.toUserMessage("Couldn't leave channel")) }
+                .onFailure { e ->
+                    _messages.tryEmit(e.toUserMessage(R.string.contacts_error_prefix_leave_channel))
+                }
         }
     }
 
@@ -134,40 +143,46 @@ class ChannelDetailViewModel @Inject constructor(
         viewModelScope.launch {
             repository.remove(channelId)
                 .onSuccess { _closed.tryEmit(Unit) }
-                .onFailure { e -> _messages.tryEmit(e.toUserMessage("Couldn't delete channel")) }
+                .onFailure { e ->
+                    _messages.tryEmit(e.toUserMessage(R.string.contacts_error_prefix_delete_channel))
+                }
         }
     }
 
     fun transferOwnership(memberId: String) =
-        run("Couldn't transfer ownership") { repository.transferOwnership(channelId, memberId) }
+        run(R.string.contacts_error_prefix_transfer_ownership) { repository.transferOwnership(channelId, memberId) }
 
     fun updateInfo(name: String?, notice: String?) =
-        run("Couldn't update channel") { repository.updateInfo(channelId, name, notice) }
+        run(R.string.contacts_error_prefix_update_channel) { repository.updateInfo(channelId, name, notice) }
 
     fun rotateSessionKey() =
-        run("Couldn't rotate session key") { repository.rotateSessionKey(channelId) }
+        run(R.string.contacts_error_prefix_rotate_session_key) { repository.rotateSessionKey(channelId) }
 
     /** Mints an invite (open, or bound to [inviteeId]); the ticket surfaces via [inviteTicket]. */
     fun invite(inviteeId: String?) {
         viewModelScope.launch {
             repository.invite(channelId, inviteeId)
                 .onSuccess { _inviteTicket.tryEmit(it) }
-                .onFailure { _messages.tryEmit(it.toUserMessage("Couldn't create invite")) }
+                .onFailure { _messages.tryEmit(it.toUserMessage(R.string.contacts_error_prefix_create_invite)) }
         }
     }
 
-    private fun run(failurePrefix: String, action: suspend () -> Result<Unit>) {
+    private fun run(@StringRes failurePrefixRes: Int, action: suspend () -> Result<Unit>) {
         viewModelScope.launch {
-            action().onFailure { e -> _messages.tryEmit(e.toUserMessage(failurePrefix)) }
+            action().onFailure { e -> _messages.tryEmit(e.toUserMessage(failurePrefixRes)) }
         }
     }
 
     /** Maps known channel moderation failures to specific, user-facing messages (M4-7). */
-    private fun Throwable.toUserMessage(failurePrefix: String): String = when (this) {
-        is InsufficientPermissionException -> "You don't have permission to do that"
-        is NotChannelMemberException -> "You're not a member of this channel"
-        is ChannelNotExistsException -> "This channel no longer exists"
-        else -> "$failurePrefix: ${message ?: "unknown error"}"
+    private fun Throwable.toUserMessage(@StringRes failurePrefixRes: Int): String = when (this) {
+        is InsufficientPermissionException -> context.getString(R.string.contacts_error_no_permission)
+        is NotChannelMemberException -> context.getString(R.string.contacts_error_not_channel_member)
+        is ChannelNotExistsException -> context.getString(R.string.contacts_error_channel_no_longer_exists)
+        else -> context.getString(
+            R.string.contacts_error_format,
+            context.getString(failurePrefixRes),
+            message ?: context.getString(R.string.contacts_error_unknown),
+        )
     }
 
     private companion object {

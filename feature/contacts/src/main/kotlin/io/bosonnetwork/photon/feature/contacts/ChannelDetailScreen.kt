@@ -73,6 +73,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -126,15 +128,21 @@ fun ChannelDetailScreen(
         topBar = {
             TopAppBar(
                 scrollBehavior = topBarScroll,
-                title = { Text(state.detail?.channel?.name ?: "Channel") },
+                title = { Text(state.detail?.channel?.name ?: stringResource(R.string.contacts_channel_title_fallback)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.contacts_cd_back),
+                        )
                     }
                 },
                 actions = {
                     IconButton(onClick = { onOpenChat(viewModel.channelId) }) {
-                        Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Open chat")
+                        Icon(
+                            Icons.AutoMirrored.Filled.Chat,
+                            contentDescription = stringResource(R.string.contacts_cd_open_chat),
+                        )
                     }
                     state.detail?.channel?.let { channel ->
                         ChannelOverflow(
@@ -154,13 +162,13 @@ fun ChannelDetailScreen(
             val detail = state.detail
             when {
                 state.loading -> LoadingState()
-                state.error != null -> ErrorState(state.error ?: "Error")
-                detail == null -> EmptyState("Channel not found")
+                state.error != null -> ErrorState(state.error ?: stringResource(R.string.contacts_error_generic))
+                detail == null -> EmptyState(stringResource(R.string.contacts_channel_not_found))
                 else -> LazyColumn(Modifier.fillMaxSize()) {
                     item { ChannelHeader(detail.channel, onInvite = { showInviteChooser = true }) }
                     item {
                         Text(
-                            "${detail.members.size} MEMBERS",
+                            stringResource(R.string.contacts_members_header_format, detail.members.size),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp),
@@ -183,20 +191,19 @@ fun ChannelDetailScreen(
     pendingAction?.let { action ->
         val spec = when (action) {
             is MemberAction.Ban -> ConfirmSpec(
-                title = "Ban ${action.member.displayName}?",
-                text = "They will be removed and can't rejoin until unbanned.",
-                label = "Ban",
+                title = stringResource(R.string.contacts_ban_member_title, action.member.displayName),
+                text = stringResource(R.string.contacts_ban_member_message),
+                label = stringResource(R.string.contacts_action_ban),
             ) { viewModel.ban(action.member.id) }
             is MemberAction.Kick -> ConfirmSpec(
-                title = "Remove ${action.member.displayName}?",
-                text = "They will be removed from the channel but can be invited again.",
-                label = "Remove",
+                title = stringResource(R.string.contacts_remove_member_title, action.member.displayName),
+                text = stringResource(R.string.contacts_remove_member_message),
+                label = stringResource(R.string.contacts_action_remove),
             ) { viewModel.kick(action.member.id) }
             is MemberAction.Transfer -> ConfirmSpec(
-                title = "Transfer ownership?",
-                text = "${action.member.displayName} becomes the owner. You keep your membership " +
-                    "but can no longer manage or delete the channel.",
-                label = "Transfer",
+                title = stringResource(R.string.contacts_transfer_ownership_title),
+                text = stringResource(R.string.contacts_transfer_ownership_message, action.member.displayName),
+                label = stringResource(R.string.contacts_action_transfer),
             ) { viewModel.transferOwnership(action.member.id) }
         }
         ConfirmDialog(
@@ -210,10 +217,9 @@ fun ChannelDetailScreen(
 
     if (confirmLeave) {
         ConfirmDialog(
-            title = "Leave channel?",
-            text = "You will stop receiving messages from this channel. You can rejoin later " +
-                "with an invite.",
-            confirmLabel = "Leave",
+            title = stringResource(R.string.contacts_leave_channel_title),
+            text = stringResource(R.string.contacts_leave_channel_message),
+            confirmLabel = stringResource(R.string.contacts_action_leave),
             onConfirm = { viewModel.leave() },
             onDismiss = { confirmLeave = false },
         )
@@ -221,9 +227,9 @@ fun ChannelDetailScreen(
 
     if (confirmDelete) {
         ConfirmDialog(
-            title = "Delete channel?",
-            text = "The channel and its messages are deleted for every member. This cannot be undone.",
-            confirmLabel = "Delete",
+            title = stringResource(R.string.contacts_delete_channel_title),
+            text = stringResource(R.string.contacts_delete_channel_message),
+            confirmLabel = stringResource(R.string.contacts_action_delete),
             onConfirm = { viewModel.remove() },
             onDismiss = { confirmDelete = false },
         )
@@ -264,23 +270,25 @@ private fun InviteTypeDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Create invite") },
+        title = { Text(stringResource(R.string.contacts_create_invite_title)) },
         text = {
             Column {
                 ListItem(
                     modifier = Modifier.clickable(onClick = onInviteContact),
-                    headlineContent = { Text("Invite a contact") },
-                    supportingContent = { Text("Send an invitation straight to someone in your contacts") },
+                    headlineContent = { Text(stringResource(R.string.contacts_invite_a_contact)) },
+                    supportingContent = { Text(stringResource(R.string.contacts_invite_contact_description)) },
                 )
                 ListItem(
                     modifier = Modifier.clickable(onClick = onShareableLink),
-                    headlineContent = { Text("Create a shareable link") },
-                    supportingContent = { Text("Anyone with the link can join") },
+                    headlineContent = { Text(stringResource(R.string.contacts_create_shareable_link)) },
+                    supportingContent = { Text(stringResource(R.string.contacts_shareable_link_description)) },
                 )
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.contacts_action_cancel)) }
+        },
     )
 }
 
@@ -307,7 +315,7 @@ private fun ChannelHeader(channel: UiChannel, onInvite: () -> Unit) {
         Spacer(Modifier.height(12.dp))
         Text(channel.name, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
         Text(
-            "${channel.memberCount} ${if (channel.memberCount == 1) "member" else "members"}",
+            pluralStringResource(R.plurals.contacts_member_count, channel.memberCount, channel.memberCount),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -322,11 +330,15 @@ private fun ChannelHeader(channel: UiChannel, onInvite: () -> Unit) {
         }
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AssistChip(onClick = {}, enabled = false, label = { Text(channel.permission.label) })
-            AssistChip(onClick = {}, enabled = false, label = { Text("Your role: ${channel.myRole.label}") })
+            AssistChip(onClick = {}, enabled = false, label = { Text(channel.permission.label()) })
+            AssistChip(
+                onClick = {},
+                enabled = false,
+                label = { Text(stringResource(R.string.contacts_your_role, channel.myRole.label())) },
+            )
         }
         Spacer(Modifier.height(8.dp))
-        TextButton(onClick = onInvite) { Text("Create invite ticket") }
+        TextButton(onClick = onInvite) { Text(stringResource(R.string.contacts_action_create_invite_ticket)) }
         Spacer(Modifier.height(4.dp))
         HorizontalDivider()
     }
@@ -354,12 +366,18 @@ private fun MemberRow(
             )
         },
         headlineContent = {
-            Text(if (member.isMe) "${member.displayName} (you)" else member.displayName)
+            Text(
+                if (member.isMe) {
+                    stringResource(R.string.contacts_member_you_suffix, member.displayName)
+                } else {
+                    member.displayName
+                },
+            )
         },
         supportingContent = {
             if (member.role != UiChannelRole.MEMBER) {
                 Text(
-                    member.role.label,
+                    member.role.label(),
                     color = when (member.role) {
                         UiChannelRole.BANNED -> MaterialTheme.colorScheme.error
                         else -> MaterialTheme.colorScheme.primary
@@ -371,38 +389,51 @@ private fun MemberRow(
             if (actionable) {
                 Box {
                     IconButton(onClick = { menu = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "Member actions")
+                        Icon(
+                            Icons.Filled.MoreVert,
+                            contentDescription = stringResource(R.string.contacts_cd_member_actions),
+                        )
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         when (member.role) {
                             UiChannelRole.MEMBER -> DropdownMenuItem(
-                                text = { Text("Make moderator") },
+                                text = { Text(stringResource(R.string.contacts_action_make_moderator)) },
                                 onClick = { menu = false; onSetRole(member.id, UiChannelRole.MODERATOR) },
                             )
                             UiChannelRole.MODERATOR -> DropdownMenuItem(
-                                text = { Text("Remove moderator") },
+                                text = { Text(stringResource(R.string.contacts_action_remove_moderator)) },
                                 onClick = { menu = false; onSetRole(member.id, UiChannelRole.MEMBER) },
                             )
                             else -> Unit
                         }
                         if (member.role == UiChannelRole.BANNED) {
                             DropdownMenuItem(
-                                text = { Text("Unban") },
+                                text = { Text(stringResource(R.string.contacts_action_unban)) },
                                 onClick = { menu = false; onUnban(member.id) },
                             )
                         } else {
                             DropdownMenuItem(
-                                text = { Text("Ban", color = MaterialTheme.colorScheme.error) },
+                                text = {
+                                    Text(
+                                        stringResource(R.string.contacts_action_ban),
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                },
                                 onClick = { menu = false; onAction(MemberAction.Ban(member)) },
                             )
                         }
                         DropdownMenuItem(
-                            text = { Text("Remove from channel", color = MaterialTheme.colorScheme.error) },
+                            text = {
+                                Text(
+                                    stringResource(R.string.contacts_action_remove_from_channel),
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            },
                             onClick = { menu = false; onAction(MemberAction.Kick(member)) },
                         )
                         if (channel.isOwner && member.role != UiChannelRole.BANNED) {
                             DropdownMenuItem(
-                                text = { Text("Transfer ownership") },
+                                text = { Text(stringResource(R.string.contacts_menu_transfer_ownership)) },
                                 onClick = { menu = false; onAction(MemberAction.Transfer(member)) },
                             )
                         }
@@ -424,25 +455,38 @@ private fun ChannelOverflow(
     var menu by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { menu = true }) {
-            Icon(Icons.Filled.MoreVert, contentDescription = "Channel actions")
+            Icon(
+                Icons.Filled.MoreVert,
+                contentDescription = stringResource(R.string.contacts_cd_channel_actions),
+            )
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(
-                text = { Text("Create invite") },
+                text = { Text(stringResource(R.string.contacts_menu_create_invite)) },
                 onClick = { menu = false; onInvite() },
             )
             if (channel.isOwner) {
                 DropdownMenuItem(
-                    text = { Text("Rotate session key") },
+                    text = { Text(stringResource(R.string.contacts_action_rotate_session_key)) },
                     onClick = { menu = false; onRotateKey() },
                 )
                 DropdownMenuItem(
-                    text = { Text("Delete channel", color = MaterialTheme.colorScheme.error) },
+                    text = {
+                        Text(
+                            stringResource(R.string.contacts_menu_delete_channel),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    },
                     onClick = { menu = false; onDelete() },
                 )
             } else {
                 DropdownMenuItem(
-                    text = { Text("Leave channel", color = MaterialTheme.colorScheme.error) },
+                    text = {
+                        Text(
+                            stringResource(R.string.contacts_menu_leave_channel),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    },
                     onClick = { menu = false; onLeave() },
                 )
             }
@@ -458,15 +502,13 @@ private fun ChannelOverflow(
 private fun InviteTicketDialog(ticket: String, onDismiss: () -> Unit) {
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
+    val shareChooserTitle = stringResource(R.string.contacts_share_invite_ticket_chooser)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Invite ticket") },
+        title = { Text(stringResource(R.string.contacts_invite_ticket_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "Send this ticket to the person you want to invite. They can join from " +
-                        "Contacts with \"Join channel\".",
-                )
+                Text(stringResource(R.string.contacts_invite_ticket_description))
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     shape = MaterialTheme.shapes.small,
@@ -491,40 +533,42 @@ private fun InviteTicketDialog(ticket: String, onDismiss: () -> Unit) {
                         contentDescription = null,
                         modifier = Modifier.padding(end = 4.dp),
                     )
-                    Text("Copy")
+                    Text(stringResource(R.string.contacts_action_copy))
                 }
                 TextButton(onClick = {
                     val send = Intent(Intent.ACTION_SEND).apply {
                         type = "text/plain"
                         putExtra(Intent.EXTRA_TEXT, ticket)
                     }
-                    context.startActivity(Intent.createChooser(send, "Share invite ticket"))
+                    context.startActivity(Intent.createChooser(send, shareChooserTitle))
                 }) {
                     Icon(
                         Icons.Filled.Share,
                         contentDescription = null,
                         modifier = Modifier.padding(end = 4.dp),
                     )
-                    Text("Share")
+                    Text(stringResource(R.string.contacts_action_share))
                 }
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.contacts_action_done)) }
+        },
     )
 }
 
-private val UiChannelPermission.label: String
-    get() = when (this) {
-        UiChannelPermission.PUBLIC -> "Anyone can join"
-        UiChannelPermission.MEMBER_INVITE -> "Members can invite"
-        UiChannelPermission.MODERATOR_INVITE -> "Moderators can invite"
-        UiChannelPermission.OWNER_INVITE -> "Owner invites only"
-    }
+@Composable
+private fun UiChannelPermission.label(): String = when (this) {
+    UiChannelPermission.PUBLIC -> stringResource(R.string.contacts_permission_public)
+    UiChannelPermission.MEMBER_INVITE -> stringResource(R.string.contacts_permission_member_invite)
+    UiChannelPermission.MODERATOR_INVITE -> stringResource(R.string.contacts_permission_moderator_invite)
+    UiChannelPermission.OWNER_INVITE -> stringResource(R.string.contacts_permission_owner_invite)
+}
 
-private val UiChannelRole.label: String
-    get() = when (this) {
-        UiChannelRole.OWNER -> "Owner"
-        UiChannelRole.MODERATOR -> "Moderator"
-        UiChannelRole.MEMBER -> "Member"
-        UiChannelRole.BANNED -> "Banned"
-    }
+@Composable
+private fun UiChannelRole.label(): String = when (this) {
+    UiChannelRole.OWNER -> stringResource(R.string.contacts_role_owner)
+    UiChannelRole.MODERATOR -> stringResource(R.string.contacts_role_moderator)
+    UiChannelRole.MEMBER -> stringResource(R.string.contacts_role_member)
+    UiChannelRole.BANNED -> stringResource(R.string.contacts_role_banned)
+}

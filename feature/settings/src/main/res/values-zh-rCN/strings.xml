@@ -1,0 +1,193 @@
+<resources>
+    <!-- SettingsScreen: top bar, section headers -->
+    <string name="settings_title">设置</string>
+    <string name="settings_section_account">账户</string>
+    <string name="settings_accounts_title">账户</string>
+    <string name="settings_accounts_subtitle">在此设备上切换或添加账户</string>
+    <string name="settings_section_appearance">外观</string>
+    <string name="settings_dynamic_color_title">动态取色</string>
+    <string name="settings_dynamic_color_subtitle">使用壁纸中的颜色</string>
+    <string name="settings_language_title">语言</string>
+    <string name="settings_section_notifications">通知</string>
+    <string name="settings_notifications_enabled_title">消息通知</string>
+    <string name="settings_notifications_enabled_subtitle">有新消息时通知我</string>
+    <string name="settings_notifications_preview_title">显示预览</string>
+    <string name="settings_notifications_preview_subtitle">显示发送者和消息内容</string>
+    <string name="settings_notifications_off_title">通知已关闭</string>
+    <string name="settings_notifications_off_body">请允许通知，以便 Photon 在有新消息时提醒你。</string>
+    <string name="settings_notifications_allow_action">允许</string>
+    <string name="settings_battery_title">允许后台活动</string>
+    <string name="settings_battery_body">将 Photon 排除在电池优化之外，以便它保持连接并可靠地送达消息。</string>
+    <string name="settings_open_settings_action">打开设置</string>
+    <string name="settings_section_security">安全</string>
+    <string name="settings_sessions_title">会话</string>
+    <string name="settings_sessions_subtitle">管理你的登录设备</string>
+    <string name="settings_devices_title">设备</string>
+    <string name="settings_devices_subtitle">管理已注册到你账户的设备</string>
+    <string name="settings_section_about">关于</string>
+    <string name="settings_about_app_name">Photon</string>
+    <string name="settings_about_version_line">版本 %1$s - 由 BosonNetwork 提供支持</string>
+    <string name="settings_about_version_unknown">未知</string>
+    <string name="settings_sign_out_action">退出登录</string>
+    <string name="settings_sign_out_confirm_title">退出登录？</string>
+    <string name="settings_sign_out_confirm_body">这将结束你在此设备上的会话。你的身份、对话和设置仍会保留在此设备上，因此你可以随时重新登录。你需要重新登录才能再次连接。</string>
+
+    <!-- SettingsScreen: Boson ID row + "My ID" QR dialog -->
+    <string name="settings_boson_id_title">Boson ID</string>
+    <string name="settings_boson_id_copy_content_description">复制 Boson ID</string>
+    <string name="settings_boson_id_copied_message">Boson ID 已复制</string>
+    <string name="settings_boson_id_qr_content_description">以二维码显示 Boson ID</string>
+    <string name="settings_my_id_title">我的 ID</string>
+    <string name="settings_my_id_message">好友可以扫描或输入此 ID 来添加%1$s。该 ID 是公开的，可以安全分享。</string>
+    <string name="settings_my_id_fallback_name">你</string>
+    <string name="settings_my_id_qr_content_description">用户 ID 二维码</string>
+
+    <!-- SettingsScreen: hidden tap-count hint before revealing the identity key -->
+    <plurals name="settings_identity_key_taps_remaining">
+        <item quantity="other">还需再点击 %1$d 次即可显示身份密钥</item>
+    </plurals>
+
+    <!-- SettingsScreen: passphrase section + dialogs -->
+    <string name="settings_passphrase_protected_title">已通过口令保护</string>
+    <string name="settings_passphrase_unset_title">未设置口令</string>
+    <string name="settings_passphrase_protected_subtitle">更改敏感账户设置时需要输入口令。</string>
+    <string name="settings_passphrase_unset_subtitle">添加口令可在密钥泄露时保护敏感账户变更。</string>
+    <string name="settings_passphrase_change_action">修改口令</string>
+    <string name="settings_passphrase_set_action">设置口令</string>
+    <string name="settings_passphrase_current_label">当前口令</string>
+    <string name="settings_passphrase_new_label">新口令</string>
+    <string name="settings_passphrase_confirm_label">确认新口令</string>
+    <string name="settings_passphrase_mismatch">两次输入的口令不一致</string>
+    <string name="settings_passphrase_remove_title">移除口令</string>
+    <string name="settings_passphrase_remove_body">输入当前口令以将其移除。移除后，敏感变更将不再受保护。</string>
+    <string name="settings_passphrase_label">口令</string>
+
+    <!-- SettingsScreen: profile header + edit-profile dialog -->
+    <string name="settings_change_photo_content_description">更改头像</string>
+    <string name="settings_no_name_set">未设置名称</string>
+    <string name="settings_plan_line">套餐：%1$s</string>
+    <string name="settings_edit_profile_action">编辑资料</string>
+    <string name="settings_remove_photo_action">移除头像</string>
+    <string name="settings_name_label">名称</string>
+    <string name="settings_email_label">电子邮箱</string>
+    <string name="settings_bio_label">简介</string>
+
+    <!-- SettingsScreen: theme mode labels -->
+    <string name="settings_theme_system">系统</string>
+    <string name="settings_theme_light">浅色</string>
+    <string name="settings_theme_dark">深色</string>
+
+    <!-- Shared generic actions -->
+    <string name="settings_action_done">完成</string>
+    <string name="settings_action_remove">移除</string>
+    <string name="settings_action_save">保存</string>
+    <string name="settings_action_cancel">取消</string>
+    <string name="settings_back_content_description">返回</string>
+
+    <!-- LanguageScreen -->
+    <string name="settings_language_selected_content_description">已选择</string>
+    <string name="settings_language_system">跟随系统</string>
+    <string name="settings_language_english">英语</string>
+    <string name="settings_language_chinese">简体中文</string>
+    <string name="settings_language_native_english">English</string>
+    <!-- Endonym: identical to the English resource file (a language's own name never changes). -->
+    <string name="settings_language_native_chinese">简体中文</string>
+
+    <!-- DevicesScreen -->
+    <string name="settings_devices_empty">没有已注册的设备</string>
+    <string name="settings_device_remove_confirm_title">移除 %1$s？</string>
+    <string name="settings_device_remove_confirm_body">该设备将从你的账户中取消注册，无法再使用其设备密钥登录。它当前的任何活动会话都将在下次重新连接时结束。</string>
+    <string name="settings_add_device_action">添加此设备</string>
+    <string name="settings_approve_device_action">批准设备</string>
+    <string name="settings_enter_passphrase_title">输入口令</string>
+    <string name="settings_enter_passphrase_body">你的账户已通过口令保护。请输入口令以移除此设备。</string>
+    <string name="settings_device_current_content_description">此设备 - 显示身份密钥</string>
+    <string name="settings_device_remove_content_description">移除设备</string>
+    <string name="settings_device_remove_error">无法移除设备：%1$s</string>
+    <string name="settings_wrong_passphrase">口令错误</string>
+
+    <!-- SessionsScreen -->
+    <string name="settings_sessions_empty">没有活动会话</string>
+    <string name="settings_revoke_session_title">撤销会话？</string>
+    <string name="settings_revoke_session_body">%1$s 将退出消息服务。该设备仍保持注册状态，可以稍后重新连接。</string>
+    <string name="settings_revoke_also_remove_title">同时从你的账户中移除此设备</string>
+    <string name="settings_revoke_also_remove_subtitle">该设备将被取消注册，无法再使用其设备密钥登录。</string>
+    <string name="settings_revoke_action">撤销</string>
+    <string name="settings_session_online_content_description">在线</string>
+    <string name="settings_session_offline_content_description">离线</string>
+    <string name="settings_session_current_content_description">此设备</string>
+    <string name="settings_session_revoke_error">无法撤销会话：%1$s</string>
+
+    <!-- ApproveDeviceScreen -->
+    <string name="settings_approve_scan_hint">将摄像头对准新设备上显示的二维码</string>
+    <string name="settings_camera_permission_message">需要摄像头权限才能扫描配对码。</string>
+    <string name="settings_camera_permission_action">授予摄像头权限</string>
+    <string name="settings_approve_loading_reading">正在读取配对请求…</string>
+    <string name="settings_approve_loading_authorizing">正在授权设备…</string>
+    <string name="settings_approve_confirm_title">授权此设备？</string>
+    <string name="settings_approve_confirm_body">“%1$s”（%2$s）想要登录你的账户。批准后将与其共享你的加密身份密钥。</string>
+    <string name="settings_approve_action">批准</string>
+    <string name="settings_deny_action">拒绝</string>
+    <string name="settings_approve_done_approved">设备已批准。</string>
+    <string name="settings_approve_done_denied">请求已拒绝。</string>
+    <string name="settings_scan_again_action">重新扫描</string>
+    <string name="settings_pairing_failed">配对失败</string>
+
+    <!-- PairNewDeviceScreen -->
+    <string name="settings_pair_preparing">正在准备配对码…</string>
+    <string name="settings_pair_scan_hint">使用已登录的设备扫描此码</string>
+    <string name="settings_pair_qr_content_description">配对二维码</string>
+    <string name="settings_pair_waiting">等待批准…</string>
+    <string name="settings_pair_success">此设备已配对</string>
+    <string name="settings_continue_action">继续</string>
+    <string name="settings_try_again_action">重试</string>
+    <string name="settings_device_name_fallback">Android 设备</string>
+
+    <!-- KeyReveal shared scaffold -->
+    <string name="settings_reveal_key_action">显示密钥</string>
+    <string name="settings_key_copied">已复制</string>
+    <string name="settings_key_copy_action">复制密钥</string>
+
+    <!-- ShowIdentityKeyScreen -->
+    <string name="settings_identity_key_title">显示身份密钥</string>
+    <string name="settings_identity_key_warning">这是你的身份密钥——它就是你的账户本身。任何获取此二维码或文本的人都可以冒充你并读取你的消息，而且与设备密钥不同，它无法被撤销。请将其备份到安全的地方，并且只在你自己拥有的设备上、在私密场所显示它。</string>
+    <string name="settings_identity_key_qr_content_description">身份密钥二维码</string>
+    <string name="settings_identity_key_empty">此设备上没有身份密钥</string>
+
+    <!-- ShowKeyScreen -->
+    <string name="settings_device_key_title">显示设备密钥</string>
+    <string name="settings_device_key_warning">这是此设备的密钥。它授权此设备连接消息服务并接收你的消息——它不是你的身份密钥。任何获取此二维码或文本的人都可以以此设备的身份连接并读取发送给它的消息。与身份密钥不同，泄露的设备密钥可以被撤销：从设备列表中移除此设备即可切断连接。请只在你自己拥有的设备上、在私密场所显示它。</string>
+    <string name="settings_device_key_qr_content_description">设备密钥二维码</string>
+    <string name="settings_device_key_empty">此设备上没有设备密钥</string>
+
+    <!-- DeviceListItems -->
+    <string name="settings_device_no_recent_activity">暂无最近活动</string>
+
+    <!-- data/AvatarPreparer: user-facing upload validation errors -->
+    <string name="settings_avatar_error_not_image">请选择一张图片</string>
+    <string name="settings_avatar_error_unsupported">图片格式不受支持或已损坏</string>
+    <string name="settings_avatar_error_cannot_open">无法打开图片</string>
+
+    <!-- data/DevicePairingRepository -->
+    <string name="settings_pairing_error_no_active">当前没有正在进行的配对</string>
+    <string name="settings_pairing_error_no_identity">此设备上没有用户身份</string>
+    <string name="settings_pairing_error_invalid_code">不是有效的 Photon 配对码</string>
+    <string name="settings_default_device_name">新设备</string>
+
+    <!-- data/SettingsRepository -->
+    <string name="settings_repository_error_not_connected">未连接到消息服务</string>
+    <string name="settings_repository_error_invalid_device_id">设备 ID 无效</string>
+
+    <!-- SettingsViewModel: user-facing status/error messages -->
+    <string name="settings_profile_save_error">无法保存资料：%1$s</string>
+    <string name="settings_passphrase_saved_message">口令已保存</string>
+    <string name="settings_passphrase_set_error">无法设置口令：%1$s</string>
+    <string name="settings_passphrase_removed_message">口令已移除</string>
+    <string name="settings_passphrase_remove_error">无法移除口令：%1$s</string>
+    <string name="settings_photo_update_error">无法更新头像：%1$s</string>
+    <string name="settings_photo_remove_error">无法移除头像：%1$s</string>
+    <string name="settings_theme_change_error">无法更改主题：%1$s</string>
+    <string name="settings_notifications_update_error">无法更新通知设置：%1$s</string>
+    <string name="settings_sign_out_error">无法退出登录：%1$s</string>
+    <string name="settings_unknown_error">未知错误</string>
+</resources>

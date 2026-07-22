@@ -22,6 +22,7 @@
 
 package io.bosonnetwork.photon.feature.chat.data
 
+import android.content.Context
 import io.bosonnetwork.photon.core.boson.BosonSessionManager
 import io.bosonnetwork.photon.core.boson.awaitResult
 import io.bosonnetwork.photon.core.model.AppError
@@ -29,6 +30,7 @@ import io.bosonnetwork.photon.core.model.DisplayProfile
 import io.bosonnetwork.photon.core.model.ProfileResolver
 import io.bosonnetwork.photon.core.model.cachedDisplay
 import io.bosonnetwork.photon.core.model.shortId
+import io.bosonnetwork.photon.feature.chat.R
 import io.bosonnetwork.photon.feature.chat.model.AttachmentCarrier
 import io.bosonnetwork.photon.feature.chat.model.AttachmentKind
 import io.bosonnetwork.photon.feature.chat.model.AttachmentSource
@@ -52,6 +54,7 @@ import io.bosonnetwork.photonmessaging.InviteTicket
 import io.bosonnetwork.photonmessaging.Message
 import io.bosonnetwork.photonmessaging.MessageListener
 import io.bosonnetwork.photonmessaging.MessagingClient
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -147,13 +150,16 @@ class ChatRepositoryImpl @Inject constructor(
     private val mediaPreparer: MediaPreparer,
     private val cache: AttachmentCache,
     private val profileResolver: ProfileResolver,
+    @ApplicationContext private val context: Context,
 ) : ChatRepository {
 
     private fun client(): MessagingClient =
-        session.messagingClient ?: throw AppError.Network("Not connected to the messaging service")
+        session.messagingClient
+            ?: throw AppError.Network(context.getString(R.string.chat_error_not_connected_messaging))
 
     private fun ionStore(): IonStore =
-        session.ionStore ?: throw AppError.Network("Not connected to the storage service")
+        session.ionStore
+            ?: throw AppError.Network(context.getString(R.string.chat_error_not_connected_storage))
 
     private fun myId(): Id? = session.messagingClient?.userId
 
@@ -269,7 +275,7 @@ class ChatRepositoryImpl @Inject constructor(
         val parsed = try {
             InviteTicket.fromBytes(ticket)
         } catch (e: Exception) {
-            throw AppError.InvalidInput("Invalid invite ticket", e)
+            throw AppError.InvalidInput(context.getString(R.string.chat_error_invalid_invite_ticket), e)
         }
         client().joinChannel(parsed).awaitResult().id.toString()
     }
@@ -300,7 +306,7 @@ class ChatRepositoryImpl @Inject constructor(
                 file
             }
             is AttachmentSource.Local ->
-                Result.failure(AppError.InvalidInput("Attachment is still sending"))
+                Result.failure(AppError.InvalidInput(context.getString(R.string.chat_error_attachment_still_sending)))
         }
 
     override suspend fun sendAttachment(recipientId: String, uriString: String): Result<Unit> = runCatching {
@@ -401,7 +407,7 @@ class ChatRepositoryImpl @Inject constructor(
             val expected = try {
                 Id.of(source.contentId)
             } catch (e: Exception) {
-                throw AppError.Integrity("Malformed content id", e)
+                throw AppError.Integrity(context.getString(R.string.chat_error_malformed_content_id), e)
             }
 
             // A private temp file per download (never a shared "<name>.part") so parallel fetches can
@@ -414,11 +420,11 @@ class ChatRepositoryImpl @Inject constructor(
                     store.get(peerId, refId, part.toPath()).awaitResult()
 
                 val obj = meta.orElse(null)
-                    ?: throw AppError.NotFound("Attachment is no longer available")
+                    ?: throw AppError.NotFound(context.getString(R.string.chat_error_attachment_unavailable))
                 // End-to-end integrity: the library verifies bytes against the server-advertised content
                 // id; additionally pin it to the content id the sender committed to in the message.
                 if (obj.contentId != expected)
-                    throw AppError.Integrity("Attachment content id mismatch")
+                    throw AppError.Integrity(context.getString(R.string.chat_error_content_id_mismatch))
                 if (!part.renameTo(cached)) part.copyTo(cached, overwrite = true)
             } finally {
                 part.delete()
@@ -485,7 +491,7 @@ class ChatRepositoryImpl @Inject constructor(
                     .send().awaitResult()
 
             is AttachmentSource.Local ->
-                throw AppError.InvalidInput("Attachment is still sending")
+                throw AppError.InvalidInput(context.getString(R.string.chat_error_attachment_still_sending))
         }
         Unit
     }
@@ -563,7 +569,7 @@ class ChatRepositoryImpl @Inject constructor(
         }
 
     private fun memberCountLabel(count: Int): String =
-        if (count == 1) "1 member" else "$count members"
+        context.resources.getQuantityString(R.plurals.chat_channel_member_count, count, count)
 
     /** Splits an `ions://<peerId>/<refId>` URI into (peerId, refId). */
     private fun parseIonUri(uri: String): Pair<Id, Id> {

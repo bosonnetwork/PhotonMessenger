@@ -28,6 +28,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import io.bosonnetwork.photon.core.model.AppError
+import io.bosonnetwork.photon.feature.chat.R
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayOutputStream
 import javax.inject.Inject
@@ -81,21 +82,21 @@ class MediaPreparer @Inject constructor(
 
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         resolver.openInputStream(uri).use { input ->
-            requireNotNull(input) { "Cannot open image" }
+            requireNotNull(input) { context.getString(R.string.chat_error_cannot_open_image) }
             BitmapFactory.decodeStream(input, null, bounds)
         }
         val srcW = bounds.outWidth
         val srcH = bounds.outHeight
         if (srcW <= 0 || srcH <= 0)
-            throw AppError.InvalidInput("Unsupported or corrupt image")
+            throw AppError.InvalidInput(context.getString(R.string.chat_error_unsupported_or_corrupt_image))
 
         val decodeOpts = BitmapFactory.Options().apply {
             inSampleSize = sampleSizeFor(srcW, srcH, MAX_DIMENSION)
         }
         val decoded = resolver.openInputStream(uri).use { input ->
-            requireNotNull(input) { "Cannot open image" }
+            requireNotNull(input) { context.getString(R.string.chat_error_cannot_open_image) }
             BitmapFactory.decodeStream(input, null, decodeOpts)
-        } ?: throw AppError.InvalidInput("Unsupported or corrupt image")
+        } ?: throw AppError.InvalidInput(context.getString(R.string.chat_error_unsupported_or_corrupt_image))
 
         val scaled = scaleToMax(decoded, MAX_DIMENSION)
         if (scaled !== decoded) decoded.recycle()
@@ -117,11 +118,13 @@ class MediaPreparer @Inject constructor(
 
     private fun readRaw(uri: Uri, mime: String, displayName: String): PreparedMedia {
         val bytes = context.contentResolver.openInputStream(uri).use { input ->
-            requireNotNull(input) { "Cannot open file" }
+            requireNotNull(input) { context.getString(R.string.chat_error_cannot_open_file) }
             input.readBytes()
         }
         if (bytes.size > MAX_RAW_BYTES)
-            throw AppError.InvalidInput("File too large (max ${MAX_RAW_BYTES / (1024 * 1024)} MB)")
+            throw AppError.InvalidInput(
+                context.getString(R.string.chat_error_file_too_large, (MAX_RAW_BYTES / (1024 * 1024)).toInt()),
+            )
         return PreparedMedia(bytes, mime, displayName, null, null)
     }
 

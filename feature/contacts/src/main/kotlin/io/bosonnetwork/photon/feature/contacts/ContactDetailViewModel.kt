@@ -22,9 +22,12 @@
 
 package io.bosonnetwork.photon.feature.contacts
 
+import android.content.Context
+import androidx.annotation.StringRes
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.bosonnetwork.photon.core.model.ProfileResolver
 import io.bosonnetwork.photon.core.model.toDisplay
 import io.bosonnetwork.photon.feature.contacts.data.ContactRepository
@@ -54,6 +57,7 @@ class ContactDetailViewModel @Inject constructor(
     private val repository: ContactRepository,
     profileResolver: ProfileResolver,
     savedStateHandle: SavedStateHandle,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     val contactId: String = checkNotNull(savedStateHandle["contactId"]) { "contactId arg missing" }
@@ -84,25 +88,37 @@ class ContactDetailViewModel @Inject constructor(
     private val _removed = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val removed = _removed.asSharedFlow()
 
-    fun setMuted(muted: Boolean) = run("Couldn't update contact") { repository.setMuted(contactId, muted) }
+    fun setMuted(muted: Boolean) =
+        run(R.string.contacts_error_prefix_update_contact) { repository.setMuted(contactId, muted) }
 
-    fun setBlocked(blocked: Boolean) = run("Couldn't update contact") { repository.setBlocked(contactId, blocked) }
+    fun setBlocked(blocked: Boolean) =
+        run(R.string.contacts_error_prefix_update_contact) { repository.setBlocked(contactId, blocked) }
 
-    fun setRemark(remark: String?) = run("Couldn't update alias") { repository.setRemark(contactId, remark) }
+    fun setRemark(remark: String?) =
+        run(R.string.contacts_error_prefix_update_alias) { repository.setRemark(contactId, remark) }
 
     fun remove() {
         viewModelScope.launch {
             repository.removeContact(contactId)
                 .onSuccess { _removed.tryEmit(Unit) }
-                .onFailure { e -> _messages.tryEmit("Couldn't remove contact: ${e.message ?: "unknown error"}") }
+                .onFailure { e ->
+                    _messages.tryEmit(errorMessage(R.string.contacts_error_prefix_remove_contact, e))
+                }
         }
     }
 
-    private fun run(failurePrefix: String, action: suspend () -> Result<Unit>) {
+    private fun run(@StringRes failurePrefixRes: Int, action: suspend () -> Result<Unit>) {
         viewModelScope.launch {
             action().onFailure { e ->
-                _messages.tryEmit("$failurePrefix: ${e.message ?: "unknown error"}")
+                _messages.tryEmit(errorMessage(failurePrefixRes, e))
             }
         }
     }
+
+    private fun errorMessage(@StringRes failurePrefixRes: Int, e: Throwable): String =
+        context.getString(
+            R.string.contacts_error_format,
+            context.getString(failurePrefixRes),
+            e.message ?: context.getString(R.string.contacts_error_unknown),
+        )
 }

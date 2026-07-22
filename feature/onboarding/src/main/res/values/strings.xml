@@ -1,0 +1,77 @@
+<resources>
+    <string name="onb_welcome_title">Photon</string>
+    <string name="onb_welcome_tagline">Federated messaging powered by BosonNetwork</string>
+
+    <string name="onb_server_step_title">Connect to your super node</string>
+    <string name="onb_server_url_label">Server URL</string>
+    <string name="onb_server_url_placeholder">https://your-node:9000</string>
+    <string name="onb_server_id_label">Server ID (advanced)</string>
+    <string name="onb_server_id_placeholder">Boson node id (for a self-signed server)</string>
+    <string name="onb_server_id_supporting_text">Required to trust a self-signed HTTPS server; leave blank for a public CA.</string>
+    <string name="onb_advanced_options">Advanced options</string>
+    <string name="onb_continue">Continue</string>
+
+    <string name="onb_choose_identity_title">Set up your identity</string>
+    <string name="onb_choose_identity_desc_can_create">Create a new identity key, or bring an existing one from another device.</string>
+    <string name="onb_choose_identity_desc_import_only">This device needs your identity key. Import it from a device where you are already signed in.</string>
+    <string name="onb_create_new_identity">Create new identity</string>
+    <string name="onb_scan_qr_another_device">Scan QR from another device</string>
+    <string name="onb_enter_key_manually">Enter key manually</string>
+
+    <string name="onb_enter_identity_key_title">Enter your identity key</string>
+    <string name="onb_paste_key_desc">Paste your user private key (base58 or hex) from another device.</string>
+    <string name="onb_private_key_label">Private key</string>
+    <string name="onb_import_identity">Import identity</string>
+    <string name="onb_back">Back</string>
+
+    <string name="onb_create_profile_title">Create your profile</string>
+    <string name="onb_display_name_label">Display name</string>
+    <string name="onb_bio_label">Bio (optional)</string>
+    <string name="onb_passphrase_optional_label">Passphrase (optional)</string>
+    <string name="onb_passphrase_optional_supporting">Protects sensitive actions like adding a device. You can set this later in Settings.</string>
+    <string name="onb_create_account">Create account</string>
+
+    <string name="onb_passphrase_title">Enter your account passphrase</string>
+    <string name="onb_passphrase_desc">Your account is protected by a passphrase. Enter it to register this device.</string>
+    <string name="onb_passphrase_label">Passphrase</string>
+    <string name="onb_register_device">Register this device</string>
+
+    <string name="onb_solving_title">Creating your account</string>
+    <string name="onb_solving_desc">Running a one-time security check on this device. This can take a few seconds, and the time varies from run to run.</string>
+    <string name="onb_cancel">Cancel</string>
+
+    <string name="onb_setup_account_title">Set up your account</string>
+    <string name="onb_create_new_account">Create a new account</string>
+    <string name="onb_pow_no_signin_desc">No sign-in needed. A quick one-time security check runs on this device.</string>
+    <string name="onb_already_have_account">Already have an account?</string>
+    <string name="onb_add_from_another_device">Add from another device</string>
+    <string name="onb_other_sign_in_ways">Other ways to sign in</string>
+    <string name="onb_continue_with_provider">Continue with %1$s</string>
+    <string name="onb_change_super_node">Change super node</string>
+
+    <string name="onb_backup_key_title">Back up your identity key</string>
+    <string name="onb_backup_key_desc">This key is your BosonNetwork identity. It is the ONLY way to access and restore your account on another device, and if you lose it no one can recover it for you. Save it somewhere safe and private before continuing.</string>
+    <string name="onb_identity_key_qr_cd">Identity key QR</string>
+    <string name="onb_copied">Copied</string>
+    <string name="onb_copy_key">Copy key</string>
+    <string name="onb_saved_key_ack">I have saved my identity key somewhere safe.</string>
+
+    <string name="onb_scan_identity_qr_title">Scan the identity QR</string>
+    <string name="onb_camera_permission_needed">Camera permission is needed to scan the QR.</string>
+    <string name="onb_grant_camera_access">Grant camera access</string>
+
+    <!-- ViewModel / repository user-facing error and status messages -->
+    <string name="onb_error_secure_connection">Couldn\'t establish a secure connection. If this server uses a self-signed certificate, enter its Server ID under Advanced options.</string>
+    <string name="onb_error_cant_reach_server">Couldn\'t reach that server</string>
+    <string name="onb_error_invalid_key">Invalid key</string>
+    <string name="onb_error_register_device_failed">Couldn\'t register this device</string>
+    <string name="onb_error_create_account_failed">Couldn\'t create your account; please try again</string>
+
+    <string name="onb_error_invalid_server_id">Invalid Server ID (expected a Boson node id)</string>
+    <string name="onb_error_pow_timeout">Couldn\'t complete the security check in time; please try again</string>
+    <string name="onb_error_registration_rejected">Registration was rejected; please try again</string>
+    <string name="onb_error_identity_taken">That identity is already taken; please try again</string>
+    <string name="onb_error_pow_verify_failed">Couldn\'t verify the security check; please try again</string>
+    <string name="onb_error_key_mismatch">This key does not match your account identity</string>
+    <string name="onb_error_no_user_identity">No user identity on this device</string>
+</resources>

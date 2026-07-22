@@ -34,8 +34,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.bosonnetwork.photon.core.model.shortId
+import io.bosonnetwork.photon.feature.settings.R
 import io.bosonnetwork.photon.feature.settings.model.UiDevice
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -121,10 +123,12 @@ internal fun DeviceDetails(device: UiDevice, modifier: Modifier = Modifier) {
  * stays on one line. Online/offline state is conveyed by the status icon, not this text. Falls back to
  * a neutral label when neither a time nor an address is available.
  */
+@Composable
 internal fun UiDevice.activityLine(): String {
     val time = lastActive.takeIf { it > 0 }?.let { formatDeviceTimestamp(it) }
     val address = lastAddress?.takeIf { it.isNotBlank() }
-    return listOfNotNull(time, address).joinToString(" - ").ifEmpty { "No recent activity" }
+    return listOfNotNull(time, address).joinToString(" - ")
+        .ifEmpty { stringResource(R.string.settings_device_no_recent_activity) }
 }
 
 // ISO 8601 date-time with a space instead of 'T' (e.g. 2026-07-17 14:03:22). The API returns UTC epoch

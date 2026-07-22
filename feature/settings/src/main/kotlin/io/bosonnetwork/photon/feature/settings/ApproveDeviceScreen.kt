@@ -55,12 +55,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.bosonnetwork.photon.feature.settings.R
 
 /**
  * "Approve a device" - scans a new device's pairing QR, confirms what is being authorized, then seals
@@ -89,10 +91,13 @@ fun ApproveDeviceScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Approve a device") },
+                title = { Text(stringResource(R.string.settings_approve_device_action)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.settings_back_content_description),
+                        )
                     }
                 },
             )
@@ -104,42 +109,45 @@ fun ApproveDeviceScreen(
                     if (hasCameraPermission) {
                         QrScanner(onScanned = viewModel::onScanned, modifier = Modifier.fillMaxSize())
                         Text(
-                            "Point the camera at the QR shown on the new device",
+                            stringResource(R.string.settings_approve_scan_hint),
                             style = MaterialTheme.typography.bodyMedium,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp),
                         )
                     } else {
                         CenteredAction(
-                            message = "Camera access is needed to scan the pairing code.",
-                            actionLabel = "Grant camera access",
+                            message = stringResource(R.string.settings_camera_permission_message),
+                            actionLabel = stringResource(R.string.settings_camera_permission_action),
                             onAction = { permissionLauncher.launch(Manifest.permission.CAMERA) },
                         )
                     }
                 }
 
                 is ApproveDeviceUiState.Loading ->
-                    LoadingState(label = "Reading pairing request...")
+                    LoadingState(label = stringResource(R.string.settings_approve_loading_reading))
 
                 is ApproveDeviceUiState.Approving ->
-                    LoadingState(label = "Authorizing device...")
+                    LoadingState(label = stringResource(R.string.settings_approve_loading_authorizing))
 
                 is ApproveDeviceUiState.Confirm -> {
                     var passphrase by remember { mutableStateOf("") }
                     AlertDialog(
                         onDismissRequest = viewModel::rescan,
-                        title = { Text("Authorize this device?") },
+                        title = { Text(stringResource(R.string.settings_approve_confirm_title)) },
                         text = {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(
-                                    "\"${s.info.deviceName}\" (${s.info.appName}) wants to sign in to your " +
-                                        "account. Approving shares your encrypted identity key with it.",
+                                    stringResource(
+                                        R.string.settings_approve_confirm_body,
+                                        s.info.deviceName,
+                                        s.info.appName,
+                                    ),
                                 )
                                 if (s.needsPassphrase) {
                                     OutlinedTextField(
                                         value = passphrase,
                                         onValueChange = { passphrase = it },
-                                        label = { Text("Passphrase") },
+                                        label = { Text(stringResource(R.string.settings_passphrase_label)) },
                                         singleLine = true,
                                         isError = s.passphraseError != null,
                                         visualTransformation = PasswordVisualTransformation(),
@@ -155,25 +163,29 @@ fun ApproveDeviceScreen(
                             Button(
                                 onClick = { viewModel.approve(passphrase.takeIf { s.needsPassphrase }) },
                                 enabled = !s.needsPassphrase || passphrase.isNotBlank(),
-                            ) { Text("Approve") }
+                            ) { Text(stringResource(R.string.settings_approve_action)) }
                         },
                         dismissButton = {
-                            TextButton(onClick = viewModel::deny) { Text("Deny") }
+                            TextButton(onClick = viewModel::deny) { Text(stringResource(R.string.settings_deny_action)) }
                         },
                     )
                 }
 
                 is ApproveDeviceUiState.Done ->
                     CenteredAction(
-                        message = if (s.approved) "Device approved." else "Request denied.",
-                        actionLabel = "Done",
+                        message = if (s.approved) {
+                            stringResource(R.string.settings_approve_done_approved)
+                        } else {
+                            stringResource(R.string.settings_approve_done_denied)
+                        },
+                        actionLabel = stringResource(R.string.settings_action_done),
                         onAction = onFinished,
                     )
 
                 is ApproveDeviceUiState.Failed ->
                     CenteredAction(
                         message = s.message,
-                        actionLabel = "Scan again",
+                        actionLabel = stringResource(R.string.settings_scan_again_action),
                         onAction = viewModel::rescan,
                     )
             }

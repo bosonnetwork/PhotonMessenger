@@ -22,6 +22,7 @@
 
 package io.bosonnetwork.photon.feature.onboarding.data
 
+import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
@@ -76,6 +77,9 @@ class AuthRepositoryRegistrationTest {
     private lateinit var repository: AuthRepository
     private lateinit var repoTokenStore: FakeTokenStore
 
+    /** Relaxed: only used to resolve user-facing error strings, whose exact text no test checks. */
+    private fun fakeContext(): Context = mockk(relaxed = true)
+
     /** The super node id the Director's GET /client/id currently reports. */
     private var nodeId = "NODE-1"
 
@@ -121,6 +125,7 @@ class AuthRepositoryRegistrationTest {
             tokenStore = repoTokenStore,
             keyManager = keyManager,
             profileManager = profileManager,
+            context = fakeContext(),
         )
     }
 

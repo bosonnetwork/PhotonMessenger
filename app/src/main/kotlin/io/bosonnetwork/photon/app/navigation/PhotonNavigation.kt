@@ -22,21 +22,23 @@
 
 package io.bosonnetwork.photon.app.navigation
 
+import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.People
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
+import io.bosonnetwork.photon.app.R
 
 /** Top-level navigation destinations (design spec section 5 navigation). */
 enum class TopLevelDestination(
     val route: String,
-    val label: String,
+    @StringRes val labelRes: Int,
     val icon: ImageVector,
 ) {
-    HOME("home", "Chats", Icons.Outlined.Chat),
-    CONTACTS("contacts", "Contacts", Icons.Outlined.People),
-    SETTINGS("settings", "Settings", Icons.Outlined.Settings),
+    HOME("home", R.string.app_nav_chats, Icons.Outlined.Chat),
+    CONTACTS("contacts", R.string.app_nav_contacts, Icons.Outlined.People),
+    SETTINGS("settings", R.string.app_nav_settings, Icons.Outlined.Settings),
 }
 
 /** Non-top-level routes. */
@@ -50,5 +52,6 @@ object Routes {
     const val APPROVE_DEVICE = "approveDevice"
     const val SHOW_KEY = "showKey"
     const val SHOW_IDENTITY_KEY = "showIdentityKey"
+    const val LANGUAGE = "language"
     const val FORWARD = "forward"
 }

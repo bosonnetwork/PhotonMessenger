@@ -63,6 +63,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -71,6 +72,7 @@ import io.bosonnetwork.photon.core.designsystem.component.EmptyState
 import io.bosonnetwork.photon.core.designsystem.component.ErrorState
 import io.bosonnetwork.photon.core.designsystem.component.LoadingState
 import io.bosonnetwork.photon.core.designsystem.component.ResponsiveContent
+import io.bosonnetwork.photon.feature.settings.R
 import io.bosonnetwork.photon.feature.settings.model.UiDevice
 
 /**
@@ -96,10 +98,13 @@ fun SessionsScreen(
         topBar = {
             TopAppBar(
                 scrollBehavior = topBarScroll,
-                title = { Text("Sessions") },
+                title = { Text(stringResource(R.string.settings_sessions_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.settings_back_content_description),
+                        )
                     }
                 },
             )
@@ -109,9 +114,13 @@ fun SessionsScreen(
         ResponsiveContent(modifier = Modifier.padding(padding)) {
             when {
                 state.loading -> LoadingState()
-                state.error != null -> ErrorState(state.error ?: "Error")
+                state.error != null ->
+                    ErrorState(state.error ?: stringResource(R.string.settings_unknown_error))
                 state.sessions.isEmpty() ->
-                    EmptyState("No active sessions", icon = Icons.Outlined.Devices)
+                    EmptyState(
+                        stringResource(R.string.settings_sessions_empty),
+                        icon = Icons.Outlined.Devices,
+                    )
                 else -> LazyColumn(Modifier.fillMaxSize()) {
                     items(state.sessions, key = { it.deviceId }) { session ->
                         SessionRow(session, onRevoke = { revokeTarget = it })
@@ -156,13 +165,10 @@ private fun RevokeSessionDialog(
     var alsoRemoveDevice by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Revoke session?") },
+        title = { Text(stringResource(R.string.settings_revoke_session_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(
-                    "${device.name} is signed out of the messaging service. The device stays " +
-                        "registered and can reconnect later.",
-                )
+                Text(stringResource(R.string.settings_revoke_session_body, device.name))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -176,9 +182,9 @@ private fun RevokeSessionDialog(
                 ) {
                     Checkbox(checked = alsoRemoveDevice, onCheckedChange = null)
                     Column {
-                        Text("Also remove this device from your account")
+                        Text(stringResource(R.string.settings_revoke_also_remove_title))
                         Text(
-                            "The device is deregistered and can no longer sign in with its device key.",
+                            stringResource(R.string.settings_revoke_also_remove_subtitle),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -187,9 +193,9 @@ private fun RevokeSessionDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(alsoRemoveDevice) }) { Text("Revoke") }
+            TextButton(onClick = { onConfirm(alsoRemoveDevice) }) { Text(stringResource(R.string.settings_revoke_action)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.settings_action_cancel)) } },
     )
 }
 
@@ -203,7 +209,11 @@ private fun SessionRow(session: UiDevice, onRevoke: (UiDevice) -> Unit) {
             // it announced for TalkBack now that the text label is gone. It centers on the title line.
             Icon(
                 imageVector = if (session.online) Icons.Filled.Circle else Icons.Outlined.Circle,
-                contentDescription = if (session.online) "Online" else "Offline",
+                contentDescription = if (session.online) {
+                    stringResource(R.string.settings_session_online_content_description)
+                } else {
+                    stringResource(R.string.settings_session_offline_content_description)
+                },
                 tint = if (session.online) {
                     MaterialTheme.colorScheme.primary
                 } else {
@@ -220,11 +230,11 @@ private fun SessionRow(session: UiDevice, onRevoke: (UiDevice) -> Unit) {
                     // The current device's own session cannot be revoked here (the service rejects it).
                     Icon(
                         Icons.Filled.Smartphone,
-                        contentDescription = "This device",
+                        contentDescription = stringResource(R.string.settings_session_current_content_description),
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 } else {
-                    TextButton(onClick = { onRevoke(session) }) { Text("Revoke") }
+                    TextButton(onClick = { onRevoke(session) }) { Text(stringResource(R.string.settings_revoke_action)) }
                 }
             }
         },

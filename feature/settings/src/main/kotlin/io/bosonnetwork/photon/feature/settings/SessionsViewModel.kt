@@ -22,9 +22,12 @@
 
 package io.bosonnetwork.photon.feature.settings
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.bosonnetwork.photon.core.model.AppError
+import io.bosonnetwork.photon.feature.settings.R
 import io.bosonnetwork.photon.feature.settings.data.SettingsRepository
 import io.bosonnetwork.photon.feature.settings.model.PassphrasePrompt
 import io.bosonnetwork.photon.feature.settings.model.UiDevice
@@ -54,6 +57,7 @@ data class SessionsUiState(
 @HiltViewModel
 class SessionsViewModel @Inject constructor(
     private val repository: SettingsRepository,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SessionsUiState())
@@ -87,7 +91,8 @@ class SessionsViewModel @Inject constructor(
         viewModelScope.launch {
             val revoked = repository.revokeSession(deviceId)
             if (revoked.isFailure) {
-                _messages.tryEmit("Couldn't revoke session: ${revoked.exceptionOrNull()?.message ?: "unknown error"}")
+                val reason = revoked.exceptionOrNull()?.message ?: context.getString(R.string.settings_unknown_error)
+                _messages.tryEmit(context.getString(R.string.settings_session_revoke_error, reason))
                 return@launch
             }
             if (alsoRemoveDevice) {
@@ -122,9 +127,18 @@ class SessionsViewModel @Inject constructor(
             is AppError.PassphraseRequired ->
                 _uiState.update { it.copy(passphrasePrompt = PassphrasePrompt(deviceId)) }
             is AppError.Forbidden ->
-                _uiState.update { it.copy(passphrasePrompt = PassphrasePrompt(deviceId, "Wrong passphrase")) }
-            else ->
-                _messages.tryEmit("Couldn't remove device: ${error.message ?: "unknown error"}")
+                _uiState.update {
+                    it.copy(
+                        passphrasePrompt = PassphrasePrompt(
+                            deviceId,
+                            context.getString(R.string.settings_wrong_passphrase),
+                        ),
+                    )
+                }
+            else -> {
+                val reason = error.message ?: context.getString(R.string.settings_unknown_error)
+                _messages.tryEmit(context.getString(R.string.settings_device_remove_error, reason))
+            }
         }
     }
 }

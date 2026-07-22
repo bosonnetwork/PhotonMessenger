@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ConfirmDialog: default dismiss action -->
+    <string name="ds_action_cancel">Cancel</string>
+
+    <!-- StateViews: default retry action on ErrorState -->
+    <string name="ds_action_retry">Retry</string>
+
+    <!-- CountBadge: shown instead of the exact number once the count exceeds the cap -->
+    <string name="ds_count_badge_overflow">99+</string>
+
+    <!-- TimeFormat: chat day-header labels -->
+    <string name="ds_time_today">Today</string>
+    <string name="ds_time_yesterday">Yesterday</string>
+</resources>

@@ -1,0 +1,128 @@
+<resources>
+    <!-- ChatScreen: permissions / file-open snackbars -->
+    <string name="chat_storage_permission_needed">需要存储权限才能保存</string>
+    <string name="chat_mic_permission_needed">需要麦克风权限才能录制语音消息</string>
+    <string name="chat_no_app_to_open_file">没有可打开此文件的应用</string>
+
+    <!-- ChatScreen: common actions -->
+    <string name="chat_action_retry">重试</string>
+    <string name="chat_action_delete">删除</string>
+    <string name="chat_action_copy">复制</string>
+    <string name="chat_action_save">保存</string>
+    <string name="chat_action_forward">转发</string>
+    <string name="chat_action_open">打开</string>
+    <string name="chat_action_join">加入</string>
+    <string name="chat_action_ignore">忽略</string>
+    <string name="chat_action_share">分享</string>
+
+    <!-- ChatScreen: content descriptions -->
+    <string name="chat_cd_back">返回</string>
+    <string name="chat_cd_scroll_to_newest">滚动到最新消息</string>
+    <string name="chat_cd_attach">添加附件</string>
+    <string name="chat_cd_delete_recording">删除录音</string>
+    <string name="chat_cd_send_voice_message">发送语音消息</string>
+    <string name="chat_cd_send">发送</string>
+    <string name="chat_cd_record_voice_message">录制语音消息</string>
+    <string name="chat_cd_recording_locked">录音已锁定</string>
+    <string name="chat_cd_close">关闭</string>
+    <string name="chat_cd_more">更多</string>
+    <string name="chat_cd_channel">频道</string>
+
+    <!-- ChatScreen: delete-message dialog -->
+    <string name="chat_delete_message_title">删除消息?</string>
+    <string name="chat_delete_message_text">此操作仅从本设备删除该消息。</string>
+    <string name="chat_not_delivered_tap_retry">未送达,点击重试</string>
+
+    <!-- ChatScreen: channel-invite bubble -->
+    <string name="chat_invite_label">频道邀请</string>
+    <string name="chat_channel_fallback_name">频道</string>
+    <string name="chat_invite_status_sent">邀请已发送</string>
+    <string name="chat_invite_status_joined">已加入</string>
+    <string name="chat_invite_status_expired">邀请已过期</string>
+    <string name="chat_invite_status_dismissed">邀请已忽略</string>
+
+    <!-- ChatScreen: message delivery status -->
+    <string name="chat_status_sending">发送中</string>
+    <string name="chat_status_sent">已发送</string>
+    <string name="chat_status_failed">发送失败</string>
+
+    <!-- ChatScreen: voice / file attachment bubbles -->
+    <string name="chat_a11y_voice_playing">语音消息,%1$s,正在播放,点击暂停</string>
+    <string name="chat_a11y_voice_paused">语音消息,%1$s,点击播放</string>
+    <string name="chat_status_sending_ellipsis">发送中...</string>
+    <string name="chat_status_downloading_ellipsis">下载中...</string>
+    <string name="chat_tap_to_retry">点击重试</string>
+
+    <!-- ChatScreen: composer -->
+    <string name="chat_composer_placeholder">消息</string>
+    <string name="chat_slide_to_cancel">滑动取消</string>
+    <string name="chat_hold_to_record_hint">按住录音,松开发送</string>
+
+    <!-- ConversationsScreen -->
+    <string name="chat_conversations_title">聊天</string>
+    <string name="chat_new_chat">新建聊天</string>
+    <string name="chat_search_placeholder">搜索</string>
+    <string name="chat_no_conversations_match">没有与“%1$s”匹配的对话</string>
+    <string name="chat_no_conversations_yet">还没有对话。\n从联系人开始一个新对话吧。</string>
+    <string name="chat_delete_conversation_title">删除对话?</string>
+    <string name="chat_delete_conversation_text">此操作将从您的账户中删除与“%1$s”的消息记录。该%2$s不会被删除。</string>
+    <string name="chat_channel_word">频道</string>
+    <string name="chat_contact_word">联系人</string>
+    <string name="chat_no_messages_yet">暂无消息</string>
+    <string name="chat_delete_conversation_action">删除对话</string>
+
+    <!-- ForwardScreen -->
+    <string name="chat_no_chats_match">没有与“%1$s”匹配的聊天</string>
+    <string name="chat_no_contacts_to_forward">暂无可转发的联系人。</string>
+    <string name="chat_section_recent_chats">最近聊天</string>
+    <string name="chat_section_contacts">联系人</string>
+    <string name="chat_forward_to_title">转发至</string>
+
+    <!-- ViewModel-surfaced errors / status (ChatViewModel, ConversationsViewModel, ForwardViewModel) -->
+    <string name="chat_error_unknown">未知错误</string>
+    <string name="chat_error_unavailable">不可用</string>
+    <string name="chat_error_download_failed">下载失败</string>
+    <string name="chat_error_load_older">无法加载更早的消息:%1$s</string>
+    <string name="chat_error_delete_message">无法删除消息:%1$s</string>
+    <string name="chat_error_join_channel">无法加入频道:%1$s</string>
+    <string name="chat_error_play">无法播放:%1$s</string>
+    <string name="chat_error_save">无法保存:%1$s</string>
+    <string name="chat_error_open">无法打开:%1$s</string>
+    <string name="chat_error_share">无法分享:%1$s</string>
+    <string name="chat_saved_to">已保存到%1$s</string>
+    <string name="chat_error_start_recording">无法开始录音</string>
+    <string name="chat_error_recording_failed">录音失败</string>
+    <string name="chat_error_not_connected_send">未连接。您的%1$s未能发送 - 恢复在线后请重试。</string>
+    <string name="chat_error_send_timeout">您的%1$s已超时。</string>
+    <string name="chat_error_send_failed">无法发送您的%1$s。</string>
+    <string name="chat_noun_message">消息</string>
+    <string name="chat_noun_attachment">附件</string>
+    <string name="chat_noun_voice_message">语音消息</string>
+    <string name="chat_error_delete_conversation">无法删除对话:%1$s</string>
+    <string name="chat_error_load_contacts">无法加载联系人:%1$s</string>
+    <string name="chat_error_forward">无法转发:%1$s</string>
+    <string name="chat_forward_label_attachment_fallback">附件</string>
+
+    <!-- Repository / MediaSaver-surfaced errors (shown via e.message in the ViewModel snackbars above) -->
+    <string name="chat_error_not_connected_messaging">未连接到消息服务</string>
+    <string name="chat_error_not_connected_storage">未连接到存储服务</string>
+    <string name="chat_error_invalid_invite_ticket">无效的邀请凭证</string>
+    <string name="chat_error_attachment_still_sending">附件仍在发送中</string>
+    <string name="chat_error_malformed_content_id">内容 ID 格式错误</string>
+    <string name="chat_error_content_id_mismatch">附件内容 ID 不匹配</string>
+    <string name="chat_error_attachment_unavailable">附件已不可用</string>
+    <string name="chat_error_create_destination_file">无法创建目标文件</string>
+    <string name="chat_error_open_destination_file">无法打开目标文件</string>
+    <string name="chat_folder_pictures">图片</string>
+    <string name="chat_folder_downloads">下载</string>
+
+    <!-- MediaPreparer-surfaced errors -->
+    <string name="chat_error_cannot_open_image">无法打开图片</string>
+    <string name="chat_error_unsupported_or_corrupt_image">不支持或已损坏的图片</string>
+    <string name="chat_error_cannot_open_file">无法打开文件</string>
+    <string name="chat_error_file_too_large">文件过大(最大 %1$d MB)</string>
+
+    <plurals name="chat_channel_member_count">
+        <item quantity="other">%1$d 位成员</item>
+    </plurals>
+</resources>

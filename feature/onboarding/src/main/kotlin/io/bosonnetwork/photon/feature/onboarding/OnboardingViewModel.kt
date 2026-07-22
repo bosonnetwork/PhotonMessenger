@@ -22,6 +22,7 @@
 
 package io.bosonnetwork.photon.feature.onboarding
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.bosonnetwork.photon.core.network.model.ProviderDto
@@ -32,6 +33,7 @@ import io.bosonnetwork.photon.feature.onboarding.data.AuthRepository
 import io.bosonnetwork.photon.feature.onboarding.data.ProfileSeed
 import io.bosonnetwork.photon.feature.onboarding.data.SessionState
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -92,6 +94,7 @@ data class ProfileHandoff(val existingProfileId: String?, val seed: ProfileSeed?
 class OnboardingViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     deepLinkBus: AuthDeepLinkBus,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(OnboardingUiState())
@@ -194,12 +197,11 @@ class OnboardingViewModel @Inject constructor(
         var cause: Throwable? = e
         while (cause != null) {
             if (cause is javax.net.ssl.SSLException || cause is java.security.cert.CertificateException) {
-                return "Couldn't establish a secure connection. If this server uses a " +
-                    "self-signed certificate, enter its Server ID under Advanced options."
+                return context.getString(R.string.onb_error_secure_connection)
             }
             cause = cause.cause
         }
-        return e.message ?: "Couldn't reach that server"
+        return e.message ?: context.getString(R.string.onb_error_cant_reach_server)
     }
 
     /** Reloads providers for the confirmed server (retry affordance on the sign-in step). */
@@ -298,7 +300,7 @@ class OnboardingViewModel @Inject constructor(
                         else -> applySession(state)
                     }
                 }
-                .onFailure { e -> _uiState.update { it.copy(loading = false, error = e.message ?: "Invalid key") } }
+                .onFailure { e -> _uiState.update { it.copy(loading = false, error = e.message ?: context.getString(R.string.onb_error_invalid_key)) } }
         }
     }
 
@@ -346,7 +348,10 @@ class OnboardingViewModel @Inject constructor(
                 .onSuccess { _uiState.update { it.copy(loading = false, step = OnboardingStep.Authenticated) } }
                 .onFailure { e ->
                     _uiState.update {
-                        it.copy(loading = false, error = e.toDirectorError().message ?: "Couldn't register this device")
+                        it.copy(
+                            loading = false,
+                            error = e.toDirectorError().message ?: context.getString(R.string.onb_error_register_device_failed),
+                        )
                     }
                 }
         }
@@ -446,7 +451,7 @@ class OnboardingViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         step = OnboardingStep.CreateProfile,
-                        error = e.message ?: "Couldn't create your account; please try again",
+                        error = e.message ?: context.getString(R.string.onb_error_create_account_failed),
                     )
                 }
             }

@@ -64,6 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
@@ -105,10 +106,13 @@ fun ContactDetailScreen(
         topBar = {
             TopAppBar(
                 scrollBehavior = topBarScroll,
-                title = { Text("Contact") },
+                title = { Text(stringResource(R.string.contacts_detail_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.contacts_cd_back),
+                        )
                     }
                 },
             )
@@ -119,8 +123,8 @@ fun ContactDetailScreen(
             val contact = state.contact
             when {
                 state.loading -> LoadingState()
-                state.error != null -> ErrorState(state.error ?: "Error")
-                contact == null -> EmptyState("This contact is no longer in your list")
+                state.error != null -> ErrorState(state.error ?: stringResource(R.string.contacts_error_generic))
+                contact == null -> EmptyState(stringResource(R.string.contacts_contact_removed))
                 else -> ContactDetailContent(
                     contact = contact,
                     bio = state.bio,
@@ -140,19 +144,18 @@ fun ContactDetailScreen(
     val contact = state.contact
     if (showRemoveConfirm && contact != null) {
         ConfirmDialog(
-            title = "Remove contact?",
-            text = "${contact.displayName} will be removed from your contacts. " +
-                "You can add them again later with their ID.",
-            confirmLabel = "Remove",
+            title = stringResource(R.string.contacts_remove_contact_title),
+            text = stringResource(R.string.contacts_remove_contact_message, contact.displayName),
+            confirmLabel = stringResource(R.string.contacts_action_remove),
             onConfirm = { viewModel.remove() },
             onDismiss = { showRemoveConfirm = false },
         )
     }
     if (showBlockConfirm && contact != null) {
         ConfirmDialog(
-            title = "Block ${contact.displayName}?",
-            text = "You will no longer receive messages from this contact.",
-            confirmLabel = "Block",
+            title = stringResource(R.string.contacts_block_contact_title, contact.displayName),
+            text = stringResource(R.string.contacts_block_contact_message),
+            confirmLabel = stringResource(R.string.contacts_action_block),
             onConfirm = { viewModel.setBlocked(true) },
             onDismiss = { showBlockConfirm = false },
         )
@@ -182,6 +185,7 @@ private fun ContactDetailContent(
 ) {
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
+    val userIdCopiedMessage = stringResource(R.string.contacts_user_id_copied)
 
     Column(
         modifier = Modifier
@@ -222,7 +226,7 @@ private fun ContactDetailContent(
             if (contact.blocked) {
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Blocked",
+                    stringResource(R.string.contacts_status_blocked),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -235,14 +239,14 @@ private fun ContactDetailContent(
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("Message")
+                Text(stringResource(R.string.contacts_action_message))
             }
         }
         HorizontalDivider()
 
         // Identity
         ListItem(
-            headlineContent = { Text("User ID") },
+            headlineContent = { Text(stringResource(R.string.contacts_label_user_id)) },
             supportingContent = {
                 Text(
                     contact.id,
@@ -253,16 +257,19 @@ private fun ContactDetailContent(
             trailingContent = {
                 IconButton(onClick = {
                     clipboard.setText(AnnotatedString(contact.id))
-                    scope.launch { snackbar.showSnackbar("User ID copied") }
+                    scope.launch { snackbar.showSnackbar(userIdCopiedMessage) }
                 }) {
-                    Icon(Icons.Filled.ContentCopy, contentDescription = "Copy user ID")
+                    Icon(
+                        Icons.Filled.ContentCopy,
+                        contentDescription = stringResource(R.string.contacts_cd_copy_user_id),
+                    )
                 }
             },
         )
         ListItem(
-            headlineContent = { Text("Alias") },
+            headlineContent = { Text(stringResource(R.string.contacts_label_alias)) },
             supportingContent = {
-                Text(contact.remark ?: "None - tap to set a local name")
+                Text(contact.remark ?: stringResource(R.string.contacts_alias_none_hint))
             },
             modifier = Modifier.clickable(role = Role.Button, onClick = onEditAlias),
         )
@@ -275,8 +282,8 @@ private fun ContactDetailContent(
                 onValueChange = onMute,
                 role = Role.Switch,
             ),
-            headlineContent = { Text("Mute") },
-            supportingContent = { Text("Silence notifications from this contact") },
+            headlineContent = { Text(stringResource(R.string.contacts_label_mute)) },
+            supportingContent = { Text(stringResource(R.string.contacts_mute_description)) },
             trailingContent = { Switch(checked = contact.muted, onCheckedChange = null) },
         )
         ListItem(
@@ -285,8 +292,8 @@ private fun ContactDetailContent(
                 onValueChange = { onBlockRequest() },
                 role = Role.Switch,
             ),
-            headlineContent = { Text("Block") },
-            supportingContent = { Text("Stop receiving messages from this contact") },
+            headlineContent = { Text(stringResource(R.string.contacts_action_block)) },
+            supportingContent = { Text(stringResource(R.string.contacts_block_description)) },
             trailingContent = { Switch(checked = contact.blocked, onCheckedChange = null) },
         )
         HorizontalDivider()
@@ -296,7 +303,11 @@ private fun ContactDetailContent(
             onClick = onRemove,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
-            Text("Remove contact", color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+            Text(
+                stringResource(R.string.contacts_button_remove_contact),
+                color = MaterialTheme.colorScheme.error,
+                textAlign = TextAlign.Center,
+            )
         }
         Spacer(Modifier.height(16.dp))
     }

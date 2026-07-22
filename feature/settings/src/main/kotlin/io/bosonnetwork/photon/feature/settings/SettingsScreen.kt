@@ -86,6 +86,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.semantics.contentDescription
@@ -101,9 +102,11 @@ import io.bosonnetwork.photon.core.designsystem.component.ConfirmDialog
 import io.bosonnetwork.photon.core.designsystem.component.LoadingState
 import io.bosonnetwork.photon.core.designsystem.component.PhotonAvatar
 import io.bosonnetwork.photon.core.designsystem.component.ResponsiveContent
+import io.bosonnetwork.photon.core.model.AppLanguage
 import io.bosonnetwork.photon.core.model.NotificationPreferences
 import io.bosonnetwork.photon.core.model.ThemeMode
 import io.bosonnetwork.photon.core.qr.rememberQrBitmap
+import io.bosonnetwork.photon.feature.settings.R
 import io.bosonnetwork.photon.feature.settings.model.UiProfile
 import kotlinx.coroutines.launch
 
@@ -111,9 +114,11 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    currentLanguage: AppLanguage,
     onOpenAccounts: () -> Unit,
     onOpenSessions: () -> Unit,
     onOpenDevices: () -> Unit,
+    onOpenLanguage: () -> Unit,
     onShowIdentityKey: () -> Unit,
     onSignedOut: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
@@ -146,7 +151,7 @@ fun SettingsScreen(
     val topBarScroll = TopAppBarDefaults.enterAlwaysScrollBehavior()
     Scaffold(
         modifier = Modifier.nestedScroll(topBarScroll.nestedScrollConnection),
-        topBar = { TopAppBar(title = { Text("Settings") }, scrollBehavior = topBarScroll) },
+        topBar = { TopAppBar(title = { Text(stringResource(R.string.settings_title)) }, scrollBehavior = topBarScroll) },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         ResponsiveContent(modifier = Modifier.padding(padding)) {
@@ -165,7 +170,7 @@ fun SettingsScreen(
                     HorizontalDivider()
 
                     state.profile?.let { profile ->
-                        SectionTitle("Account")
+                        SectionTitle(stringResource(R.string.settings_section_account))
                         UserIdRow(
                             userId = profile.id,
                             snackbar = snackbar,
@@ -174,26 +179,31 @@ fun SettingsScreen(
                         )
                         HorizontalDivider()
                         ListItem(
-                            headlineContent = { Text("Accounts") },
-                            supportingContent = { Text("Switch between or add accounts on this device") },
+                            headlineContent = { Text(stringResource(R.string.settings_accounts_title)) },
+                            supportingContent = { Text(stringResource(R.string.settings_accounts_subtitle)) },
                             modifier = Modifier.clickable(role = Role.Button, onClick = onOpenAccounts),
                         )
                         HorizontalDivider()
                     }
 
-                    SectionTitle("Appearance")
+                    SectionTitle(stringResource(R.string.settings_section_appearance))
                     ThemeModeRow(theme.mode, viewModel::setThemeMode)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                         SwitchRow(
-                            title = "Dynamic color",
-                            subtitle = "Use colors from your wallpaper",
+                            title = stringResource(R.string.settings_dynamic_color_title),
+                            subtitle = stringResource(R.string.settings_dynamic_color_subtitle),
                             checked = theme.dynamicColor,
                             onCheckedChange = viewModel::setDynamicColor,
                         )
                     }
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.settings_language_title)) },
+                        supportingContent = { Text(currentLanguage.displayName()) },
+                        modifier = Modifier.clickable(role = Role.Button, onClick = onOpenLanguage),
+                    )
                     HorizontalDivider()
 
-                    SectionTitle("Notifications")
+                    SectionTitle(stringResource(R.string.settings_section_notifications))
                     NotificationSettings(
                         prefs = notifications,
                         onEnabledChange = viewModel::setNotificationsEnabled,
@@ -201,7 +211,7 @@ fun SettingsScreen(
                     )
                     HorizontalDivider()
 
-                    SectionTitle("Security")
+                    SectionTitle(stringResource(R.string.settings_section_security))
                     PassphraseSection(
                         protected = state.profile?.passphraseProtected == true,
                         onSet = { showSetPassphrase = true },
@@ -210,15 +220,15 @@ fun SettingsScreen(
                     HorizontalDivider()
 
                     ListItem(
-                        headlineContent = { Text("Sessions") },
-                        supportingContent = { Text("Manage where you're signed in") },
+                        headlineContent = { Text(stringResource(R.string.settings_sessions_title)) },
+                        supportingContent = { Text(stringResource(R.string.settings_sessions_subtitle)) },
                         modifier = Modifier.clickable(role = Role.Button, onClick = onOpenSessions),
                     )
                     HorizontalDivider()
 
                     ListItem(
-                        headlineContent = { Text("Devices") },
-                        supportingContent = { Text("Manage devices registered to your account") },
+                        headlineContent = { Text(stringResource(R.string.settings_devices_title)) },
+                        supportingContent = { Text(stringResource(R.string.settings_devices_subtitle)) },
                         modifier = Modifier.clickable(role = Role.Button, onClick = onOpenDevices),
                     )
                     HorizontalDivider()
@@ -230,7 +240,7 @@ fun SettingsScreen(
                     OutlinedButton(
                         onClick = { confirmSignOut = true },
                         modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    ) { Text("Sign out", color = MaterialTheme.colorScheme.error) }
+                    ) { Text(stringResource(R.string.settings_sign_out_action), color = MaterialTheme.colorScheme.error) }
                 }
             }
         }
@@ -276,11 +286,9 @@ fun SettingsScreen(
 
     if (confirmSignOut) {
         ConfirmDialog(
-            title = "Sign out?",
-            text = "This ends your session on this device. Your identity, conversations, and settings " +
-                "stay on this device, so you can sign back in anytime. You'll need to sign in again to " +
-                "reconnect.",
-            confirmLabel = "Sign out",
+            title = stringResource(R.string.settings_sign_out_confirm_title),
+            text = stringResource(R.string.settings_sign_out_confirm_body),
+            confirmLabel = stringResource(R.string.settings_sign_out_action),
             onConfirm = { viewModel.signOut() },
             onDismiss = { confirmSignOut = false },
         )
@@ -300,6 +308,8 @@ private fun UserIdRow(
 ) {
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val bosonIdCopiedMessage = stringResource(R.string.settings_boson_id_copied_message)
 
     // Hidden gesture, in the spirit of Android's "tap Build number 7 times": tapping the row body 7
     // times in quick succession unlocks the identity-key screen (which is itself reveal-gated). The
@@ -321,16 +331,16 @@ private fun UserIdRow(
                     // Dismiss the previous hint so the countdown updates promptly (toast-like).
                     snackbar.currentSnackbarData?.dismiss()
                     snackbar.showSnackbar(
-                        if (remaining == 1) {
-                            "1 more tap to show your identity key"
-                        } else {
-                            "$remaining more taps to show your identity key"
-                        },
+                        context.resources.getQuantityString(
+                            R.plurals.settings_identity_key_taps_remaining,
+                            remaining,
+                            remaining,
+                        ),
                     )
                 }
             }
         },
-        headlineContent = { Text("Boson ID") },
+        headlineContent = { Text(stringResource(R.string.settings_boson_id_title)) },
         supportingContent = {
             // A full base58 id (~44 chars) wraps onto multiple lines even at a small size, so show an
             // abbreviated first-8...last-8 form on a single line, in the same style as the other
@@ -341,12 +351,18 @@ private fun UserIdRow(
             Row {
                 IconButton(onClick = {
                     clipboard.setText(AnnotatedString(userId))
-                    scope.launch { snackbar.showSnackbar("Boson ID copied") }
+                    scope.launch { snackbar.showSnackbar(bosonIdCopiedMessage) }
                 }) {
-                    Icon(Icons.Filled.ContentCopy, contentDescription = "Copy Boson ID")
+                    Icon(
+                        Icons.Filled.ContentCopy,
+                        contentDescription = stringResource(R.string.settings_boson_id_copy_content_description),
+                    )
                 }
                 IconButton(onClick = onShowQr) {
-                    Icon(Icons.Filled.QrCode2, contentDescription = "Show Boson ID as QR")
+                    Icon(
+                        Icons.Filled.QrCode2,
+                        contentDescription = stringResource(R.string.settings_boson_id_qr_content_description),
+                    )
                 }
             }
         },
@@ -368,7 +384,7 @@ private fun abbreviateId(id: String): String =
 private fun UserIdQrDialog(userId: String, name: String, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("My ID") },
+        title = { Text(stringResource(R.string.settings_my_id_title)) },
         text = {
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -376,13 +392,15 @@ private fun UserIdQrDialog(userId: String, name: String, onDismiss: () -> Unit) 
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
-                    "Friends scan or type this ID to add ${name.ifBlank { "you" }}. " +
-                        "It is public and safe to share.",
+                    stringResource(
+                        R.string.settings_my_id_message,
+                        name.ifBlank { stringResource(R.string.settings_my_id_fallback_name) },
+                    ),
                 )
                 rememberQrBitmap(userId)?.let { qr ->
                     Image(
                         bitmap = qr,
-                        contentDescription = "User ID QR code",
+                        contentDescription = stringResource(R.string.settings_my_id_qr_content_description),
                         modifier = Modifier.size(220.dp),
                     )
                 }
@@ -398,7 +416,7 @@ private fun UserIdQrDialog(userId: String, name: String, onDismiss: () -> Unit) 
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.settings_action_done)) } },
     )
 }
 
@@ -408,12 +426,19 @@ private fun AboutSection() {
     val version = remember {
         runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
-        }.getOrNull() ?: "unknown"
+        }.getOrNull()
     }
-    SectionTitle("About")
+    SectionTitle(stringResource(R.string.settings_section_about))
     ListItem(
-        headlineContent = { Text("Photon") },
-        supportingContent = { Text("Version $version - Powered by BosonNetwork") },
+        headlineContent = { Text(stringResource(R.string.settings_about_app_name)) },
+        supportingContent = {
+            Text(
+                stringResource(
+                    R.string.settings_about_version_line,
+                    version ?: stringResource(R.string.settings_about_version_unknown),
+                ),
+            )
+        },
     )
 }
 
@@ -432,14 +457,20 @@ private fun PassphraseSection(
     val tint = if (protected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
     ListItem(
         headlineContent = {
-            Text(if (protected) "Protected by a passphrase" else "No passphrase set")
+            Text(
+                if (protected) {
+                    stringResource(R.string.settings_passphrase_protected_title)
+                } else {
+                    stringResource(R.string.settings_passphrase_unset_title)
+                },
+            )
         },
         supportingContent = {
             Text(
                 if (protected) {
-                    "A passphrase is required to change sensitive account settings."
+                    stringResource(R.string.settings_passphrase_protected_subtitle)
                 } else {
-                    "Add a passphrase to protect sensitive account changes even if your key is exposed."
+                    stringResource(R.string.settings_passphrase_unset_subtitle)
                 },
             )
         },
@@ -449,9 +480,17 @@ private fun PassphraseSection(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        OutlinedButton(onClick = onSet) { Text(if (protected) "Change passphrase" else "Set passphrase") }
+        OutlinedButton(onClick = onSet) {
+            Text(
+                if (protected) {
+                    stringResource(R.string.settings_passphrase_change_action)
+                } else {
+                    stringResource(R.string.settings_passphrase_set_action)
+                },
+            )
+        }
         if (protected) {
-            TextButton(onClick = onRemove) { Text("Remove") }
+            TextButton(onClick = onRemove) { Text(stringResource(R.string.settings_action_remove)) }
         }
     }
 }
@@ -470,17 +509,25 @@ private fun SetPassphraseDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (protected) "Change passphrase" else "Set passphrase") },
+        title = {
+            Text(
+                if (protected) {
+                    stringResource(R.string.settings_passphrase_change_action)
+                } else {
+                    stringResource(R.string.settings_passphrase_set_action)
+                },
+            )
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (protected) {
-                    PassphraseField(current, { current = it }, "Current passphrase")
+                    PassphraseField(current, { current = it }, stringResource(R.string.settings_passphrase_current_label))
                 }
-                PassphraseField(new, { new = it }, "New passphrase")
-                PassphraseField(confirm, { confirm = it }, "Confirm new passphrase")
+                PassphraseField(new, { new = it }, stringResource(R.string.settings_passphrase_new_label))
+                PassphraseField(confirm, { confirm = it }, stringResource(R.string.settings_passphrase_confirm_label))
                 if (confirm.isNotBlank() && !matches) {
                     Text(
-                        "Passphrases don't match",
+                        stringResource(R.string.settings_passphrase_mismatch),
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -491,9 +538,9 @@ private fun SetPassphraseDialog(
             TextButton(
                 onClick = { onSubmit(current.takeIf { protected }, new) },
                 enabled = matches && currentOk,
-            ) { Text("Save") }
+            ) { Text(stringResource(R.string.settings_action_save)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.settings_action_cancel)) } },
     )
 }
 
@@ -505,17 +552,19 @@ private fun RemovePassphraseDialog(
     var current by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Remove passphrase") },
+        title = { Text(stringResource(R.string.settings_passphrase_remove_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Enter your current passphrase to remove it. Sensitive changes will no longer be protected.")
-                PassphraseField(current, { current = it }, "Current passphrase")
+                Text(stringResource(R.string.settings_passphrase_remove_body))
+                PassphraseField(current, { current = it }, stringResource(R.string.settings_passphrase_current_label))
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSubmit(current) }, enabled = current.isNotBlank()) { Text("Remove") }
+            TextButton(onClick = { onSubmit(current) }, enabled = current.isNotBlank()) {
+                Text(stringResource(R.string.settings_action_remove))
+            }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.settings_action_cancel)) } },
     )
 }
 
@@ -542,18 +591,19 @@ private fun ProfileHeader(
         Modifier.fillMaxWidth().padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        val changePhotoContentDescription = stringResource(R.string.settings_change_photo_content_description)
         PhotonAvatar(
             model = profile?.avatarUrl,
             name = profile?.name,
             size = 96.dp,
-            contentDescription = "Change profile photo",
+            contentDescription = changePhotoContentDescription,
             modifier = Modifier
                 .clickable(onClick = onChangePhoto)
-                .semantics { contentDescription = "Change profile photo" },
+                .semantics { contentDescription = changePhotoContentDescription },
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = profile?.name?.takeIf { it.isNotBlank() } ?: "No name set",
+            text = profile?.name?.takeIf { it.isNotBlank() } ?: stringResource(R.string.settings_no_name_set),
             style = MaterialTheme.typography.titleLarge,
         )
         profile?.email?.takeIf { it.isNotBlank() }?.let {
@@ -565,13 +615,17 @@ private fun ProfileHeader(
         }
         profile?.plan?.takeIf { it.isNotBlank() }?.let {
             Spacer(Modifier.height(4.dp))
-            Text("Plan: $it", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                stringResource(R.string.settings_plan_line, it),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onEdit) { Text("Edit profile") }
+            OutlinedButton(onClick = onEdit) { Text(stringResource(R.string.settings_edit_profile_action)) }
             if (profile?.avatarUrl != null) {
-                TextButton(onClick = onRemovePhoto) { Text("Remove photo") }
+                TextButton(onClick = onRemovePhoto) { Text(stringResource(R.string.settings_remove_photo_action)) }
             }
         }
     }
@@ -607,32 +661,31 @@ private fun NotificationSettings(
     ) { refreshKey++ }
 
     SwitchRow(
-        title = "Message notifications",
-        subtitle = "Notify me about new messages",
+        title = stringResource(R.string.settings_notifications_enabled_title),
+        subtitle = stringResource(R.string.settings_notifications_enabled_subtitle),
         checked = prefs.enabled,
         onCheckedChange = onEnabledChange,
     )
     if (prefs.enabled) {
         SwitchRow(
-            title = "Show preview",
-            subtitle = "Show sender and message text",
+            title = stringResource(R.string.settings_notifications_preview_title),
+            subtitle = stringResource(R.string.settings_notifications_preview_subtitle),
             checked = prefs.showPreview,
             onCheckedChange = onPreviewChange,
         )
         if (!notificationsAllowed) {
             GuidanceCard(
-                title = "Notifications are turned off",
-                body = "Allow notifications so Photon can alert you to new messages.",
-                action = "Allow",
+                title = stringResource(R.string.settings_notifications_off_title),
+                body = stringResource(R.string.settings_notifications_off_body),
+                action = stringResource(R.string.settings_notifications_allow_action),
                 onClick = { requestPermission.launch(Manifest.permission.POST_NOTIFICATIONS) },
             )
         }
         if (!batteryUnrestricted) {
             GuidanceCard(
-                title = "Allow background activity",
-                body = "Exempt Photon from battery optimization so it stays connected and " +
-                    "delivers messages reliably.",
-                action = "Open settings",
+                title = stringResource(R.string.settings_battery_title),
+                body = stringResource(R.string.settings_battery_body),
+                action = stringResource(R.string.settings_open_settings_action),
                 onClick = {
                     runCatching {
                         context.startActivity(
@@ -728,31 +781,31 @@ private fun EditProfileDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Edit profile") },
+        title = { Text(stringResource(R.string.settings_edit_profile_action)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Name") },
+                    label = { Text(stringResource(R.string.settings_name_label)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = email,
                     onValueChange = { email = it },
-                    label = { Text("Email") },
+                    label = { Text(stringResource(R.string.settings_email_label)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = bio,
                     onValueChange = { bio = it },
-                    label = { Text("Bio") },
+                    label = { Text(stringResource(R.string.settings_bio_label)) },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (requirePassphrase) {
-                    PassphraseField(passphrase, { passphrase = it }, "Passphrase")
+                    PassphraseField(passphrase, { passphrase = it }, stringResource(R.string.settings_passphrase_label))
                 }
             }
         },
@@ -760,14 +813,15 @@ private fun EditProfileDialog(
             TextButton(
                 onClick = { onSave(name.trim(), bio.trim(), email.trim(), passphrase.takeIf { requirePassphrase }) },
                 enabled = !saving && passphraseOk,
-            ) { Text("Save") }
+            ) { Text(stringResource(R.string.settings_action_save)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.settings_action_cancel)) } },
     )
 }
 
+@Composable
 private fun ThemeMode.label(): String = when (this) {
-    ThemeMode.SYSTEM -> "System"
-    ThemeMode.LIGHT -> "Light"
-    ThemeMode.DARK -> "Dark"
+    ThemeMode.SYSTEM -> stringResource(R.string.settings_theme_system)
+    ThemeMode.LIGHT -> stringResource(R.string.settings_theme_light)
+    ThemeMode.DARK -> stringResource(R.string.settings_theme_dark)
 }

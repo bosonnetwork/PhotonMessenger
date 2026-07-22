@@ -22,8 +22,10 @@
 
 package io.bosonnetwork.photon.feature.contacts
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.bosonnetwork.photon.feature.contacts.data.ChannelRepository
 import io.bosonnetwork.photon.feature.contacts.model.UiChannelPermission
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -54,6 +56,7 @@ sealed interface CreateChannelEvent {
 @HiltViewModel
 class CreateChannelViewModel @Inject constructor(
     private val repository: ChannelRepository,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CreateChannelUiState())
@@ -78,7 +81,10 @@ class CreateChannelViewModel @Inject constructor(
                 permission = state.permission,
                 announce = state.announce,
             ).onSuccess { _events.tryEmit(CreateChannelEvent.Created(it)) }
-                .onFailure { _events.tryEmit(CreateChannelEvent.Error(it.message ?: "Couldn't create channel")) }
+                .onFailure {
+                    val message = it.message ?: context.getString(R.string.contacts_error_create_channel_failed)
+                    _events.tryEmit(CreateChannelEvent.Error(message))
+                }
             _uiState.update { it.copy(submitting = false) }
         }
     }

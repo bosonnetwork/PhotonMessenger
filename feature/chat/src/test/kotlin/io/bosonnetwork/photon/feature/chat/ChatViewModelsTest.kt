@@ -22,6 +22,7 @@
 
 package io.bosonnetwork.photon.feature.chat
 
+import android.content.Context
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import io.bosonnetwork.photon.core.boson.ChannelInvite
@@ -36,6 +37,8 @@ import io.bosonnetwork.photon.feature.chat.data.ForwardPayloadStore
 import io.bosonnetwork.photon.feature.chat.data.MediaSaver
 import io.bosonnetwork.photon.feature.chat.data.VoicePlayer
 import io.bosonnetwork.photon.feature.chat.data.VoiceRecorder
+import io.mockk.every
+import io.mockk.mockk
 import io.bosonnetwork.photon.feature.chat.model.AttachmentCarrier
 import io.bosonnetwork.photon.feature.chat.model.AttachmentKind
 import io.bosonnetwork.photon.feature.chat.model.AttachmentSource
@@ -165,8 +168,55 @@ class ChatViewModelsTest {
         override fun setActiveConversation(conversationId: String?) { lastActive = conversationId }
     }
 
+    /**
+     * Minimal string-resource stand-in for the plain-JUnit (non-Robolectric) unit tests: the
+     * ViewModels resolve their user-facing error/status text via [android.content.Context.getString]
+     * now that the chat feature is localized, so tests need a Context that resolves the same resource
+     * ids to their English strings.xml text (kept in sync by hand below). `Context.getString` is a
+     * final convenience method on the real framework class, so it cannot be overridden by subclassing
+     * (only [ContextWrapper.getResources] is open) - a relaxed MockK mock is used instead, since MockK's
+     * inline mock maker can stub final methods without needing a Robolectric runtime.
+     */
+    private val fakeContext: Context = mockk(relaxed = true) {
+        val strings = mapOf(
+            R.string.chat_error_unknown to "unknown error",
+            R.string.chat_error_unavailable to "unavailable",
+            R.string.chat_error_download_failed to "download failed",
+            R.string.chat_error_load_older to "Couldn't load older messages: %1\$s",
+            R.string.chat_error_delete_message to "Couldn't delete message: %1\$s",
+            R.string.chat_error_join_channel to "Couldn't join channel: %1\$s",
+            R.string.chat_error_play to "Couldn't play: %1\$s",
+            R.string.chat_error_save to "Couldn't save: %1\$s",
+            R.string.chat_error_open to "Couldn't open: %1\$s",
+            R.string.chat_error_share to "Couldn't share: %1\$s",
+            R.string.chat_saved_to to "Saved to %1\$s",
+            R.string.chat_error_start_recording to "Couldn't start recording",
+            R.string.chat_error_recording_failed to "Recording failed",
+            R.string.chat_error_not_connected_send to
+                "Not connected. Your %1\$s wasn't sent - retry once you're back online.",
+            R.string.chat_error_send_timeout to "Your %1\$s timed out.",
+            R.string.chat_error_send_failed to "Couldn't send your %1\$s.",
+            R.string.chat_noun_message to "message",
+            R.string.chat_noun_attachment to "attachment",
+            R.string.chat_noun_voice_message to "voice message",
+            R.string.chat_error_delete_conversation to "Couldn't delete conversation: %1\$s",
+            R.string.chat_error_load_contacts to "Couldn't load contacts: %1\$s",
+            R.string.chat_error_forward to "Couldn't forward: %1\$s",
+            R.string.chat_forward_label_attachment_fallback to "attachment",
+        )
+        every { getString(any()) } answers {
+            val id = firstArg<Int>()
+            strings[id] ?: "STRING_$id"
+        }
+        every { getString(any(), *anyVararg()) } answers {
+            val id = firstArg<Int>()
+            val fmtArgs = secondArg<Array<*>>()
+            String.format(strings[id] ?: "STRING_$id", *fmtArgs)
+        }
+    }
+
     private fun conversationsVm(repo: ChatRepository) =
-        ConversationsViewModel(repo, resolver, FakeUnreadTracker())
+        ConversationsViewModel(repo, resolver, FakeUnreadTracker(), fakeContext)
 
     /** In-memory invite-state store; records joined/ignored per message id. */
     private class FakeChannelInviteStore : ChannelInviteStore {
@@ -190,7 +240,7 @@ class ChatViewModelsTest {
     ) =
         ChatViewModel(
             repo, FakeUnreadTracker(), resolver, mediaSaver, ForwardPayloadStore(),
-            recorder, VoicePlayer(), inviteStore,
+            recorder, VoicePlayer(), inviteStore, fakeContext,
             SavedStateHandle(mapOf("conversationId" to conversationId)),
         )
 
@@ -390,7 +440,7 @@ class ChatViewModelsTest {
         )
         val repo = FakeChatRepo(convosFlow, msgsFlow)
         val store = ForwardPayloadStore().apply { set(ForwardPayload.Attachment(attachment)) }
-        val vm = ForwardViewModel(repo, resolver, store)
+        val vm = ForwardViewModel(repo, resolver, store, fakeContext)
 
         vm.forwarded.test {
             vm.forward("target1")
@@ -408,7 +458,7 @@ class ChatViewModelsTest {
     fun `forwarding text dispatches via sendText`() = runTest {
         val repo = FakeChatRepo(convosFlow, msgsFlow)
         val store = ForwardPayloadStore().apply { set(ForwardPayload.Text("hello")) }
-        val vm = ForwardViewModel(repo, resolver, store)
+        val vm = ForwardViewModel(repo, resolver, store, fakeContext)
 
         vm.forwarded.test {
             vm.forward("target2")

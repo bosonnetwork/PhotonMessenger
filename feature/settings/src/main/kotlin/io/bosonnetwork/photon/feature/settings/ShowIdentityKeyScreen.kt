@@ -24,7 +24,9 @@ package io.bosonnetwork.photon.feature.settings
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
+import io.bosonnetwork.photon.feature.settings.R
 
 /**
  * Shows the user IDENTITY key as a QR (and text) so it can be backed up or imported onto another
@@ -39,13 +41,11 @@ fun ShowIdentityKeyScreen(
 ) {
     val keyBase58 = remember { viewModel.userKeyBase58() }
     RevealKeyScaffold(
-        title = "Show identity key",
-        warning = "This is your identity key - it IS your account. Anyone who captures this QR or text " +
-            "can impersonate you and read your messages, and unlike a device key it cannot be revoked. " +
-            "Back it up somewhere safe, and only reveal it on a device you own, in a private place.",
+        title = stringResource(R.string.settings_identity_key_title),
+        warning = stringResource(R.string.settings_identity_key_warning),
         keyBase58 = keyBase58,
-        qrContentDescription = "Identity key QR",
-        emptyMessage = "No identity key on this device",
+        qrContentDescription = stringResource(R.string.settings_identity_key_qr_content_description),
+        emptyMessage = stringResource(R.string.settings_identity_key_empty),
         onBack = onBack,
     )
 }

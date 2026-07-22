@@ -22,11 +22,14 @@
 
 package io.bosonnetwork.photon.feature.contacts.data
 
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.bosonnetwork.photon.core.boson.BosonSessionManager
 import io.bosonnetwork.photon.core.boson.ChannelInvite
 import io.bosonnetwork.photon.core.boson.awaitResult
 import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.core.model.shortId
+import io.bosonnetwork.photon.feature.contacts.R
 import io.bosonnetwork.photon.feature.contacts.model.UiChannel
 import io.bosonnetwork.photon.feature.contacts.model.UiChannelDetail
 import io.bosonnetwork.photon.feature.contacts.model.UiChannelMember
@@ -98,10 +101,12 @@ interface ChannelRepository {
 @Singleton
 class ChannelRepositoryImpl @Inject constructor(
     private val session: BosonSessionManager,
+    @ApplicationContext private val context: Context,
 ) : ChannelRepository {
 
     private fun client(): MessagingClient =
-        session.messagingClient ?: throw AppError.Network("Not connected to the messaging service")
+        session.messagingClient
+            ?: throw AppError.Network(context.getString(R.string.contacts_error_not_connected))
 
     override fun channels(): Flow<List<UiChannel>> = callbackFlow {
         val client = session.messagingClient
@@ -181,7 +186,7 @@ class ChannelRepositoryImpl @Inject constructor(
         val cid = parseId(channelId)
         val invitee = parseId(inviteeId)
         val channel = client.getContact(cid).awaitResult().orElse(null) as? Channel
-            ?: throw AppError.NotFound("Channel not found")
+            ?: throw AppError.NotFound(context.getString(R.string.contacts_channel_not_found))
         val ticket = client.createInviteTicket(cid, invitee).awaitResult()
         // The ticket API mints with the default expiration; mirror it for the display-only expiry (the
         // recipient still gates joining on the ticket's own validity).
@@ -203,7 +208,7 @@ class ChannelRepositoryImpl @Inject constructor(
         val parsed = try {
             InviteTicket.fromString(ticket.trim())
         } catch (e: Exception) {
-            throw AppError.InvalidInput("Invalid invite ticket", e)
+            throw AppError.InvalidInput(context.getString(R.string.contacts_error_invalid_invite_ticket), e)
         }
         client().joinChannel(parsed).awaitResult().id.toString()
     }
@@ -246,7 +251,7 @@ class ChannelRepositoryImpl @Inject constructor(
     override suspend fun updateInfo(channelId: String, name: String?, notice: String?): Result<Unit> = runCatching {
         val client = client()
         val channel = client.getContact(parseId(channelId)).awaitResult().orElse(null) as? Channel
-            ?: throw AppError.NotFound("Channel not found")
+            ?: throw AppError.NotFound(context.getString(R.string.contacts_channel_not_found))
         var editor = channel.editChannel()
         if (name != null) editor = editor.setName(name)
         if (notice != null) editor = editor.setNotice(notice)
@@ -280,6 +285,6 @@ class ChannelRepositoryImpl @Inject constructor(
         try {
             Id.of(text.trim())
         } catch (e: Exception) {
-            throw AppError.InvalidInput("Invalid Boson ID", e)
+            throw AppError.InvalidInput(context.getString(R.string.contacts_error_invalid_boson_id), e)
         }
 }

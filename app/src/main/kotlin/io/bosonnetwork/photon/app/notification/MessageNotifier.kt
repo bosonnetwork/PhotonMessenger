@@ -23,6 +23,7 @@
 package io.bosonnetwork.photon.app.notification
 
 import io.bosonnetwork.photon.app.AppForegroundState
+import io.bosonnetwork.photon.app.R
 import io.bosonnetwork.photon.core.boson.UnreadTracker
 import io.bosonnetwork.photon.core.boson.awaitResult
 import io.bosonnetwork.photon.core.model.ProfileResolver
@@ -32,6 +33,8 @@ import io.bosonnetwork.Id
 import io.bosonnetwork.photonmessaging.Message
 import io.bosonnetwork.photonmessaging.MessageListener
 import io.bosonnetwork.photonmessaging.MessagingClient
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
@@ -49,6 +52,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 @Singleton
 class MessageNotifier @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val gateway: NotificationGateway,
     private val foreground: AppForegroundState,
     private val unreadTracker: UnreadTracker,
@@ -118,10 +122,12 @@ class MessageNotifier @Inject constructor(
     }
 
     private fun previewOf(message: Message): String {
-        val content = runCatching { message.payloadAsContent }.getOrNull() ?: return "New message"
+        val content = runCatching { message.payloadAsContent }.getOrNull()
+            ?: return context.getString(R.string.app_notif_new_message)
         val hasAttachment = content.contentDisposition.orElse(null) != null
-        if (hasAttachment) return "Sent an attachment"
-        return runCatching { content.asText() }.getOrNull()?.takeIf { it.isNotBlank() } ?: "New message"
+        if (hasAttachment) return context.getString(R.string.app_notif_sent_attachment)
+        return runCatching { content.asText() }.getOrNull()?.takeIf { it.isNotBlank() }
+            ?: context.getString(R.string.app_notif_new_message)
     }
 
     private companion object {

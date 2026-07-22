@@ -142,6 +142,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -163,6 +164,7 @@ import io.bosonnetwork.photon.core.designsystem.component.formatBubbleTime
 import io.bosonnetwork.photon.core.designsystem.component.formatDayHeader
 import io.bosonnetwork.photon.core.designsystem.component.identityColor
 import io.bosonnetwork.photon.core.designsystem.component.sameDay
+import io.bosonnetwork.photon.feature.chat.R
 import io.bosonnetwork.photon.feature.chat.data.VoicePlayer
 import io.bosonnetwork.photon.feature.chat.model.AttachmentKind
 import io.bosonnetwork.photon.feature.chat.model.AttachmentSource
@@ -193,6 +195,11 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val uiScope = rememberCoroutineScope()
+    val storagePermissionNeededText = stringResource(R.string.chat_storage_permission_needed)
+    val micPermissionNeededText = stringResource(R.string.chat_mic_permission_needed)
+    val noAppToOpenFileText = stringResource(R.string.chat_no_app_to_open_file)
+    val retryActionLabel = stringResource(R.string.chat_action_retry)
+    val holdToRecordHintText = stringResource(R.string.chat_hold_to_record_hint)
     var draft by remember { mutableStateOf("") }
     // Message pending a delete confirmation (long-press -> Delete). Confirming removes it locally.
     var deleteTarget by remember { mutableStateOf<UiMessage?>(null) }
@@ -212,7 +219,7 @@ fun ChatScreen(
         val target = pendingSave
         pendingSave = null
         if (granted && target != null) viewModel.saveAttachment(target)
-        else if (!granted) uiScope.launch { snackbar.showSnackbar("Storage permission is needed to save") }
+        else if (!granted) uiScope.launch { snackbar.showSnackbar(storagePermissionNeededText) }
     }
 
     fun requestSave(message: UiMessage) {
@@ -240,7 +247,7 @@ fun ChatScreen(
     ) { granted ->
         hasAudioPermission = granted
         if (!granted) uiScope.launch {
-            snackbar.showSnackbar("Microphone permission is needed to record voice messages")
+            snackbar.showSnackbar(micPermissionNeededText)
         }
     }
 
@@ -260,7 +267,7 @@ fun ChatScreen(
             try {
                 context.startActivity(intent)
             } catch (e: ActivityNotFoundException) {
-                snackbar.showSnackbar("No app can open this file")
+                snackbar.showSnackbar(noAppToOpenFileText)
             }
         }
     }
@@ -283,7 +290,7 @@ fun ChatScreen(
         viewModel.sendFailures.collect { failure ->
             val result = snackbar.showSnackbar(
                 message = failure.message,
-                actionLabel = "Retry",
+                actionLabel = retryActionLabel,
                 withDismissAction = true,
             )
             if (result == SnackbarResult.ActionPerformed) viewModel.retrySend(failure)
@@ -372,7 +379,7 @@ fun ChatScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.chat_cd_back))
                     }
                 },
             )
@@ -396,7 +403,7 @@ fun ChatScreen(
                 onCancelRecord = viewModel::cancelRecording,
                 onSendRecord = viewModel::stopAndSendRecording,
                 onRecordTooShort = {
-                    uiScope.launch { snackbar.showSnackbar("Hold to record, release to send") }
+                    uiScope.launch { snackbar.showSnackbar(holdToRecordHintText) }
                 },
             )
         },
@@ -483,7 +490,7 @@ fun ChatScreen(
                         },
                         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                     ) {
-                        Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Scroll to newest")
+                        Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.chat_cd_scroll_to_newest))
                     }
                 }
             }
@@ -492,9 +499,9 @@ fun ChatScreen(
 
     deleteTarget?.let { target ->
         ConfirmDialog(
-            title = "Delete message?",
-            text = "This removes the message from this device only.",
-            confirmLabel = "Delete",
+            title = stringResource(R.string.chat_delete_message_title),
+            text = stringResource(R.string.chat_delete_message_text),
+            confirmLabel = stringResource(R.string.chat_action_delete),
             onConfirm = { viewModel.deleteMessage(target) },
             onDismiss = { deleteTarget = null },
         )
@@ -709,7 +716,7 @@ private fun MessageBubble(
         }
         if (failed) {
             Text(
-                text = "Not delivered. Tap to retry",
+                text = stringResource(R.string.chat_not_delivered_tap_retry),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier
@@ -743,34 +750,34 @@ private fun MessageActionMenu(
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         if (showCopy) {
             DropdownMenuItem(
-                text = { Text("Copy") },
+                text = { Text(stringResource(R.string.chat_action_copy)) },
                 leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) },
                 onClick = { onDismiss(); onCopy() },
             )
         }
         if (showSave) {
             DropdownMenuItem(
-                text = { Text("Save") },
+                text = { Text(stringResource(R.string.chat_action_save)) },
                 leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
                 onClick = { onDismiss(); onSave() },
             )
         }
         if (showForward) {
             DropdownMenuItem(
-                text = { Text("Forward") },
+                text = { Text(stringResource(R.string.chat_action_forward)) },
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.Forward, contentDescription = null) },
                 onClick = { onDismiss(); onForward() },
             )
         }
         if (showOpen) {
             DropdownMenuItem(
-                text = { Text("Open") },
+                text = { Text(stringResource(R.string.chat_action_open)) },
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null) },
                 onClick = { onDismiss(); onOpen() },
             )
         }
         DropdownMenuItem(
-            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+            text = { Text(stringResource(R.string.chat_action_delete), color = MaterialTheme.colorScheme.error) },
             leadingIcon = {
                 Icon(
                     Icons.Filled.Delete,
@@ -815,12 +822,12 @@ private fun InviteCard(
             Spacer(Modifier.width(8.dp))
             Column {
                 Text(
-                    "Channel invitation",
+                    stringResource(R.string.chat_invite_label),
                     style = MaterialTheme.typography.labelSmall,
                     color = mutedColor,
                 )
                 Text(
-                    invite.channelName.ifBlank { "Channel" },
+                    invite.channelName.ifBlank { stringResource(R.string.chat_channel_fallback_name) },
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = onColor,
@@ -831,24 +838,24 @@ private fun InviteCard(
         }
         Spacer(Modifier.height(8.dp))
         when {
-            fromMe -> InviteStatus("Invitation sent", mutedColor)
-            action == InviteAction.JOINED -> InviteStatus("Joined", mutedColor)
-            expired -> InviteStatus("Invitation expired", mutedColor)
+            fromMe -> InviteStatus(stringResource(R.string.chat_invite_status_sent), mutedColor)
+            action == InviteAction.JOINED -> InviteStatus(stringResource(R.string.chat_invite_status_joined), mutedColor)
+            expired -> InviteStatus(stringResource(R.string.chat_invite_status_expired), mutedColor)
             action == InviteAction.IGNORED ->
                 // Soft dismiss: the prompt collapses but joining stays available until the ticket expires.
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "Invitation dismissed",
+                        stringResource(R.string.chat_invite_status_dismissed),
                         style = MaterialTheme.typography.bodySmall,
                         color = mutedColor,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = onJoin) { Text("Join") }
+                    TextButton(onClick = onJoin) { Text(stringResource(R.string.chat_action_join)) }
                 }
             else ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onJoin) { Text("Join") }
-                    TextButton(onClick = onIgnore) { Text("Ignore") }
+                    Button(onClick = onJoin) { Text(stringResource(R.string.chat_action_join)) }
+                    TextButton(onClick = onIgnore) { Text(stringResource(R.string.chat_action_ignore)) }
                 }
         }
     }
@@ -931,9 +938,9 @@ private fun BubbleMeta(message: UiMessage, onColor: Color, modifier: Modifier = 
             Icon(
                 icon,
                 contentDescription = when (message.status) {
-                    MessageStatus.SENDING -> "Sending"
-                    MessageStatus.SENT -> "Sent"
-                    MessageStatus.FAILED -> "Failed"
+                    MessageStatus.SENDING -> stringResource(R.string.chat_status_sending)
+                    MessageStatus.SENT -> stringResource(R.string.chat_status_sent)
+                    MessageStatus.FAILED -> stringResource(R.string.chat_status_failed)
                 },
                 modifier = Modifier.size(13.dp),
                 tint = onColor.copy(alpha = 0.75f),
@@ -1014,8 +1021,11 @@ private fun VoiceAttachment(
     val progress = if (totalMs > 0) (voice.positionMs.toFloat() / totalMs).coerceIn(0f, 1f) else 0f
     // Show elapsed while a play position exists, otherwise the full length.
     val timeLabel = formatDuration(if (voice.positionMs in 1 until totalMs) voice.positionMs else totalMs)
-    val a11y = "Voice message, ${formatDuration(totalMs)}, " +
-        if (voice.playing) "playing, tap to pause" else "tap to play"
+    val a11y = if (voice.playing) {
+        stringResource(R.string.chat_a11y_voice_playing, formatDuration(totalMs))
+    } else {
+        stringResource(R.string.chat_a11y_voice_paused, formatDuration(totalMs))
+    }
     Row(
         modifier = Modifier
             .combinedClickable(onClick = onToggle, onLongClick = onLongPress)
@@ -1138,9 +1148,9 @@ private fun FileAttachment(
     val failed = download is AttachmentDownload.Failed
     val ext = extLabel(attachment.name, attachment.mime)
     val secondary = when {
-        sending -> "Sending..."
-        loading -> "Downloading..."
-        failed -> "Tap to retry"
+        sending -> stringResource(R.string.chat_status_sending_ellipsis)
+        loading -> stringResource(R.string.chat_status_downloading_ellipsis)
+        failed -> stringResource(R.string.chat_tap_to_retry)
         else -> if (ext.isEmpty()) formatSize(attachment.size) else "${formatSize(attachment.size)} . $ext"
     }
     Row(
@@ -1263,7 +1273,7 @@ private fun MessageInput(
                 IconButton(onClick = onAttach) {
                     Icon(
                         Icons.Default.AttachFile,
-                        contentDescription = "Attach",
+                        contentDescription = stringResource(R.string.chat_cd_attach),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -1274,7 +1284,7 @@ private fun MessageInput(
                         .weight(1f)
                         // Remember the single-line field height (blank draft) to size the recording bar.
                         .onSizeChanged { if (value.isBlank()) inputHeight = with(density) { it.height.toDp() } },
-                    placeholder = { Text("Message") },
+                    placeholder = { Text(stringResource(R.string.chat_composer_placeholder)) },
                     maxLines = 5,
                     shape = RoundedCornerShape(24.dp),
                     colors = TextFieldDefaults.colors(
@@ -1294,18 +1304,18 @@ private fun MessageInput(
                     IconButton(onClick = onCancelRecord) {
                         Icon(
                             Icons.Filled.Delete,
-                            contentDescription = "Delete recording",
+                            contentDescription = stringResource(R.string.chat_cd_delete_recording),
                             tint = MaterialTheme.colorScheme.error,
                         )
                     }
                     Spacer(Modifier.width(6.dp))
                     FilledIconButton(onClick = onSendRecord, shape = CircleShape) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send voice message")
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.chat_cd_send_voice_message))
                     }
                 }
                 value.isNotBlank() && !isRecording ->
                     FilledIconButton(onClick = onSend, shape = CircleShape) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.chat_cd_send))
                     }
                 voiceSupported ->
                     MicButton(
@@ -1321,7 +1331,7 @@ private fun MessageInput(
                     )
                 else ->
                     FilledIconButton(onClick = onSend, enabled = false, shape = CircleShape) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.chat_cd_send))
                     }
             }
         }
@@ -1431,7 +1441,7 @@ private fun MicButton(
         ) {
             Icon(
                 Icons.Filled.Mic,
-                contentDescription = "Record voice message",
+                contentDescription = stringResource(R.string.chat_cd_record_voice_message),
                 tint = MaterialTheme.colorScheme.onPrimary,
             )
         }
@@ -1487,7 +1497,7 @@ private fun RecordingBar(
         if (locked) {
             Icon(
                 Icons.Filled.Lock,
-                contentDescription = "Recording locked",
+                contentDescription = stringResource(R.string.chat_cd_recording_locked),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(18.dp),
             )
@@ -1506,7 +1516,7 @@ private fun RecordingBar(
                     modifier = Modifier.size(18.dp),
                 )
                 Text(
-                    "Slide to cancel",
+                    stringResource(R.string.chat_slide_to_cancel),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

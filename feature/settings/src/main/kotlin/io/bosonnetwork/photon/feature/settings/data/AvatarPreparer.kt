@@ -27,6 +27,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import io.bosonnetwork.photon.core.model.AppError
+import io.bosonnetwork.photon.feature.settings.R
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayOutputStream
 import javax.inject.Inject
@@ -47,23 +48,23 @@ class AvatarPreparer @Inject constructor(
         val resolver = context.contentResolver
         val mime = resolver.getType(uri) ?: ""
         if (!mime.startsWith("image/"))
-            throw AppError.InvalidInput("Please choose an image")
+            throw AppError.InvalidInput(context.getString(R.string.settings_avatar_error_not_image))
 
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         resolver.openInputStream(uri).use { input ->
-            requireNotNull(input) { "Cannot open image" }
+            requireNotNull(input) { context.getString(R.string.settings_avatar_error_cannot_open) }
             BitmapFactory.decodeStream(input, null, bounds)
         }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0)
-            throw AppError.InvalidInput("Unsupported or corrupt image")
+            throw AppError.InvalidInput(context.getString(R.string.settings_avatar_error_unsupported))
 
         val decodeOpts = BitmapFactory.Options().apply {
             inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight, MAX_DIMENSION)
         }
         val decoded = resolver.openInputStream(uri).use { input ->
-            requireNotNull(input) { "Cannot open image" }
+            requireNotNull(input) { context.getString(R.string.settings_avatar_error_cannot_open) }
             BitmapFactory.decodeStream(input, null, decodeOpts)
-        } ?: throw AppError.InvalidInput("Unsupported or corrupt image")
+        } ?: throw AppError.InvalidInput(context.getString(R.string.settings_avatar_error_unsupported))
 
         val scaled = scaleToMax(decoded, MAX_DIMENSION)
         if (scaled !== decoded) decoded.recycle()

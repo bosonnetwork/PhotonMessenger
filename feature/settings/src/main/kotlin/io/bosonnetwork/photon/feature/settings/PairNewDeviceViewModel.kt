@@ -22,9 +22,12 @@
 
 package io.bosonnetwork.photon.feature.settings
 
+import android.content.Context
 import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.qualifiers.ApplicationContext
+import io.bosonnetwork.photon.feature.settings.R
 import io.bosonnetwork.photon.feature.settings.data.DevicePairingRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -53,6 +56,7 @@ sealed interface PairNewDeviceUiState {
 @HiltViewModel
 class PairNewDeviceViewModel @Inject constructor(
     private val repository: DevicePairingRepository,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<PairNewDeviceUiState>(PairNewDeviceUiState.Preparing)
@@ -80,7 +84,7 @@ class PairNewDeviceViewModel @Inject constructor(
         listOfNotNull(Build.MANUFACTURER?.replaceFirstChar { it.uppercase() }, Build.MODEL)
             .joinToString(" ")
             .trim()
-            .ifBlank { "Android device" }
+            .ifBlank { context.getString(R.string.settings_device_name_fallback) }
 
-    private fun Throwable.userMessage(): String = message ?: "Pairing failed"
+    private fun Throwable.userMessage(): String = message ?: context.getString(R.string.settings_pairing_failed)
 }

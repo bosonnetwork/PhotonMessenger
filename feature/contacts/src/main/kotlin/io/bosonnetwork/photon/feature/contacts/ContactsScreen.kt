@@ -76,6 +76,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -97,7 +98,14 @@ import io.bosonnetwork.photon.core.qr.QrScanner
 import io.bosonnetwork.photon.feature.contacts.model.UiContact
 import io.bosonnetwork.photon.feature.contacts.model.UiFriendRequest
 
-private enum class ContactsTab(val label: String) { FRIENDS("Friends"), CHANNELS("Channels"), REQUESTS("Requests") }
+private enum class ContactsTab { FRIENDS, CHANNELS, REQUESTS }
+
+@Composable
+private fun ContactsTab.label(): String = when (this) {
+    ContactsTab.FRIENDS -> stringResource(R.string.contacts_tab_friends)
+    ContactsTab.CHANNELS -> stringResource(R.string.contacts_tab_channels)
+    ContactsTab.REQUESTS -> stringResource(R.string.contacts_tab_requests)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -132,16 +140,25 @@ fun ContactsScreen(
         topBar = {
             TopAppBar(
                 scrollBehavior = topBarScroll,
-                title = { Text("Contacts") },
+                title = { Text(stringResource(R.string.contacts_title)) },
                 actions = {
                     IconButton(onClick = { showJoinDialog = true }) {
-                        Icon(Icons.Outlined.AddLink, contentDescription = "Join channel with a ticket")
+                        Icon(
+                            Icons.Outlined.AddLink,
+                            contentDescription = stringResource(R.string.contacts_cd_join_channel),
+                        )
                     }
                     IconButton(onClick = onCreateChannel) {
-                        Icon(Icons.Outlined.GroupAdd, contentDescription = "New channel")
+                        Icon(
+                            Icons.Outlined.GroupAdd,
+                            contentDescription = stringResource(R.string.contacts_cd_new_channel),
+                        )
                     }
                     IconButton(onClick = { showAddDialog = true }) {
-                        Icon(Icons.Outlined.PersonAdd, contentDescription = "Add friend")
+                        Icon(
+                            Icons.Outlined.PersonAdd,
+                            contentDescription = stringResource(R.string.contacts_cd_add_friend),
+                        )
                     }
                 },
             )
@@ -162,6 +179,7 @@ fun ContactsScreen(
                             selected = selectedTab == index,
                             onClick = { selectedTab = index },
                             text = {
+                                val label = tab.label()
                                 // Pending requests are actionable notifications, so they get a badge;
                                 // friend/channel totals stay as a plain "(count)" suffix.
                                 if (tab == ContactsTab.REQUESTS && count > 0) {
@@ -169,11 +187,17 @@ fun ContactsScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     ) {
-                                        Text(tab.label)
+                                        Text(label)
                                         CountBadge(count)
                                     }
                                 } else {
-                                    Text(if (count > 0) "${tab.label} ($count)" else tab.label)
+                                    Text(
+                                        if (count > 0) {
+                                            stringResource(R.string.contacts_tab_count_format, label, count)
+                                        } else {
+                                            label
+                                        },
+                                    )
                                 }
                             },
                         )
@@ -246,9 +270,9 @@ fun ContactsScreen(
 
     blockTarget?.let { contact ->
         ConfirmDialog(
-            title = "Block ${contact.displayName}?",
-            text = "You will no longer receive messages from this contact.",
-            confirmLabel = "Block",
+            title = stringResource(R.string.contacts_block_contact_title, contact.displayName),
+            text = stringResource(R.string.contacts_block_contact_message),
+            confirmLabel = stringResource(R.string.contacts_action_block),
             onConfirm = { viewModel.setBlocked(contact.id, true) },
             onDismiss = { blockTarget = null },
         )
@@ -256,10 +280,9 @@ fun ContactsScreen(
 
     removeTarget?.let { contact ->
         ConfirmDialog(
-            title = "Remove contact?",
-            text = "${contact.displayName} will be removed from your contacts. " +
-                "You can add them again later with their ID.",
-            confirmLabel = "Remove",
+            title = stringResource(R.string.contacts_remove_contact_title),
+            text = stringResource(R.string.contacts_remove_contact_message, contact.displayName),
+            confirmLabel = stringResource(R.string.contacts_action_remove),
             onConfirm = { viewModel.remove(contact.id) },
             onDismiss = { removeTarget = null },
         )
@@ -278,11 +301,13 @@ private fun FriendList(
 ) {
     if (contacts.isEmpty()) {
         EmptyState(
-            "No friends yet.\nShare your user ID (Settings) or add a friend with theirs.",
+            stringResource(R.string.contacts_empty_friends),
             icon = Icons.Outlined.PersonAdd,
         )
         return
     }
+    val mutedLabel = stringResource(R.string.contacts_status_muted)
+    val blockedLabel = stringResource(R.string.contacts_status_blocked)
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         items(contacts, key = { it.id }) { contact ->
             var menuOpen by remember(contact.id) { mutableStateOf(false) }
@@ -303,8 +328,8 @@ private fun FriendList(
                 },
                 supportingContent = {
                     val flags = buildList {
-                        if (contact.muted) add("Muted")
-                        if (contact.blocked) add("Blocked")
+                        if (contact.muted) add(mutedLabel)
+                        if (contact.blocked) add(blockedLabel)
                     }
                     if (flags.isNotEmpty()) {
                         Text(flags.joinToString(", "), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -313,27 +338,44 @@ private fun FriendList(
                 trailingContent = {
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "Actions")
+                            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.contacts_cd_actions))
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             DropdownMenuItem(
-                                text = { Text("View profile") },
+                                text = { Text(stringResource(R.string.contacts_action_view_profile)) },
                                 onClick = { menuOpen = false; onOpenProfile(contact.id) },
                             )
                             DropdownMenuItem(
-                                text = { Text("Edit alias") },
+                                text = { Text(stringResource(R.string.contacts_action_edit_alias)) },
                                 onClick = { menuOpen = false; onEditAlias(contact) },
                             )
                             DropdownMenuItem(
-                                text = { Text(if (contact.muted) "Unmute" else "Mute") },
+                                text = {
+                                    Text(
+                                        stringResource(
+                                            if (contact.muted) R.string.contacts_action_unmute else R.string.contacts_action_mute,
+                                        ),
+                                    )
+                                },
                                 onClick = { menuOpen = false; onMute(contact.id, !contact.muted) },
                             )
                             DropdownMenuItem(
-                                text = { Text(if (contact.blocked) "Unblock" else "Block") },
+                                text = {
+                                    Text(
+                                        stringResource(
+                                            if (contact.blocked) R.string.contacts_action_unblock else R.string.contacts_action_block,
+                                        ),
+                                    )
+                                },
                                 onClick = { menuOpen = false; onBlock(contact) },
                             )
                             DropdownMenuItem(
-                                text = { Text("Remove", color = MaterialTheme.colorScheme.error) },
+                                text = {
+                                    Text(
+                                        stringResource(R.string.contacts_action_remove),
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                },
                                 onClick = { menuOpen = false; onRemove(contact) },
                             )
                         }
@@ -353,7 +395,7 @@ private fun ChannelList(
 ) {
     if (channels.isEmpty()) {
         EmptyState(
-            "No channels yet.\nCreate one with the group icon, or join with an invite ticket.",
+            stringResource(R.string.contacts_empty_channels),
             icon = Icons.Outlined.GroupAdd,
         )
         return
@@ -379,21 +421,33 @@ private fun ChannelList(
                 },
                 supportingContent = {
                     if (channel.muted) {
-                        Text("Muted", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            stringResource(R.string.contacts_status_muted),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 },
                 trailingContent = {
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "Channel actions")
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = stringResource(R.string.contacts_cd_channel_actions),
+                            )
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             DropdownMenuItem(
-                                text = { Text("Channel info") },
+                                text = { Text(stringResource(R.string.contacts_action_channel_info)) },
                                 onClick = { menuOpen = false; onOpenDetail(channel.id) },
                             )
                             DropdownMenuItem(
-                                text = { Text(if (channel.muted) "Unmute" else "Mute") },
+                                text = {
+                                    Text(
+                                        stringResource(
+                                            if (channel.muted) R.string.contacts_action_unmute else R.string.contacts_action_mute,
+                                        ),
+                                    )
+                                },
                                 onClick = { menuOpen = false; onMute(channel.id, !channel.muted) },
                             )
                         }
@@ -411,7 +465,7 @@ private fun RequestList(
     onDecline: (String) -> Unit,
 ) {
     if (requests.isEmpty()) {
-        EmptyState("No pending requests.", icon = Icons.Outlined.PersonAdd)
+        EmptyState(stringResource(R.string.contacts_empty_requests), icon = Icons.Outlined.PersonAdd)
         return
     }
     LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -444,14 +498,18 @@ private fun RequestList(
                         }
                         if (request.hello.isNotBlank()) {
                             Text(
-                                "\"${request.hello}\"",
+                                stringResource(R.string.contacts_request_hello_format, request.hello),
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilledTonalButton(onClick = { onAccept(request.userId) }) { Text("Accept") }
-                            TextButton(onClick = { onDecline(request.userId) }) { Text("Decline") }
+                            FilledTonalButton(onClick = { onAccept(request.userId) }) {
+                                Text(stringResource(R.string.contacts_action_accept))
+                            }
+                            TextButton(onClick = { onDecline(request.userId) }) {
+                                Text(stringResource(R.string.contacts_action_decline))
+                            }
                         }
                     }
                 },
@@ -490,14 +548,14 @@ private fun AddFriendDialog(
     val clipboard = LocalClipboardManager.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add friend") },
+        title = { Text(stringResource(R.string.contacts_add_friend_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Enter your friend's user ID, or paste/scan it. Their ID and QR are in their Settings.")
+                Text(stringResource(R.string.contacts_add_friend_description))
                 OutlinedTextField(
                     value = id,
                     onValueChange = { id = it },
-                    label = { Text("Boson ID") },
+                    label = { Text(stringResource(R.string.contacts_label_boson_id)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     trailingIcon = {
@@ -507,10 +565,16 @@ private fun AddFriendDialog(
                             IconButton(onClick = {
                                 clipboard.getText()?.text?.let { id = fieldFromStart(it.trim()) }
                             }) {
-                                Icon(Icons.Outlined.ContentPaste, contentDescription = "Paste user ID")
+                                Icon(
+                                    Icons.Outlined.ContentPaste,
+                                    contentDescription = stringResource(R.string.contacts_cd_paste_user_id),
+                                )
                             }
                             IconButton(onClick = { scanning = true }) {
-                                Icon(Icons.Outlined.QrCodeScanner, contentDescription = "Scan QR code")
+                                Icon(
+                                    Icons.Outlined.QrCodeScanner,
+                                    contentDescription = stringResource(R.string.contacts_cd_scan_qr_code),
+                                )
                             }
                         }
                     },
@@ -518,7 +582,7 @@ private fun AddFriendDialog(
                 OutlinedTextField(
                     value = hello,
                     onValueChange = { hello = it },
-                    label = { Text("Say hello (optional)") },
+                    label = { Text(stringResource(R.string.contacts_label_say_hello)) },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -527,9 +591,11 @@ private fun AddFriendDialog(
             TextButton(
                 onClick = { onSubmit(id.text, hello) },
                 enabled = id.text.isNotBlank(),
-            ) { Text("Send") }
+            ) { Text(stringResource(R.string.contacts_action_send)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.contacts_action_cancel)) }
+        },
     )
 }
 
@@ -563,7 +629,7 @@ private fun AddFriendScanDialog(
 
     AlertDialog(
         onDismissRequest = onCancel,
-        title = { Text("Scan QR code") },
+        title = { Text(stringResource(R.string.contacts_scan_qr_title)) },
         text = {
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -571,7 +637,7 @@ private fun AddFriendScanDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 if (hasCameraPermission) {
-                    Text("Point the camera at your friend's user ID QR code.")
+                    Text(stringResource(R.string.contacts_scan_qr_instruction))
                     QrScanner(
                         onScanned = onScanned,
                         modifier = Modifier
@@ -581,16 +647,18 @@ private fun AddFriendScanDialog(
                     )
                 } else {
                     Text(
-                        "Camera permission is needed to scan a QR code.",
+                        stringResource(R.string.contacts_camera_permission_needed),
                         textAlign = TextAlign.Center,
                     )
                     TextButton(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
-                        Text("Grant camera access")
+                        Text(stringResource(R.string.contacts_action_grant_camera_access))
                     }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
+        confirmButton = {
+            TextButton(onClick = onCancel) { Text(stringResource(R.string.contacts_action_cancel)) }
+        },
     )
 }
 
@@ -602,22 +670,26 @@ private fun JoinChannelDialog(
     var ticket by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Join channel") },
+        title = { Text(stringResource(R.string.contacts_join_channel_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Paste the invite ticket you were given.")
+                Text(stringResource(R.string.contacts_join_channel_description))
                 OutlinedTextField(
                     value = ticket,
                     onValueChange = { ticket = it },
-                    label = { Text("Invite ticket") },
+                    label = { Text(stringResource(R.string.contacts_label_invite_ticket)) },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSubmit(ticket) }, enabled = ticket.isNotBlank()) { Text("Join") }
+            TextButton(onClick = { onSubmit(ticket) }, enabled = ticket.isNotBlank()) {
+                Text(stringResource(R.string.contacts_action_join))
+            }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.contacts_action_cancel)) }
+        },
     )
 }
 
@@ -630,20 +702,24 @@ internal fun EditAliasDialog(
     var alias by remember { mutableStateOf(contact.remark.orEmpty()) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Edit alias") },
+        title = { Text(stringResource(R.string.contacts_action_edit_alias)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Set a local alias for this contact. Leave blank to clear it.")
+                Text(stringResource(R.string.contacts_edit_alias_description))
                 OutlinedTextField(
                     value = alias,
                     onValueChange = { alias = it },
-                    label = { Text("Alias") },
+                    label = { Text(stringResource(R.string.contacts_label_alias)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
         },
-        confirmButton = { TextButton(onClick = { onSubmit(alias) }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = {
+            TextButton(onClick = { onSubmit(alias) }) { Text(stringResource(R.string.contacts_action_save)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.contacts_action_cancel)) }
+        },
     )
 }

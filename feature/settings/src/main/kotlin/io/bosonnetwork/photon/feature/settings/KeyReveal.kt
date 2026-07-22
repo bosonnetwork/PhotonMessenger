@@ -51,12 +51,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.bosonnetwork.photon.core.designsystem.component.EmptyState
 import io.bosonnetwork.photon.core.designsystem.component.ResponsiveContent
 import io.bosonnetwork.photon.core.qr.rememberQrBitmap
+import io.bosonnetwork.photon.feature.settings.R
 
 /**
  * Shared "reveal a sensitive key" screen used by the device-key and identity-key screens. Shows a
@@ -83,7 +85,10 @@ internal fun RevealKeyScaffold(
                 title = { Text(title) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.settings_back_content_description),
+                        )
                     }
                 },
             )
@@ -109,7 +114,7 @@ internal fun RevealKeyScaffold(
                     Spacer(Modifier.height(24.dp))
                     if (!revealed) {
                         Button(onClick = { revealed = true }) {
-                            Text("Reveal key")
+                            Text(stringResource(R.string.settings_reveal_key_action))
                         }
                     } else {
                         rememberQrBitmap(keyBase58)?.let { qr ->
@@ -132,7 +137,13 @@ internal fun RevealKeyScaffold(
                             clipboard.setText(AnnotatedString(keyBase58))
                             copied = true
                         }) {
-                            Text(if (copied) "Copied" else "Copy key")
+                            Text(
+                                if (copied) {
+                                    stringResource(R.string.settings_key_copied)
+                                } else {
+                                    stringResource(R.string.settings_key_copy_action)
+                                },
+                            )
                         }
                     }
                 }

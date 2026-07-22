@@ -22,8 +22,10 @@
 
 package io.bosonnetwork.photon.app.session
 
+import io.bosonnetwork.photon.app.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -50,19 +52,42 @@ class SessionStatusTextTest {
     }
 
     @Test
+    fun `hidden states resolve to no resource`() {
+        assertNull(SessionStatus(SessionPhase.IDLE).bannerLabelRes())
+        assertNull(SessionStatus(SessionPhase.READY).bannerLabelRes())
+    }
+
+    @Test
     fun `discovering and connecting read as connecting`() {
-        assertEquals("Connecting...", SessionStatus(SessionPhase.DISCOVERING).bannerLabel())
-        assertEquals("Connecting...", SessionStatus(SessionPhase.CONNECTING).bannerLabel())
+        assertEquals(
+            R.string.app_session_status_connecting,
+            SessionStatus(SessionPhase.DISCOVERING).bannerLabelRes(),
+        )
+        assertEquals(
+            R.string.app_session_status_connecting,
+            SessionStatus(SessionPhase.CONNECTING).bannerLabelRes(),
+        )
     }
 
     @Test
     fun `disconnected reads as reconnecting`() {
-        assertEquals("Reconnecting...", SessionStatus(SessionPhase.DISCONNECTED).bannerLabel())
+        assertEquals(
+            R.string.app_session_status_reconnecting,
+            SessionStatus(SessionPhase.DISCONNECTED).bannerLabelRes(),
+        )
     }
 
     @Test
-    fun `failed surfaces the error message and falls back when absent`() {
-        assertEquals("boom", SessionStatus(SessionPhase.FAILED, "boom").bannerLabel())
-        assertEquals("Couldn't connect", SessionStatus(SessionPhase.FAILED).bannerLabel())
+    fun `failed resolves to the could-not-connect fallback resource`() {
+        // The composable prefers SessionStatus.message (a runtime error detail) when present; the
+        // pure phase-to-resource mapping tested here always yields the fallback resource id.
+        assertEquals(
+            R.string.app_session_status_could_not_connect,
+            SessionStatus(SessionPhase.FAILED, "boom").bannerLabelRes(),
+        )
+        assertEquals(
+            R.string.app_session_status_could_not_connect,
+            SessionStatus(SessionPhase.FAILED).bannerLabelRes(),
+        )
     }
 }

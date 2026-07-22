@@ -24,7 +24,9 @@ package io.bosonnetwork.photon.feature.settings
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
+import io.bosonnetwork.photon.feature.settings.R
 
 /**
  * Shows THIS device's device key as a QR (and text). Gated behind an explicit reveal tap with a clear
@@ -39,15 +41,11 @@ fun ShowKeyScreen(
 ) {
     val keyBase58 = remember { viewModel.deviceKeyBase58() }
     RevealKeyScaffold(
-        title = "Show device key",
-        warning = "This is this device's key. It authorizes this device to connect to the messaging " +
-            "service and receive your messages - it is not your identity key. Anyone who captures this " +
-            "QR or text can connect as this device and read the messages delivered to it. Unlike your " +
-            "identity, a leaked device key can be revoked: remove this device from your Devices list to " +
-            "cut it off. Only reveal it on a device you own, in a private place.",
+        title = stringResource(R.string.settings_device_key_title),
+        warning = stringResource(R.string.settings_device_key_warning),
         keyBase58 = keyBase58,
-        qrContentDescription = "Device key QR",
-        emptyMessage = "No device key on this device",
+        qrContentDescription = stringResource(R.string.settings_device_key_qr_content_description),
+        emptyMessage = stringResource(R.string.settings_device_key_empty),
         onBack = onBack,
     )
 }

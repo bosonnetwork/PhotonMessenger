@@ -24,6 +24,7 @@ package io.bosonnetwork.photon.app
 
 import android.app.Activity
 import android.app.Application
+import android.content.Context
 import android.os.Bundle
 import coil.ImageLoader
 import coil.ImageLoaderFactory
@@ -68,6 +69,12 @@ class PhotonApp : Application(), ImageLoaderFactory {
     lateinit var profileManager: ProfileManager
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    // Apply the app language to the process before any resource is read, so notifications and the
+    // foreground service (which run off the application context) are localized too (see LocaleManager).
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(LocaleManager.wrap(base))
+    }
 
     override fun onCreate() {
         super.onCreate()

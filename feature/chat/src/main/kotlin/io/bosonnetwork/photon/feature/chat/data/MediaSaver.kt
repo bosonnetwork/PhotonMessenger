@@ -29,6 +29,7 @@ import android.os.Environment
 import android.media.MediaScannerConnection
 import android.provider.MediaStore
 import io.bosonnetwork.photon.core.model.AppError
+import io.bosonnetwork.photon.feature.chat.R
 import io.bosonnetwork.photon.feature.chat.model.AttachmentKind
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -89,10 +90,10 @@ class AndroidMediaSaver @Inject constructor(
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
         val uri = resolver.insert(collection, values)
-            ?: throw AppError.Network("Couldn't create the destination file")
+            ?: throw AppError.Network(context.getString(R.string.chat_error_create_destination_file))
         try {
             resolver.openOutputStream(uri).use { out ->
-                requireNotNull(out) { "Couldn't open the destination file" }
+                requireNotNull(out) { context.getString(R.string.chat_error_open_destination_file) }
                 open().use { it.copyTo(out) }
             }
             values.clear()
@@ -102,7 +103,7 @@ class AndroidMediaSaver @Inject constructor(
             resolver.delete(uri, null, null)
             throw e
         }
-        return if (isImage) "Pictures" else "Downloads"
+        return if (isImage) context.getString(R.string.chat_folder_pictures) else context.getString(R.string.chat_folder_downloads)
     }
 
     private fun saveLegacy(name: String, mime: String, kind: AttachmentKind, open: () -> InputStream): String {
@@ -115,7 +116,7 @@ class AndroidMediaSaver @Inject constructor(
         val dest = uniqueFile(dir, name)
         dest.outputStream().use { out -> open().use { it.copyTo(out) } }
         MediaScannerConnection.scanFile(context, arrayOf(dest.absolutePath), arrayOf(mime), null)
-        return if (isImage) "Pictures" else "Downloads"
+        return if (isImage) context.getString(R.string.chat_folder_pictures) else context.getString(R.string.chat_folder_downloads)
     }
 
     private fun uniqueFile(dir: File, name: String): File {

@@ -22,6 +22,9 @@
 
 package io.bosonnetwork.photon.app.session
 
+import androidx.annotation.StringRes
+import io.bosonnetwork.photon.app.R
+
 /**
  * Pure presentation logic for the connection banner (F1 / M1-16), separated from the composable so
  * it can be unit-tested. The banner is hidden when the session is idle (signed out) or fully READY.
@@ -31,11 +34,16 @@ package io.bosonnetwork.photon.app.session
 fun SessionStatus.isBannerVisible(): Boolean =
     phase != SessionPhase.IDLE && phase != SessionPhase.READY
 
-/** User-facing banner text for the current phase; empty for the hidden states. */
-fun SessionStatus.bannerLabel(): String = when (phase) {
-    SessionPhase.DISCOVERING, SessionPhase.CONNECTING -> "Connecting..."
-    SessionPhase.CONNECTED -> "Securing connection..."
-    SessionPhase.DISCONNECTED -> "Reconnecting..."
-    SessionPhase.FAILED -> message ?: "Couldn't connect"
-    SessionPhase.IDLE, SessionPhase.READY -> ""
+/**
+ * Resource id for the user-facing banner text for the current phase, or null for the hidden states.
+ * The composable resolves this to a localized string; for FAILED it prefers [SessionStatus.message]
+ * (a runtime error detail) when present and falls back to this resource otherwise.
+ */
+@StringRes
+fun SessionStatus.bannerLabelRes(): Int? = when (phase) {
+    SessionPhase.DISCOVERING, SessionPhase.CONNECTING -> R.string.app_session_status_connecting
+    SessionPhase.CONNECTED -> R.string.app_session_status_securing_connection
+    SessionPhase.DISCONNECTED -> R.string.app_session_status_reconnecting
+    SessionPhase.FAILED -> R.string.app_session_status_could_not_connect
+    SessionPhase.IDLE, SessionPhase.READY -> null
 }

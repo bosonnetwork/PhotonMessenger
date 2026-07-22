@@ -43,6 +43,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import io.bosonnetwork.photon.app.LocaleManager
+import io.bosonnetwork.photon.app.R
 import io.bosonnetwork.photon.app.account.AccountsScreen
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -55,6 +59,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import io.bosonnetwork.photon.app.AppRelauncher
 import io.bosonnetwork.photon.app.AppViewModel
 import io.bosonnetwork.photon.core.designsystem.component.CountBadge
 import io.bosonnetwork.photon.feature.chat.ChatScreen
@@ -68,6 +73,7 @@ import io.bosonnetwork.photon.feature.contacts.CreateChannelScreen
 import io.bosonnetwork.photon.feature.onboarding.OnboardingScreen
 import io.bosonnetwork.photon.feature.settings.ApproveDeviceScreen
 import io.bosonnetwork.photon.feature.settings.DevicesScreen
+import io.bosonnetwork.photon.feature.settings.LanguageScreen
 import io.bosonnetwork.photon.feature.settings.PairNewDeviceScreen
 import io.bosonnetwork.photon.feature.settings.SessionsScreen
 import io.bosonnetwork.photon.feature.settings.SettingsScreen
@@ -96,16 +102,18 @@ fun PhotonNavHost(
     migration?.let {
         AlertDialog(
             onDismissRequest = { appViewModel.dismissMigration() },
-            title = { Text("Move your home super node?") },
-            text = {
-                Text(
-                    "You're signing in through a different super node than the one this device is " +
-                        "registered with. Move your home super node here? Your conversations, contacts, " +
-                        "and identity stay on this device - only your messaging provider changes.",
-                )
+            title = { Text(stringResource(R.string.app_navhost_migration_dialog_title)) },
+            text = { Text(stringResource(R.string.app_navhost_migration_dialog_message)) },
+            confirmButton = {
+                TextButton(onClick = { appViewModel.confirmMigration() }) {
+                    Text(stringResource(R.string.app_navhost_migration_move))
+                }
             },
-            confirmButton = { TextButton(onClick = { appViewModel.confirmMigration() }) { Text("Move") } },
-            dismissButton = { TextButton(onClick = { appViewModel.dismissMigration() }) { Text("Not now") } },
+            dismissButton = {
+                TextButton(onClick = { appViewModel.dismissMigration() }) {
+                    Text(stringResource(R.string.app_navhost_migration_not_now))
+                }
+            },
         )
     }
 
@@ -141,10 +149,13 @@ fun PhotonNavHost(
                                     else -> 0
                                 }
                                 BadgedBox(badge = { CountBadge(count) }) {
-                                    Icon(destination.icon, contentDescription = destination.label)
+                                    Icon(
+                                        destination.icon,
+                                        contentDescription = stringResource(destination.labelRes),
+                                    )
                                 }
                             },
-                            label = { Text(destination.label) },
+                            label = { Text(stringResource(destination.labelRes)) },
                         )
                     }
                 }
@@ -209,9 +220,11 @@ fun PhotonNavHost(
             }
             composable(TopLevelDestination.SETTINGS.route) {
                 SettingsScreen(
+                    currentLanguage = LocaleManager.current(LocalContext.current),
                     onOpenAccounts = { navController.navigate(Routes.ACCOUNTS) },
                     onOpenSessions = { navController.navigate(Routes.SESSIONS) },
                     onOpenDevices = { navController.navigate(Routes.DEVICES) },
+                    onOpenLanguage = { navController.navigate(Routes.LANGUAGE) },
                     onShowIdentityKey = { navController.navigate(Routes.SHOW_IDENTITY_KEY) },
                     onSignedOut = {
                         appViewModel.onSignedOut()
@@ -249,6 +262,23 @@ fun PhotonNavHost(
             }
             composable(Routes.SHOW_IDENTITY_KEY) {
                 ShowIdentityKeyScreen(onBack = { navController.popBackStack() })
+            }
+            composable(Routes.LANGUAGE) {
+                val context = LocalContext.current
+                LanguageScreen(
+                    current = LocaleManager.current(context),
+                    onSelect = { language ->
+                        // Persist the choice, then relaunch so every context (activity, application,
+                        // notifications, foreground service) re-wraps with the new locale together.
+                        if (language != LocaleManager.current(context)) {
+                            LocaleManager.setLanguage(context, language)
+                            AppRelauncher.relaunch(context)
+                        } else {
+                            navController.popBackStack()
+                        }
+                    },
+                    onBack = { navController.popBackStack() },
+                )
             }
             composable(Routes.ADD_DEVICE) {
                 PairNewDeviceScreen(

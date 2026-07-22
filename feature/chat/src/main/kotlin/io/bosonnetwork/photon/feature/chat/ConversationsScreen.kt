@@ -65,6 +65,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -78,6 +79,7 @@ import io.bosonnetwork.photon.core.designsystem.component.LoadingState
 import io.bosonnetwork.photon.core.designsystem.component.PhotonAvatar
 import io.bosonnetwork.photon.core.designsystem.component.ResponsiveContent
 import io.bosonnetwork.photon.core.designsystem.component.formatListTime
+import io.bosonnetwork.photon.feature.chat.R
 import io.bosonnetwork.photon.feature.chat.model.UiConversation
 
 /** Conversation list / main dashboard (design spec screen 3). */
@@ -99,11 +101,11 @@ fun ConversationsScreen(
     val topBarScroll = TopAppBarDefaults.enterAlwaysScrollBehavior()
     Scaffold(
         modifier = modifier.nestedScroll(topBarScroll.nestedScrollConnection),
-        topBar = { TopAppBar(title = { Text("Chats") }, scrollBehavior = topBarScroll) },
+        topBar = { TopAppBar(title = { Text(stringResource(R.string.chat_conversations_title)) }, scrollBehavior = topBarScroll) },
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                text = { Text("New chat") },
+                text = { Text(stringResource(R.string.chat_new_chat)) },
                 icon = { Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null) },
                 onClick = onNewChat,
             )
@@ -118,15 +120,15 @@ fun ConversationsScreen(
                     singleLine = true,
                     shape = RoundedCornerShape(24.dp),
                     leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                    placeholder = { Text("Search") },
+                    placeholder = { Text(stringResource(R.string.chat_search_placeholder)) },
                 )
                 when {
                     state.loading -> LoadingState()
                     state.error != null -> ErrorState(state.error!!)
-                    state.filteredEmpty -> EmptyState("No conversations match \"${query.trim()}\"")
+                    state.filteredEmpty -> EmptyState(stringResource(R.string.chat_no_conversations_match, query.trim()))
                     state.conversations.isEmpty() ->
                         EmptyState(
-                            "No conversations yet.\nStart one from your contacts.",
+                            stringResource(R.string.chat_no_conversations_yet),
                             icon = Icons.AutoMirrored.Filled.Chat,
                         )
                     else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -145,11 +147,11 @@ fun ConversationsScreen(
     }
 
     deleteTarget?.let { convo ->
+        val kindWord = stringResource(if (convo.isChannel) R.string.chat_channel_word else R.string.chat_contact_word)
         ConfirmDialog(
-            title = "Delete conversation?",
-            text = "This removes the message history for \"${convo.title}\" from your account. " +
-                "The ${if (convo.isChannel) "channel" else "contact"} is not removed.",
-            confirmLabel = "Delete",
+            title = stringResource(R.string.chat_delete_conversation_title),
+            text = stringResource(R.string.chat_delete_conversation_text, convo.title, kindWord),
+            confirmLabel = stringResource(R.string.chat_action_delete),
             onConfirm = { viewModel.deleteConversation(convo.id) },
             onDismiss = { deleteTarget = null },
         )
@@ -187,7 +189,7 @@ private fun ConversationRow(
                     if (conversation.isChannel) {
                         Icon(
                             Icons.Outlined.Groups,
-                            contentDescription = "Channel",
+                            contentDescription = stringResource(R.string.chat_cd_channel),
                             modifier = Modifier.size(16.dp).padding(end = 2.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -203,7 +205,7 @@ private fun ConversationRow(
             },
             supportingContent = {
                 Text(
-                    conversation.preview.ifBlank { "No messages yet" },
+                    conversation.preview.ifBlank { stringResource(R.string.chat_no_messages_yet) },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
@@ -226,7 +228,7 @@ private fun ConversationRow(
         )
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             DropdownMenuItem(
-                text = { Text("Delete conversation", color = MaterialTheme.colorScheme.error) },
+                text = { Text(stringResource(R.string.chat_delete_conversation_action), color = MaterialTheme.colorScheme.error) },
                 onClick = { menuOpen = false; onDelete() },
             )
         }

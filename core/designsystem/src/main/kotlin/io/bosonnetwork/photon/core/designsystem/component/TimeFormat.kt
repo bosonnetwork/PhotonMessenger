@@ -22,6 +22,9 @@
 
 package io.bosonnetwork.photon.core.designsystem.component
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import io.bosonnetwork.photon.core.designsystem.R
 import java.text.DateFormat
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -54,13 +57,14 @@ fun formatBubbleTime(epochMillis: Long): String =
     if (epochMillis <= 0) "" else timeFormat().format(Date(epochMillis))
 
 /** Chat day-header label: "Today", "Yesterday", "June 21", or "June 21, 2025". */
+@Composable
 fun formatDayHeader(epochMillis: Long, now: Long = System.currentTimeMillis()): String {
     val then = Calendar.getInstance().apply { timeInMillis = epochMillis }
     val today = Calendar.getInstance().apply { timeInMillis = now }
     val yesterday = (today.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -1) }
     return when {
-        then.sameDayAs(today) -> "Today"
-        then.sameDayAs(yesterday) -> "Yesterday"
+        then.sameDayAs(today) -> stringResource(R.string.ds_time_today)
+        then.sameDayAs(yesterday) -> stringResource(R.string.ds_time_yesterday)
         then.get(Calendar.YEAR) == today.get(Calendar.YEAR) ->
             SimpleDateFormat("MMMM d", Locale.getDefault()).format(Date(epochMillis))
         else -> SimpleDateFormat("MMMM d, yyyy", Locale.getDefault()).format(Date(epochMillis))

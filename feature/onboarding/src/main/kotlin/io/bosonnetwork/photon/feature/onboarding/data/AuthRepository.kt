@@ -22,7 +22,9 @@
 
 package io.bosonnetwork.photon.feature.onboarding.data
 
+import android.content.Context
 import android.os.Build
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.bosonnetwork.Id
 import io.bosonnetwork.crypto.Signature
 import io.bosonnetwork.crypto.pow.RegistrationPowClient
@@ -44,6 +46,7 @@ import io.bosonnetwork.photon.core.network.model.ProviderDto
 import io.bosonnetwork.photon.core.network.model.SelfRegisterRequest
 import io.bosonnetwork.photon.core.network.model.UpdateProfileRequest
 import io.bosonnetwork.photon.core.security.ProfileManager
+import io.bosonnetwork.photon.feature.onboarding.R
 import java.security.SecureRandom
 import java.util.Base64
 import javax.inject.Inject
@@ -125,6 +128,7 @@ class AuthRepository @Inject constructor(
     private val tokenStore: AuthTokenStore,
     private val keyManager: KeyManager,
     private val profileManager: ProfileManager,
+    @ApplicationContext private val context: Context,
 ) {
     @Volatile
     private var cachedApi: Pair<DirectorConfig, DirectorApi>? = null
@@ -150,7 +154,7 @@ class AuthRepository @Inject constructor(
             try {
                 Id.of(cleanId)
             } catch (e: Exception) {
-                throw AppError.InvalidInput("Invalid Server ID (expected a Boson node id)", e)
+                throw AppError.InvalidInput(context.getString(R.string.onb_error_invalid_server_id), e)
             }
         }
         configStore.setBaseUrl(url)
@@ -240,7 +244,7 @@ class AuthRepository @Inject constructor(
                     )
                 } catch (e: IllegalStateException) {
                     // No solution within the search budget: retryable (a fresh challenge/nonce may solve).
-                    throw AppError.Timeout("Couldn't complete the security check in time; please try again", e)
+                    throw AppError.Timeout(context.getString(R.string.onb_error_pow_timeout), e)
                 }
                 // The device co-signs with its own key (bound to the device identity); the Director
                 // verifies deviceSig against the device key, as it verifies userSig against the user key.
@@ -274,7 +278,7 @@ class AuthRepository @Inject constructor(
                             reSolvedForExpiry = true
                             challenge = directorApi.getRegistrationChallenge()
                         } else {
-                            throw AppError.Forbidden("Registration was rejected; please try again", e)
+                            throw AppError.Forbidden(context.getString(R.string.onb_error_registration_rejected), e)
                         }
                         is AppError.RateLimited -> throw err
                         // Our own user already exists: almost always a lost-response resubmit of this very
@@ -282,10 +286,10 @@ class AuthRepository @Inject constructor(
                         // (astronomically rare) fails that sign-in and surfaces as a conflict.
                         is AppError.Conflict ->
                             token = runCatching { userSignInToken(userKey) }.getOrElse {
-                                throw AppError.Conflict("That identity is already taken; please try again", e)
+                                throw AppError.Conflict(context.getString(R.string.onb_error_identity_taken), e)
                             }
                         is AppError.Unknown ->
-                            throw AppError.InvalidInput("Couldn't verify the security check; please try again", e)
+                            throw AppError.InvalidInput(context.getString(R.string.onb_error_pow_verify_failed), e)
                         else -> throw err
                     }
                 }
@@ -494,7 +498,7 @@ class AuthRepository @Inject constructor(
                 )
             } else if (derivedId != boundId) {
                 // An identity is already bound: the imported key must match it, or we would fork identity.
-                throw AppError.InvalidInput("This key does not match your account identity")
+                throw AppError.InvalidInput(context.getString(R.string.onb_error_key_mismatch))
             }
             val token = finalizeSession(kp) // drop the OAuth-lineage token; authenticate by the Boson key
             commitIdentity(privateKey64, derivedId, token, displayName = null)
@@ -622,7 +626,7 @@ class AuthRepository @Inject constructor(
     suspend fun registerDevice(passphrase: String? = null, superNodeId: String? = null) {
         withContext(Dispatchers.IO) {
             val userId = keyManager.userId()?.toString()
-                ?: throw AppError.InvalidInput("No user identity on this device")
+                ?: throw AppError.InvalidInput(context.getString(R.string.onb_error_no_user_identity))
             // Defense in depth: a device key registered under a different identity is rotated here
             // rather than re-registered across users.
             val deviceKey = keyManager.ensureDeviceKeyFor(userId)

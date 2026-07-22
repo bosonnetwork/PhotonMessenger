@@ -22,9 +22,11 @@
 
 package io.bosonnetwork.photon.feature.contacts
 
+import android.content.Context
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.bosonnetwork.photon.core.model.ProfileResolver
 import io.bosonnetwork.photon.core.model.displayProfile
 import io.bosonnetwork.photon.feature.contacts.data.ChannelRepository
@@ -78,6 +80,7 @@ class InviteContactPickerViewModel @Inject constructor(
     private val channelRepository: ChannelRepository,
     private val profileResolver: ProfileResolver,
     savedStateHandle: SavedStateHandle,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     val channelId: String = checkNotNull(savedStateHandle["channelId"]) { "channelId arg missing" }
@@ -140,7 +143,8 @@ class InviteContactPickerViewModel @Inject constructor(
             channelRepository.inviteContact(channelId, contact.id)
                 .onSuccess { _events.tryEmit(InvitePickerEvent.Sent(contact.displayName)) }
                 .onFailure {
-                    _events.tryEmit(InvitePickerEvent.Error(it.message ?: "Couldn't send invitation"))
+                    val message = it.message ?: context.getString(R.string.contacts_error_send_invitation_failed)
+                    _events.tryEmit(InvitePickerEvent.Error(message))
                 }
             _sending.value = false
         }

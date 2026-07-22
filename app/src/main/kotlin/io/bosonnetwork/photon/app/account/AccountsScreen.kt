@@ -54,7 +54,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import io.bosonnetwork.photon.app.R
 import io.bosonnetwork.photon.core.security.Profile
 
 /**
@@ -78,10 +80,13 @@ fun AccountsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Accounts") },
+                title = { Text(stringResource(R.string.app_accounts_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.app_accounts_back),
+                        )
                     }
                 },
             )
@@ -95,7 +100,10 @@ fun AccountsScreen(
                         headlineContent = { Text(profileTitle(profile)) },
                         supportingContent = {
                             // Always the short id; the active profile is marked by the trailing check icon.
-                            Text(profile.userId?.let(::shortId) ?: "Not signed in")
+                            Text(
+                                profile.userId?.let(::shortId)
+                                    ?: stringResource(R.string.app_accounts_not_signed_in),
+                            )
                         },
                         trailingContent = {
                             if (active) {
@@ -104,13 +112,16 @@ fun AccountsScreen(
                                 Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                                     Icon(
                                         Icons.Filled.CheckCircle,
-                                        contentDescription = "Active",
+                                        contentDescription = stringResource(R.string.app_accounts_active),
                                         tint = MaterialTheme.colorScheme.primary,
                                     )
                                 }
                             } else {
                                 IconButton(onClick = { confirmRemove = profile }) {
-                                    Icon(Icons.Outlined.Delete, contentDescription = "Remove account")
+                                    Icon(
+                                        Icons.Outlined.Delete,
+                                        contentDescription = stringResource(R.string.app_accounts_remove_account_cd),
+                                    )
                                 }
                             }
                         },
@@ -122,47 +133,56 @@ fun AccountsScreen(
             OutlinedButton(
                 onClick = onAddAccount,
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
-            ) { Text("Add account") }
+            ) { Text(stringResource(R.string.app_accounts_add_account)) }
         }
     }
 
     confirmSwitch?.let { profile ->
         AlertDialog(
             onDismissRequest = { confirmSwitch = null },
-            title = { Text("Switch account?") },
-            text = { Text("Switch to ${profileTitle(profile)}? The app restarts to open this account.") },
-            confirmButton = {
-                TextButton(onClick = { onSwitch(profile.id); confirmSwitch = null }) { Text("Switch") }
+            title = { Text(stringResource(R.string.app_accounts_switch_dialog_title)) },
+            text = {
+                Text(stringResource(R.string.app_accounts_switch_dialog_message, profileTitle(profile)))
             },
-            dismissButton = { TextButton(onClick = { confirmSwitch = null }) { Text("Cancel") } },
+            confirmButton = {
+                TextButton(onClick = { onSwitch(profile.id); confirmSwitch = null }) {
+                    Text(stringResource(R.string.app_accounts_switch))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmSwitch = null }) {
+                    Text(stringResource(R.string.app_accounts_cancel))
+                }
+            },
         )
     }
 
     confirmRemove?.let { profile ->
         AlertDialog(
             onDismissRequest = { confirmRemove = null },
-            title = { Text("Remove account?") },
+            title = { Text(stringResource(R.string.app_accounts_remove_dialog_title)) },
             text = {
-                Text(
-                    "This deletes ${profileTitle(profile)} and all of its local data (conversations, " +
-                        "contacts, settings, and keys) from this device. If its identity key is not backed " +
-                        "up elsewhere, access to that identity is lost. This cannot be undone.",
-                )
+                Text(stringResource(R.string.app_accounts_remove_dialog_message, profileTitle(profile)))
             },
             confirmButton = {
                 TextButton(onClick = { onRemove(profile.id); confirmRemove = null }) {
-                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.app_accounts_remove), color = MaterialTheme.colorScheme.error)
                 }
             },
-            dismissButton = { TextButton(onClick = { confirmRemove = null }) { Text("Cancel") } },
+            dismissButton = {
+                TextButton(onClick = { confirmRemove = null }) {
+                    Text(stringResource(R.string.app_accounts_cancel))
+                }
+            },
         )
     }
 }
 
+@Composable
 private fun profileTitle(profile: Profile): String =
     profile.displayName?.takeIf { it.isNotBlank() }
         ?: profile.userId?.let(::shortId)
-        ?: "New account"
+        ?: stringResource(R.string.app_accounts_new_account)
 
 /** first8...last8 abbreviation of a base58 id; short ids are returned as-is. */
 private fun shortId(id: String): String =

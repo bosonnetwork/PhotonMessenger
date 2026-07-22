@@ -22,6 +22,8 @@
 
 package io.bosonnetwork.photon.feature.settings.data
 
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.bosonnetwork.photon.core.boson.BosonSessionManager
 import io.bosonnetwork.photon.core.boson.KeyManager
 import io.bosonnetwork.photon.core.boson.awaitResult
@@ -42,6 +44,7 @@ import io.bosonnetwork.photon.core.network.model.RemoveDeviceRequest
 import io.bosonnetwork.photon.core.network.model.SetPassphraseRequest
 import io.bosonnetwork.photon.core.network.model.UpdateProfileRequest
 import io.bosonnetwork.photon.core.network.toDirectorError
+import io.bosonnetwork.photon.feature.settings.R
 import io.bosonnetwork.photon.feature.settings.model.UiDevice
 import io.bosonnetwork.photon.feature.settings.model.UiProfile
 import io.bosonnetwork.Id
@@ -112,6 +115,7 @@ class SettingsRepositoryImpl @Inject constructor(
     private val keyManager: KeyManager,
     private val session: BosonSessionManager,
     private val avatarPreparer: AvatarPreparer,
+    @ApplicationContext private val context: Context,
 ) : SettingsRepository {
 
     @Volatile
@@ -179,7 +183,7 @@ class SettingsRepositoryImpl @Inject constructor(
         // connected from a device, so the list is driven by getSessions(); the Director registry is
         // joined in on a best-effort basis only to supply a friendly name/app for each session.
         val client = session.messagingClient
-            ?: throw AppError.Network("Not connected to the messaging service")
+            ?: throw AppError.Network(context.getString(R.string.settings_repository_error_not_connected))
         val currentDeviceId = client.deviceId?.toString()
         val sessions: List<SessionInfo> = client.getSessions().awaitResult()
 
@@ -224,7 +228,7 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override suspend fun revokeSession(deviceId: String): Result<Unit> = runCatching {
         val client = session.messagingClient
-            ?: throw AppError.Network("Not connected to the messaging service")
+            ?: throw AppError.Network(context.getString(R.string.settings_repository_error_not_connected))
         client.revokeSession(parseId(deviceId)).awaitResult()
         Unit
     }
@@ -263,7 +267,7 @@ class SettingsRepositoryImpl @Inject constructor(
         try {
             Id.of(text.trim())
         } catch (e: Exception) {
-            throw AppError.InvalidInput("Invalid device ID", e)
+            throw AppError.InvalidInput(context.getString(R.string.settings_repository_error_invalid_device_id), e)
         }
 
     /** Re-wraps a Director HTTP failure as an [AppError] so the UI can tell 428/403 apart (M6 passphrase). */

@@ -27,9 +27,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import io.bosonnetwork.photon.core.designsystem.R
 
-/** Formats a notification/unread count for a compact badge, capping large values at "99+". */
-fun badgeCount(count: Int): String = if (count > 99) "99+" else count.toString()
+/** Formats a notification/unread count for a compact badge, capping large values at [overflowLabel]. */
+fun badgeCount(count: Int, overflowLabel: String): String = if (count > 99) overflowLabel else count.toString()
 
 /**
  * A small count pill used for unread and pending-request badges (conversation rows, contact tabs,
@@ -44,6 +46,6 @@ fun CountBadge(
 ) {
     if (count <= 0) return
     Badge(containerColor = containerColor, contentColor = contentColor) {
-        Text(badgeCount(count))
+        Text(badgeCount(count, stringResource(R.string.ds_count_badge_overflow)))
     }
 }

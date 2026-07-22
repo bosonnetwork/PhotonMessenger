@@ -22,14 +22,17 @@
 
 package io.bosonnetwork.photon.feature.chat
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.bosonnetwork.photon.core.boson.UnreadTracker
 import io.bosonnetwork.photon.core.model.ProfileResolver
 import io.bosonnetwork.photon.core.model.displayProfile
+import io.bosonnetwork.photon.feature.chat.R
 import io.bosonnetwork.photon.feature.chat.data.ChatRepository
 import io.bosonnetwork.photon.feature.chat.model.UiConversation
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -60,6 +63,7 @@ class ConversationsViewModel @Inject constructor(
     private val repository: ChatRepository,
     private val profileResolver: ProfileResolver,
     private val unreadTracker: UnreadTracker,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     private val _query = MutableStateFlow("")
@@ -75,7 +79,8 @@ class ConversationsViewModel @Inject constructor(
     fun deleteConversation(conversationId: String) {
         viewModelScope.launch {
             repository.removeConversation(conversationId).onFailure { e ->
-                _messages.tryEmit("Couldn't delete conversation: ${e.message ?: "unknown error"}")
+                val reason = e.message ?: context.getString(R.string.chat_error_unknown)
+                _messages.tryEmit(context.getString(R.string.chat_error_delete_conversation, reason))
             }
         }
     }

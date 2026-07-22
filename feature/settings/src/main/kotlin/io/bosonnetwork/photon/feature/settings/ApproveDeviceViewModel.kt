@@ -22,9 +22,12 @@
 
 package io.bosonnetwork.photon.feature.settings
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.bosonnetwork.photon.core.model.AppError
+import io.bosonnetwork.photon.feature.settings.R
 import io.bosonnetwork.photon.feature.settings.data.DevicePairingRepository
 import io.bosonnetwork.photon.feature.settings.data.PairingRequestInfo
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -68,6 +71,7 @@ sealed interface ApproveDeviceUiState {
 @HiltViewModel
 class ApproveDeviceViewModel @Inject constructor(
     private val repository: DevicePairingRepository,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<ApproveDeviceUiState>(ApproveDeviceUiState.Scanning)
@@ -121,7 +125,7 @@ class ApproveDeviceViewModel @Inject constructor(
         _uiState.value = ApproveDeviceUiState.Scanning
     }
 
-    private fun Throwable.userMessage(): String = message ?: "Pairing failed"
+    private fun Throwable.userMessage(): String = message ?: context.getString(R.string.settings_pairing_failed)
 
     /**
      * A passphrase-protected account gates approval: 428 asks for the passphrase, 403 reports a wrong
@@ -130,7 +134,11 @@ class ApproveDeviceViewModel @Inject constructor(
     private fun Throwable.toApproveState(info: PairingRequestInfo): ApproveDeviceUiState = when (this) {
         is AppError.PassphraseRequired -> ApproveDeviceUiState.Confirm(info, needsPassphrase = true)
         is AppError.Forbidden ->
-            ApproveDeviceUiState.Confirm(info, needsPassphrase = true, passphraseError = "Wrong passphrase")
+            ApproveDeviceUiState.Confirm(
+                info,
+                needsPassphrase = true,
+                passphraseError = context.getString(R.string.settings_wrong_passphrase),
+            )
         else -> ApproveDeviceUiState.Failed(userMessage())
     }
 }

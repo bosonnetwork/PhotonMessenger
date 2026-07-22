@@ -1,4 +1,63 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Photon</string>
+
+    <!-- Accounts screen (account switcher) -->
+    <string name="app_accounts_title">Accounts</string>
+    <string name="app_accounts_back">Back</string>
+    <string name="app_accounts_not_signed_in">Not signed in</string>
+    <string name="app_accounts_active">Active</string>
+    <string name="app_accounts_remove_account_cd">Remove account</string>
+    <string name="app_accounts_add_account">Add account</string>
+    <string name="app_accounts_switch_dialog_title">Switch account?</string>
+    <string name="app_accounts_switch_dialog_message">Switch to %1$s? The app restarts to open this account.</string>
+    <string name="app_accounts_switch">Switch</string>
+    <string name="app_accounts_cancel">Cancel</string>
+    <string name="app_accounts_remove_dialog_title">Remove account?</string>
+    <string name="app_accounts_remove_dialog_message">This deletes %1$s and all of its local data (conversations, contacts, settings, and keys) from this device. If its identity key is not backed up elsewhere, access to that identity is lost. This cannot be undone.</string>
+    <string name="app_accounts_remove">Remove</string>
+    <string name="app_accounts_new_account">New account</string>
+
+    <!-- Connection banner -->
+    <string name="app_connection_banner_retry">Retry</string>
+
+    <!-- Session status banner text -->
+    <string name="app_session_status_connecting">Connecting...</string>
+    <string name="app_session_status_securing_connection">Securing connection...</string>
+    <string name="app_session_status_reconnecting">Reconnecting...</string>
+    <string name="app_session_status_could_not_connect">Couldn\'t connect</string>
+
+    <!-- Bottom navigation -->
+    <string name="app_nav_chats">Chats</string>
+    <string name="app_nav_contacts">Contacts</string>
+    <string name="app_nav_settings">Settings</string>
+
+    <!-- Home super node migration dialog -->
+    <string name="app_navhost_migration_dialog_title">Move your home super node?</string>
+    <string name="app_navhost_migration_dialog_message">You\'re signing in through a different super node than the one this device is registered with. Move your home super node here? Your conversations, contacts, and identity stay on this device - only your messaging provider changes.</string>
+    <string name="app_navhost_migration_move">Move</string>
+    <string name="app_navhost_migration_not_now">Not now</string>
+
+    <!-- Notification channels (shown in system notification settings) -->
+    <string name="app_notif_channel_service_name">Connection</string>
+    <string name="app_notif_channel_service_description">Keeps Photon connected for new messages</string>
+    <string name="app_notif_channel_messages_name">Messages</string>
+    <string name="app_notif_channel_messages_description">New message notifications</string>
+    <string name="app_notif_channel_requests_name">Friend requests</string>
+    <string name="app_notif_channel_requests_description">New friend request notifications</string>
+
+    <!-- Notification bodies shown when message previews are disabled -->
+    <string name="app_notif_generic_message_body">You have a new message</string>
+    <string name="app_notif_generic_friend_request_body">You have a new friend request</string>
+
+    <!-- Foreground service (ongoing connection) notification -->
+    <string name="app_notif_foreground_content_text">Connected</string>
+
+    <!-- Message notification preview text -->
+    <string name="app_notif_new_message">New message</string>
+    <string name="app_notif_sent_attachment">Sent an attachment</string>
+
+    <!-- Friend request notification body -->
+    <string name="app_notif_friend_request_quoted">\"%1$s\"</string>
+    <string name="app_notif_friend_request_default_body">Wants to connect with you</string>
 </resources>

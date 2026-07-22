@@ -22,9 +22,12 @@
 
 package io.bosonnetwork.photon.feature.contacts.data
 
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.bosonnetwork.photon.core.boson.BosonSessionManager
 import io.bosonnetwork.photon.core.boson.awaitResult
 import io.bosonnetwork.photon.core.model.AppError
+import io.bosonnetwork.photon.feature.contacts.R
 import io.bosonnetwork.photon.feature.contacts.model.UiContact
 import io.bosonnetwork.photon.feature.contacts.model.UiFriendRequest
 import io.bosonnetwork.photon.feature.contacts.model.toUi
@@ -72,10 +75,12 @@ interface ContactRepository {
 @Singleton
 class ContactRepositoryImpl @Inject constructor(
     private val session: BosonSessionManager,
+    @ApplicationContext private val context: Context,
 ) : ContactRepository {
 
     private fun client(): MessagingClient =
-        session.messagingClient ?: throw AppError.Network("Not connected to the messaging service")
+        session.messagingClient
+            ?: throw AppError.Network(context.getString(R.string.contacts_error_not_connected))
 
     // Local mutations (accept/decline a request, edit/remove a contact) are initiated by THIS device,
     // so the messaging client deliberately does not fire the corresponding listener callback here (it
@@ -204,7 +209,7 @@ class ContactRepositoryImpl @Inject constructor(
     private suspend fun editContact(contactId: String, edit: (Contact) -> Contact): Result<Unit> = runCatching {
         val client = client()
         val contact = client.getContact(parseId(contactId)).awaitResult().orElse(null)
-            ?: throw AppError.NotFound("Contact not found")
+            ?: throw AppError.NotFound(context.getString(R.string.contacts_error_contact_not_found))
         client.updateContact(edit(contact)).awaitResult()
         contactsRefresh.tryEmit(Unit)
         Unit
@@ -214,6 +219,6 @@ class ContactRepositoryImpl @Inject constructor(
         try {
             Id.of(text.trim())
         } catch (e: Exception) {
-            throw AppError.InvalidInput("Invalid Boson ID", e)
+            throw AppError.InvalidInput(context.getString(R.string.contacts_error_invalid_boson_id), e)
         }
 }

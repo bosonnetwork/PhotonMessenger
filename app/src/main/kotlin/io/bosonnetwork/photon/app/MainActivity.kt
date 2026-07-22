@@ -23,6 +23,7 @@
 package io.bosonnetwork.photon.app
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -59,6 +60,12 @@ class MainActivity : ComponentActivity() {
     // choice - and posting stays a no-op.
     private val requestNotificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    // Wrap the activity context with the selected app language so Compose (which reads strings from the
+    // activity's resources / LocalConfiguration) renders in that language.
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(LocaleManager.wrap(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

@@ -73,6 +73,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -83,6 +84,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.bosonnetwork.photon.core.qr.QrScanner
 import io.bosonnetwork.photon.core.qr.rememberQrBitmap
+import io.bosonnetwork.photon.feature.onboarding.R
 
 /** Welcome / OAuth onboarding (design spec screen 1, wireframe 1). */
 @Composable
@@ -133,9 +135,9 @@ fun OnboardingScreen(
             }
         }
         Spacer(Modifier.height(16.dp))
-        Text(text = "Photon", style = MaterialTheme.typography.headlineMedium)
+        Text(text = stringResource(R.string.onb_welcome_title), style = MaterialTheme.typography.headlineMedium)
         Text(
-            text = "Federated messaging powered by BosonNetwork",
+            text = stringResource(R.string.onb_welcome_tagline),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -158,13 +160,13 @@ fun OnboardingScreen(
                     loading -> CircularProgressIndicator()
 
                     step == OnboardingStep.Server -> {
-                        Text("Connect to your super node", style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.onb_server_step_title), style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(12.dp))
                         OutlinedTextField(
                             value = state.serverUrl,
                             onValueChange = viewModel::onServerUrlChange,
-                            label = { Text("Server URL") },
-                            placeholder = { Text("https://your-node:9000") },
+                            label = { Text(stringResource(R.string.onb_server_url_label)) },
+                            placeholder = { Text(stringResource(R.string.onb_server_url_placeholder)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -174,16 +176,16 @@ fun OnboardingScreen(
                             OutlinedTextField(
                                 value = state.directorNodeId,
                                 onValueChange = viewModel::onDirectorNodeIdChange,
-                                label = { Text("Server ID (advanced)") },
-                                placeholder = { Text("Boson node id (for a self-signed server)") },
+                                label = { Text(stringResource(R.string.onb_server_id_label)) },
+                                placeholder = { Text(stringResource(R.string.onb_server_id_placeholder)) },
                                 supportingText = {
-                                    Text("Required to trust a self-signed HTTPS server; leave blank for a public CA.")
+                                    Text(stringResource(R.string.onb_server_id_supporting_text))
                                 },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         } else {
-                            TextButton(onClick = { showAdvanced = true }) { Text("Advanced options") }
+                            TextButton(onClick = { showAdvanced = true }) { Text(stringResource(R.string.onb_advanced_options)) }
                         }
                         Spacer(Modifier.height(16.dp))
                         Button(
@@ -191,19 +193,18 @@ fun OnboardingScreen(
                             enabled = state.serverUrl.isNotBlank(),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text("Continue")
+                            Text(stringResource(R.string.onb_continue))
                         }
                     }
 
                     step == OnboardingStep.ChooseIdentity -> {
-                        Text("Set up your identity", style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.onb_choose_identity_title), style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(8.dp))
                         Text(
                             text = if (state.allowCreateIdentity) {
-                                "Create a new identity key, or bring an existing one from another device."
+                                stringResource(R.string.onb_choose_identity_desc_can_create)
                             } else {
-                                "This device needs your identity key. Import it from a device where you are " +
-                                    "already signed in."
+                                stringResource(R.string.onb_choose_identity_desc_import_only)
                             },
                             style = MaterialTheme.typography.bodyMedium,
                             textAlign = TextAlign.Center,
@@ -211,16 +212,16 @@ fun OnboardingScreen(
                         Spacer(Modifier.height(16.dp))
                         if (state.allowCreateIdentity) {
                             Button(onClick = viewModel::chooseCreateNew, modifier = Modifier.fillMaxWidth()) {
-                                Text("Create new identity")
+                                Text(stringResource(R.string.onb_create_new_identity))
                             }
                             Spacer(Modifier.height(12.dp))
                         }
                         OutlinedButton(onClick = viewModel::chooseScanKey, modifier = Modifier.fillMaxWidth()) {
-                            Text("Scan QR from another device")
+                            Text(stringResource(R.string.onb_scan_qr_another_device))
                         }
                         Spacer(Modifier.height(12.dp))
                         OutlinedButton(onClick = viewModel::choosePasteKey, modifier = Modifier.fillMaxWidth()) {
-                            Text("Enter key manually")
+                            Text(stringResource(R.string.onb_enter_key_manually))
                         }
                     }
 
@@ -228,10 +229,10 @@ fun OnboardingScreen(
                         KeyScanStep(onScanned = viewModel::onKeyScanned, onCancel = viewModel::backToChoose)
 
                     step == OnboardingStep.PasteKey -> {
-                        Text("Enter your identity key", style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.onb_enter_identity_key_title), style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "Paste your user private key (base58 or hex) from another device.",
+                            stringResource(R.string.onb_paste_key_desc),
                             style = MaterialTheme.typography.bodyMedium,
                             textAlign = TextAlign.Center,
                         )
@@ -239,7 +240,7 @@ fun OnboardingScreen(
                         OutlinedTextField(
                             value = state.keyInput,
                             onValueChange = viewModel::onKeyInputChange,
-                            label = { Text("Private key") },
+                            label = { Text(stringResource(R.string.onb_private_key_label)) },
                             minLines = 2,
                             maxLines = 4,
                             modifier = Modifier.fillMaxWidth(),
@@ -250,18 +251,18 @@ fun OnboardingScreen(
                             enabled = state.keyInput.isNotBlank(),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text("Import identity")
+                            Text(stringResource(R.string.onb_import_identity))
                         }
-                        TextButton(onClick = viewModel::backToChoose) { Text("Back") }
+                        TextButton(onClick = viewModel::backToChoose) { Text(stringResource(R.string.onb_back)) }
                     }
 
                     step == OnboardingStep.CreateProfile -> {
-                        Text("Create your profile", style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.onb_create_profile_title), style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(12.dp))
                         OutlinedTextField(
                             value = state.displayName,
                             onValueChange = viewModel::onDisplayNameChange,
-                            label = { Text("Display name") },
+                            label = { Text(stringResource(R.string.onb_display_name_label)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -269,7 +270,7 @@ fun OnboardingScreen(
                         OutlinedTextField(
                             value = state.bio,
                             onValueChange = viewModel::onBioChange,
-                            label = { Text("Bio (optional)") },
+                            label = { Text(stringResource(R.string.onb_bio_label)) },
                             minLines = 2,
                             maxLines = 4,
                             modifier = Modifier.fillMaxWidth(),
@@ -283,9 +284,9 @@ fun OnboardingScreen(
                                 OutlinedTextField(
                                     value = state.createPassphrase,
                                     onValueChange = viewModel::onCreatePassphraseChange,
-                                    label = { Text("Passphrase (optional)") },
+                                    label = { Text(stringResource(R.string.onb_passphrase_optional_label)) },
                                     supportingText = {
-                                        Text("Protects sensitive actions like adding a device. You can set this later in Settings.")
+                                        Text(stringResource(R.string.onb_passphrase_optional_supporting))
                                     },
                                     singleLine = true,
                                     visualTransformation = PasswordVisualTransformation(),
@@ -293,7 +294,7 @@ fun OnboardingScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                             } else {
-                                TextButton(onClick = { showAdvanced = true }) { Text("Advanced options") }
+                                TextButton(onClick = { showAdvanced = true }) { Text(stringResource(R.string.onb_advanced_options)) }
                             }
                         }
                         Spacer(Modifier.height(16.dp))
@@ -302,15 +303,18 @@ fun OnboardingScreen(
                             enabled = state.displayName.isNotBlank(),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text(if (state.creatingNewAccount) "Create account" else "Continue")
+                            Text(
+                                if (state.creatingNewAccount) stringResource(R.string.onb_create_account)
+                                else stringResource(R.string.onb_continue),
+                            )
                         }
                     }
 
                     step == OnboardingStep.Passphrase -> {
-                        Text("Enter your account passphrase", style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.onb_passphrase_title), style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "Your account is protected by a passphrase. Enter it to register this device.",
+                            stringResource(R.string.onb_passphrase_desc),
                             style = MaterialTheme.typography.bodyMedium,
                             textAlign = TextAlign.Center,
                         )
@@ -318,7 +322,7 @@ fun OnboardingScreen(
                         OutlinedTextField(
                             value = state.passphraseInput,
                             onValueChange = viewModel::onPassphraseInputChange,
-                            label = { Text("Passphrase") },
+                            label = { Text(stringResource(R.string.onb_passphrase_label)) },
                             singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -330,7 +334,7 @@ fun OnboardingScreen(
                             enabled = state.passphraseInput.isNotBlank(),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text("Register this device")
+                            Text(stringResource(R.string.onb_register_device))
                         }
                     }
 
@@ -342,31 +346,30 @@ fun OnboardingScreen(
                     step == OnboardingStep.Solving -> {
                         CircularProgressIndicator()
                         Spacer(Modifier.height(16.dp))
-                        Text("Creating your account", style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.onb_solving_title), style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "Running a one-time security check on this device. This can take a few " +
-                                "seconds, and the time varies from run to run.",
+                            stringResource(R.string.onb_solving_desc),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
                         )
                         Spacer(Modifier.height(16.dp))
-                        TextButton(onClick = viewModel::cancelSolving) { Text("Cancel") }
+                        TextButton(onClick = viewModel::cancelSolving) { Text(stringResource(R.string.onb_cancel)) }
                     }
 
                     else -> {
                         // ChooseMethod hub: proof-of-work account creation is the primary, permissionless
                         // path; importing an existing identity and OAuth sign-in are secondary options.
-                        Text("Set up your account", style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.onb_setup_account_title), style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(16.dp))
                         if (state.powAvailable) {
                             Button(onClick = viewModel::chooseCreateAccount, modifier = Modifier.fillMaxWidth()) {
-                                Text("Create a new account")
+                                Text(stringResource(R.string.onb_create_new_account))
                             }
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                "No sign-in needed. A quick one-time security check runs on this device.",
+                                stringResource(R.string.onb_pow_no_signin_desc),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center,
@@ -374,7 +377,7 @@ fun OnboardingScreen(
                             Spacer(Modifier.height(20.dp))
                         }
                         Text(
-                            "Already have an account?",
+                            stringResource(R.string.onb_already_have_account),
                             style = MaterialTheme.typography.bodyMedium,
                             textAlign = TextAlign.Center,
                         )
@@ -383,14 +386,14 @@ fun OnboardingScreen(
                             onClick = viewModel::addFromAnotherDevice,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text("Add from another device")
+                            Text(stringResource(R.string.onb_add_from_another_device))
                         }
                         if (state.providers.isNotEmpty()) {
                             Spacer(Modifier.height(20.dp))
                             HorizontalDivider()
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                "Other ways to sign in",
+                                stringResource(R.string.onb_other_sign_in_ways),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -400,14 +403,14 @@ fun OnboardingScreen(
                                     onClick = { viewModel.onProviderSelected(provider) },
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
-                                    Text("Continue with ${provider.name}")
+                                    Text(stringResource(R.string.onb_continue_with_provider, provider.name))
                                 }
                                 Spacer(Modifier.height(8.dp))
                             }
                         }
                         Spacer(Modifier.height(8.dp))
                         TextButton(onClick = viewModel::editServer) {
-                            Text("Change super node")
+                            Text(stringResource(R.string.onb_change_super_node))
                         }
                     }
                 }
@@ -432,12 +435,10 @@ private fun BackupKeyStep(keyBase58: String, onContinue: () -> Unit) {
     var copied by remember { mutableStateOf(false) }
     var acknowledged by remember { mutableStateOf(false) }
 
-    Text("Back up your identity key", style = MaterialTheme.typography.titleMedium)
+    Text(stringResource(R.string.onb_backup_key_title), style = MaterialTheme.typography.titleMedium)
     Spacer(Modifier.height(8.dp))
     Text(
-        "This key is your BosonNetwork identity. It is the ONLY way to access and restore your account on " +
-            "another device, and if you lose it no one can recover it for you. Save it somewhere safe and " +
-            "private before continuing.",
+        stringResource(R.string.onb_backup_key_desc),
         style = MaterialTheme.typography.bodyMedium,
         textAlign = TextAlign.Center,
     )
@@ -445,7 +446,7 @@ private fun BackupKeyStep(keyBase58: String, onContinue: () -> Unit) {
     rememberQrBitmap(keyBase58)?.let { qr ->
         Image(
             bitmap = qr,
-            contentDescription = "Identity key QR",
+            contentDescription = stringResource(R.string.onb_identity_key_qr_cd),
             modifier = Modifier.size(220.dp),
         )
         Spacer(Modifier.height(16.dp))
@@ -465,13 +466,13 @@ private fun BackupKeyStep(keyBase58: String, onContinue: () -> Unit) {
         },
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text(if (copied) "Copied" else "Copy key")
+        Text(if (copied) stringResource(R.string.onb_copied) else stringResource(R.string.onb_copy_key))
     }
     Spacer(Modifier.height(16.dp))
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
         Checkbox(checked = acknowledged, onCheckedChange = { acknowledged = it })
         Text(
-            "I have saved my identity key somewhere safe.",
+            stringResource(R.string.onb_saved_key_ack),
             style = MaterialTheme.typography.bodyMedium,
         )
     }
@@ -481,7 +482,7 @@ private fun BackupKeyStep(keyBase58: String, onContinue: () -> Unit) {
         enabled = acknowledged,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text("Continue")
+        Text(stringResource(R.string.onb_continue))
     }
 }
 
@@ -503,7 +504,7 @@ private fun KeyScanStep(onScanned: (String) -> Unit, onCancel: () -> Unit) {
         if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
-    Text("Scan the identity QR", style = MaterialTheme.typography.titleMedium)
+    Text(stringResource(R.string.onb_scan_identity_qr_title), style = MaterialTheme.typography.titleMedium)
     Spacer(Modifier.height(12.dp))
     if (hasCameraPermission) {
         QrScanner(
@@ -512,15 +513,15 @@ private fun KeyScanStep(onScanned: (String) -> Unit, onCancel: () -> Unit) {
         )
     } else {
         Text(
-            "Camera permission is needed to scan the QR.",
+            stringResource(R.string.onb_camera_permission_needed),
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(12.dp))
         Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
-            Text("Grant camera access")
+            Text(stringResource(R.string.onb_grant_camera_access))
         }
     }
     Spacer(Modifier.height(12.dp))
-    TextButton(onClick = onCancel) { Text("Back") }
+    TextButton(onClick = onCancel) { Text(stringResource(R.string.onb_back)) }
 }

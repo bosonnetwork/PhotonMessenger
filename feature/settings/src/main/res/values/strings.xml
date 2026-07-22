@@ -1,0 +1,195 @@
+<resources>
+    <!-- SettingsScreen: top bar, section headers -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_section_account">Account</string>
+    <string name="settings_accounts_title">Accounts</string>
+    <string name="settings_accounts_subtitle">Switch between or add accounts on this device</string>
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_dynamic_color_title">Dynamic color</string>
+    <string name="settings_dynamic_color_subtitle">Use colors from your wallpaper</string>
+    <string name="settings_language_title">Language</string>
+    <string name="settings_section_notifications">Notifications</string>
+    <string name="settings_notifications_enabled_title">Message notifications</string>
+    <string name="settings_notifications_enabled_subtitle">Notify me about new messages</string>
+    <string name="settings_notifications_preview_title">Show preview</string>
+    <string name="settings_notifications_preview_subtitle">Show sender and message text</string>
+    <string name="settings_notifications_off_title">Notifications are turned off</string>
+    <string name="settings_notifications_off_body">Allow notifications so Photon can alert you to new messages.</string>
+    <string name="settings_notifications_allow_action">Allow</string>
+    <string name="settings_battery_title">Allow background activity</string>
+    <string name="settings_battery_body">Exempt Photon from battery optimization so it stays connected and delivers messages reliably.</string>
+    <string name="settings_open_settings_action">Open settings</string>
+    <string name="settings_section_security">Security</string>
+    <string name="settings_sessions_title">Sessions</string>
+    <string name="settings_sessions_subtitle">Manage where you\'re signed in</string>
+    <string name="settings_devices_title">Devices</string>
+    <string name="settings_devices_subtitle">Manage devices registered to your account</string>
+    <string name="settings_section_about">About</string>
+    <string name="settings_about_app_name">Photon</string>
+    <string name="settings_about_version_line">Version %1$s - Powered by BosonNetwork</string>
+    <string name="settings_about_version_unknown">unknown</string>
+    <string name="settings_sign_out_action">Sign out</string>
+    <string name="settings_sign_out_confirm_title">Sign out?</string>
+    <string name="settings_sign_out_confirm_body">This ends your session on this device. Your identity, conversations, and settings stay on this device, so you can sign back in anytime. You\'ll need to sign in again to reconnect.</string>
+
+    <!-- SettingsScreen: Boson ID row + "My ID" QR dialog -->
+    <string name="settings_boson_id_title">Boson ID</string>
+    <string name="settings_boson_id_copy_content_description">Copy Boson ID</string>
+    <string name="settings_boson_id_copied_message">Boson ID copied</string>
+    <string name="settings_boson_id_qr_content_description">Show Boson ID as QR</string>
+    <string name="settings_my_id_title">My ID</string>
+    <string name="settings_my_id_message">Friends scan or type this ID to add %1$s. It is public and safe to share.</string>
+    <string name="settings_my_id_fallback_name">you</string>
+    <string name="settings_my_id_qr_content_description">User ID QR code</string>
+
+    <!-- SettingsScreen: hidden tap-count hint before revealing the identity key -->
+    <plurals name="settings_identity_key_taps_remaining">
+        <item quantity="one">%1$d more tap to show your identity key</item>
+        <item quantity="other">%1$d more taps to show your identity key</item>
+    </plurals>
+
+    <!-- SettingsScreen: passphrase section + dialogs -->
+    <string name="settings_passphrase_protected_title">Protected by a passphrase</string>
+    <string name="settings_passphrase_unset_title">No passphrase set</string>
+    <string name="settings_passphrase_protected_subtitle">A passphrase is required to change sensitive account settings.</string>
+    <string name="settings_passphrase_unset_subtitle">Add a passphrase to protect sensitive account changes even if your key is exposed.</string>
+    <string name="settings_passphrase_change_action">Change passphrase</string>
+    <string name="settings_passphrase_set_action">Set passphrase</string>
+    <string name="settings_passphrase_current_label">Current passphrase</string>
+    <string name="settings_passphrase_new_label">New passphrase</string>
+    <string name="settings_passphrase_confirm_label">Confirm new passphrase</string>
+    <string name="settings_passphrase_mismatch">Passphrases don\'t match</string>
+    <string name="settings_passphrase_remove_title">Remove passphrase</string>
+    <string name="settings_passphrase_remove_body">Enter your current passphrase to remove it. Sensitive changes will no longer be protected.</string>
+    <string name="settings_passphrase_label">Passphrase</string>
+
+    <!-- SettingsScreen: profile header + edit-profile dialog -->
+    <string name="settings_change_photo_content_description">Change profile photo</string>
+    <string name="settings_no_name_set">No name set</string>
+    <string name="settings_plan_line">Plan: %1$s</string>
+    <string name="settings_edit_profile_action">Edit profile</string>
+    <string name="settings_remove_photo_action">Remove photo</string>
+    <string name="settings_name_label">Name</string>
+    <string name="settings_email_label">Email</string>
+    <string name="settings_bio_label">Bio</string>
+
+    <!-- SettingsScreen: theme mode labels -->
+    <string name="settings_theme_system">System</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+
+    <!-- Shared generic actions -->
+    <string name="settings_action_done">Done</string>
+    <string name="settings_action_remove">Remove</string>
+    <string name="settings_action_save">Save</string>
+    <string name="settings_action_cancel">Cancel</string>
+    <string name="settings_back_content_description">Back</string>
+
+    <!-- LanguageScreen -->
+    <string name="settings_language_selected_content_description">Selected</string>
+    <string name="settings_language_system">System default</string>
+    <string name="settings_language_english">English</string>
+    <string name="settings_language_chinese">Chinese (Simplified)</string>
+    <string name="settings_language_native_english">English</string>
+    <!-- Endonym: deliberately non-ASCII even in the English resource file, so a language's own name
+         renders correctly regardless of the current UI locale (per the localization spec). -->
+    <string name="settings_language_native_chinese">简体中文</string>
+
+    <!-- DevicesScreen -->
+    <string name="settings_devices_empty">No registered devices</string>
+    <string name="settings_device_remove_confirm_title">Remove %1$s?</string>
+    <string name="settings_device_remove_confirm_body">The device is deregistered from your account and can no longer sign in with its device key. Any active session it has is ended when it next reconnects.</string>
+    <string name="settings_add_device_action">Add this device</string>
+    <string name="settings_approve_device_action">Approve a device</string>
+    <string name="settings_enter_passphrase_title">Enter passphrase</string>
+    <string name="settings_enter_passphrase_body">Your account is protected by a passphrase. Enter it to remove this device.</string>
+    <string name="settings_device_current_content_description">This device - show identity key</string>
+    <string name="settings_device_remove_content_description">Remove device</string>
+    <string name="settings_device_remove_error">Couldn\'t remove device: %1$s</string>
+    <string name="settings_wrong_passphrase">Wrong passphrase</string>
+
+    <!-- SessionsScreen -->
+    <string name="settings_sessions_empty">No active sessions</string>
+    <string name="settings_revoke_session_title">Revoke session?</string>
+    <string name="settings_revoke_session_body">%1$s is signed out of the messaging service. The device stays registered and can reconnect later.</string>
+    <string name="settings_revoke_also_remove_title">Also remove this device from your account</string>
+    <string name="settings_revoke_also_remove_subtitle">The device is deregistered and can no longer sign in with its device key.</string>
+    <string name="settings_revoke_action">Revoke</string>
+    <string name="settings_session_online_content_description">Online</string>
+    <string name="settings_session_offline_content_description">Offline</string>
+    <string name="settings_session_current_content_description">This device</string>
+    <string name="settings_session_revoke_error">Couldn\'t revoke session: %1$s</string>
+
+    <!-- ApproveDeviceScreen -->
+    <string name="settings_approve_scan_hint">Point the camera at the QR shown on the new device</string>
+    <string name="settings_camera_permission_message">Camera access is needed to scan the pairing code.</string>
+    <string name="settings_camera_permission_action">Grant camera access</string>
+    <string name="settings_approve_loading_reading">Reading pairing request...</string>
+    <string name="settings_approve_loading_authorizing">Authorizing device...</string>
+    <string name="settings_approve_confirm_title">Authorize this device?</string>
+    <string name="settings_approve_confirm_body">"%1$s" (%2$s) wants to sign in to your account. Approving shares your encrypted identity key with it.</string>
+    <string name="settings_approve_action">Approve</string>
+    <string name="settings_deny_action">Deny</string>
+    <string name="settings_approve_done_approved">Device approved.</string>
+    <string name="settings_approve_done_denied">Request denied.</string>
+    <string name="settings_scan_again_action">Scan again</string>
+    <string name="settings_pairing_failed">Pairing failed</string>
+
+    <!-- PairNewDeviceScreen -->
+    <string name="settings_pair_preparing">Preparing pairing code...</string>
+    <string name="settings_pair_scan_hint">Scan this code from a device that is already signed in</string>
+    <string name="settings_pair_qr_content_description">Pairing QR code</string>
+    <string name="settings_pair_waiting">Waiting for approval...</string>
+    <string name="settings_pair_success">This device is now paired</string>
+    <string name="settings_continue_action">Continue</string>
+    <string name="settings_try_again_action">Try again</string>
+    <string name="settings_device_name_fallback">Android device</string>
+
+    <!-- KeyReveal shared scaffold -->
+    <string name="settings_reveal_key_action">Reveal key</string>
+    <string name="settings_key_copied">Copied</string>
+    <string name="settings_key_copy_action">Copy key</string>
+
+    <!-- ShowIdentityKeyScreen -->
+    <string name="settings_identity_key_title">Show identity key</string>
+    <string name="settings_identity_key_warning">This is your identity key - it IS your account. Anyone who captures this QR or text can impersonate you and read your messages, and unlike a device key it cannot be revoked. Back it up somewhere safe, and only reveal it on a device you own, in a private place.</string>
+    <string name="settings_identity_key_qr_content_description">Identity key QR</string>
+    <string name="settings_identity_key_empty">No identity key on this device</string>
+
+    <!-- ShowKeyScreen -->
+    <string name="settings_device_key_title">Show device key</string>
+    <string name="settings_device_key_warning">This is this device\'s key. It authorizes this device to connect to the messaging service and receive your messages - it is not your identity key. Anyone who captures this QR or text can connect as this device and read the messages delivered to it. Unlike your identity, a leaked device key can be revoked: remove this device from your Devices list to cut it off. Only reveal it on a device you own, in a private place.</string>
+    <string name="settings_device_key_qr_content_description">Device key QR</string>
+    <string name="settings_device_key_empty">No device key on this device</string>
+
+    <!-- DeviceListItems -->
+    <string name="settings_device_no_recent_activity">No recent activity</string>
+
+    <!-- data/AvatarPreparer: user-facing upload validation errors -->
+    <string name="settings_avatar_error_not_image">Please choose an image</string>
+    <string name="settings_avatar_error_unsupported">Unsupported or corrupt image</string>
+    <string name="settings_avatar_error_cannot_open">Cannot open image</string>
+
+    <!-- data/DevicePairingRepository -->
+    <string name="settings_pairing_error_no_active">No pairing in progress</string>
+    <string name="settings_pairing_error_no_identity">No user identity on this device</string>
+    <string name="settings_pairing_error_invalid_code">Not a Photon pairing code</string>
+    <string name="settings_default_device_name">New device</string>
+
+    <!-- data/SettingsRepository -->
+    <string name="settings_repository_error_not_connected">Not connected to the messaging service</string>
+    <string name="settings_repository_error_invalid_device_id">Invalid device ID</string>
+
+    <!-- SettingsViewModel: user-facing status/error messages -->
+    <string name="settings_profile_save_error">Couldn\'t save profile: %1$s</string>
+    <string name="settings_passphrase_saved_message">Passphrase saved</string>
+    <string name="settings_passphrase_set_error">Couldn\'t set passphrase: %1$s</string>
+    <string name="settings_passphrase_removed_message">Passphrase removed</string>
+    <string name="settings_passphrase_remove_error">Couldn\'t remove passphrase: %1$s</string>
+    <string name="settings_photo_update_error">Couldn\'t update photo: %1$s</string>
+    <string name="settings_photo_remove_error">Couldn\'t remove photo: %1$s</string>
+    <string name="settings_theme_change_error">Couldn\'t change theme: %1$s</string>
+    <string name="settings_notifications_update_error">Couldn\'t update notifications: %1$s</string>
+    <string name="settings_sign_out_error">Couldn\'t sign out: %1$s</string>
+    <string name="settings_unknown_error">unknown error</string>
+</resources>
