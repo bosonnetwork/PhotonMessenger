@@ -52,9 +52,11 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.SwitchAccount
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.CircularProgressIndicator
@@ -92,6 +94,11 @@ fun OnboardingScreen(
     onAuthenticated: () -> Unit,
     onHandoffProfile: (ProfileHandoff) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * Opens the returning-user account picker. Non-null only when at least one signed-in-before profile
+     * exists on this device; null hides the affordance entirely (nothing to sign back into).
+     */
+    onOpenExistingAccounts: (() -> Unit)? = null,
     viewModel: OnboardingViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -113,8 +120,9 @@ fun OnboardingScreen(
         if (state.step == OnboardingStep.Authenticated) onAuthenticated()
     }
 
+    Box(modifier = modifier.fillMaxSize()) {
     Column(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(24.dp),
@@ -435,6 +443,21 @@ fun OnboardingScreen(
         state.error?.let { error ->
             Spacer(Modifier.height(16.dp))
             Text(text = error, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+        }
+    }
+
+        // Returning-user shortcut: only on the first (server) screen, and only when the app reports
+        // existing accounts to sign back into (sign-out keeps their keys/data, just ends the session).
+        if (onOpenExistingAccounts != null && state.step == OnboardingStep.Server) {
+            IconButton(
+                onClick = onOpenExistingAccounts,
+                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+            ) {
+                Icon(
+                    Icons.Filled.SwitchAccount,
+                    contentDescription = stringResource(R.string.onb_use_existing_account),
+                )
+            }
         }
     }
 }

@@ -7,6 +7,8 @@
     <string name="app_accounts_active">当前</string>
     <string name="app_accounts_remove_account_cd">移除账户</string>
     <string name="app_accounts_add_account">添加账户</string>
+    <string name="app_accounts_sign_in_title">登录到账户</string>
+    <string name="app_accounts_sign_in_add">设置其他账户</string>
     <string name="app_accounts_switch_dialog_title">切换账户？</string>
     <string name="app_accounts_switch_dialog_message">切换到 %1$s？应用将重启以打开此账户。</string>
     <string name="app_accounts_switch">切换</string>

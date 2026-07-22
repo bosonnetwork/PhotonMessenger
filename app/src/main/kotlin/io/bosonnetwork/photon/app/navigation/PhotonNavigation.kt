@@ -46,6 +46,8 @@ object Routes {
     const val ONBOARDING = "onboarding"
     const val CREATE_CHANNEL = "createChannel"
     const val ACCOUNTS = "accounts"
+    /** Accounts list opened from onboarding as a returning-user sign-in picker (no delete). */
+    const val SIGN_IN_ACCOUNTS = "signInAccounts"
     const val SESSIONS = "sessions"
     const val DEVICES = "devices"
     const val ADD_DEVICE = "addDevice"

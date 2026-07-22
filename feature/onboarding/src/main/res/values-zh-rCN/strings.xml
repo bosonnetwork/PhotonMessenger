@@ -13,6 +13,7 @@
     <string name="onb_scan_super_node">扫描超级节点二维码</string>
     <string name="onb_scan_super_node_title">扫描超级节点二维码</string>
     <string name="onb_scan_super_node_desc">将相机对准超级节点门户中的二维码,即可自动填写其地址。</string>
+    <string name="onb_use_existing_account">登录到已有账户</string>
 
     <string name="onb_choose_identity_title">设置您的身份</string>
     <string name="onb_choose_identity_desc_can_create">创建新的身份密钥,或从其他设备导入现有密钥。</string>

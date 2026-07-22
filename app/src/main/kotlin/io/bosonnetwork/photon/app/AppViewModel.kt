@@ -237,6 +237,28 @@ class AppViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Signs into [id] from the onboarding account picker and relaunches so the graph rebinds to it.
+     * Unlike [switchProfile] this also handles re-signing into the CURRENTLY active profile: sign-out
+     * clears the session token but keeps the profile's key and local data, so the just-signed-out
+     * account is a valid target. A profile that has no live token gets a fresh clientAuth session minted
+     * from its own stored user key; one that still holds a token is opened as-is.
+     */
+    fun signInToProfile(id: String) {
+        viewModelScope.launch {
+            val secrets = SecretStore(appContext, profileManager.secretsFileNameFor(id))
+            val store = EncryptedAuthTokenStore(secrets)
+            if (store.currentToken() == null) {
+                KeyManager.readUserKey(secrets)?.let { key ->
+                    runCatching { authRepository.mintSessionFor(key) }
+                        .onSuccess { store.seedDurably(it) }
+                }
+            }
+            profileManager.setActive(id)
+            AppRelauncher.relaunch(appContext)
+        }
+    }
+
     /** Removes a profile (and its secrets). If it was active, relaunches into another/fresh profile. */
     fun deleteProfile(id: String) {
         val wasActive = id == profileManager.activeProfileId()

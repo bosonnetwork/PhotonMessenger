@@ -33,6 +33,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.AlertDialog
@@ -63,6 +64,11 @@ import io.bosonnetwork.photon.core.security.Profile
  * Account switcher: lists the on-device profiles (one per Boson identity), lets the user switch to,
  * add, or remove one. Switching/adding/removing-the-active-profile relaunches the app so the whole
  * singleton graph rebinds to the selected profile's stores.
+ *
+ * In [signInMode] (opened from onboarding as a returning-user picker) it becomes sign-in focused: only
+ * profiles that already hold an identity are listed, tapping a row signs straight into it (including
+ * the just-signed-out active profile) with no confirm dialog, and the destructive remove action and
+ * active marker are hidden to keep the onboarding entry low-risk.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,14 +79,25 @@ fun AccountsScreen(
     onAddAccount: () -> Unit,
     onRemove: (String) -> Unit,
     onBack: () -> Unit,
+    signInMode: Boolean = false,
 ) {
     var confirmRemove by remember { mutableStateOf<Profile?>(null) }
     var confirmSwitch by remember { mutableStateOf<Profile?>(null) }
 
+    // Sign-in picker only offers accounts that already have a bound identity to sign into.
+    val shown = if (signInMode) profiles.filter { it.userId != null } else profiles
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.app_accounts_title)) },
+                title = {
+                    Text(
+                        stringResource(
+                            if (signInMode) R.string.app_accounts_sign_in_title
+                            else R.string.app_accounts_title,
+                        ),
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -94,7 +111,7 @@ fun AccountsScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             LazyColumn(Modifier.weight(1f)) {
-                items(profiles, key = { it.id }) { profile ->
+                items(shown, key = { it.id }) { profile ->
                     val active = profile.id == activeProfileId
                     ListItem(
                         headlineContent = { Text(profileTitle(profile)) },
@@ -106,18 +123,25 @@ fun AccountsScreen(
                             )
                         },
                         trailingContent = {
-                            if (active) {
-                                // Match the delete IconButton's 48dp slot so the active check and the
-                                // remove icon are the same size and share the same trailing position.
-                                Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        Icons.Filled.CheckCircle,
-                                        contentDescription = stringResource(R.string.app_accounts_active),
-                                        tint = MaterialTheme.colorScheme.primary,
-                                    )
+                            when {
+                                // Sign-in picker: every row is a tappable sign-in target; no active
+                                // marker (the user is signed out) and no destructive remove here.
+                                signInMode -> Icon(
+                                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = null,
+                                )
+                                active -> {
+                                    // Match the delete IconButton's 48dp slot so the active check and the
+                                    // remove icon are the same size and share the same trailing position.
+                                    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Filled.CheckCircle,
+                                            contentDescription = stringResource(R.string.app_accounts_active),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
                                 }
-                            } else {
-                                IconButton(onClick = { confirmRemove = profile }) {
+                                else -> IconButton(onClick = { confirmRemove = profile }) {
                                     Icon(
                                         Icons.Outlined.Delete,
                                         contentDescription = stringResource(R.string.app_accounts_remove_account_cd),
@@ -125,7 +149,13 @@ fun AccountsScreen(
                                 }
                             }
                         },
-                        modifier = Modifier.clickable(enabled = !active) { confirmSwitch = profile },
+                        // Sign-in mode signs in directly (no session to abandon); the switcher confirms
+                        // first because switching abandons the live session, and never re-selects active.
+                        modifier = if (signInMode) {
+                            Modifier.clickable { onSwitch(profile.id) }
+                        } else {
+                            Modifier.clickable(enabled = !active) { confirmSwitch = profile }
+                        },
                     )
                     HorizontalDivider()
                 }
@@ -133,7 +163,14 @@ fun AccountsScreen(
             OutlinedButton(
                 onClick = onAddAccount,
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
-            ) { Text(stringResource(R.string.app_accounts_add_account)) }
+            ) {
+                Text(
+                    stringResource(
+                        if (signInMode) R.string.app_accounts_sign_in_add
+                        else R.string.app_accounts_add_account,
+                    ),
+                )
+            }
         }
     }
 

@@ -13,6 +13,7 @@
     <string name="onb_scan_super_node">Scan super node QR code</string>
     <string name="onb_scan_super_node_title">Scan the super node QR code</string>
     <string name="onb_scan_super_node_desc">Point your camera at the QR code from the super node portal to fill in its address automatically.</string>
+    <string name="onb_use_existing_account">Sign in to an existing account</string>
 
     <string name="onb_choose_identity_title">Set up your identity</string>
     <string name="onb_choose_identity_desc_can_create">Create a new identity key, or bring an existing one from another device.</string>

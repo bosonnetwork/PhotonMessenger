@@ -180,6 +180,8 @@ fun PhotonNavHost(
             },
         ) {
             composable(Routes.ONBOARDING) {
+                // Offer the returning-user account picker only when a signed-in-before profile exists.
+                val hasExistingAccounts = remember { appViewModel.profiles().any { it.userId != null } }
                 OnboardingScreen(
                     onAuthenticated = {
                         // If this identity belongs to a different existing profile, the app relaunches
@@ -195,6 +197,23 @@ fun PhotonNavHost(
                     onHandoffProfile = { handoff ->
                         appViewModel.handOffToProfile(handoff.existingProfileId, handoff.seed)
                     },
+                    onOpenExistingAccounts = if (hasExistingAccounts) {
+                        { navController.navigate(Routes.SIGN_IN_ACCOUNTS) }
+                    } else {
+                        null
+                    },
+                )
+            }
+            composable(Routes.SIGN_IN_ACCOUNTS) {
+                AccountsScreen(
+                    profiles = remember { appViewModel.profiles() },
+                    activeProfileId = appViewModel.activeProfileId(),
+                    signInMode = true,
+                    onSwitch = { appViewModel.signInToProfile(it) },
+                    // "Set up a different account": return to the onboarding flow to add/import one.
+                    onAddAccount = { navController.popBackStack() },
+                    onRemove = {},
+                    onBack = { navController.popBackStack() },
                 )
             }
             composable(TopLevelDestination.HOME.route) {
