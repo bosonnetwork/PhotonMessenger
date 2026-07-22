@@ -195,7 +195,22 @@ fun OnboardingScreen(
                         ) {
                             Text(stringResource(R.string.onb_continue))
                         }
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedButton(
+                            onClick = viewModel::scanServerQr,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(stringResource(R.string.onb_scan_super_node))
+                        }
                     }
+
+                    step == OnboardingStep.ScanServer ->
+                        CameraScanStep(
+                            title = stringResource(R.string.onb_scan_super_node_title),
+                            description = stringResource(R.string.onb_scan_super_node_desc),
+                            onScanned = viewModel::onServerQrScanned,
+                            onCancel = viewModel::cancelServerScan,
+                        )
 
                     step == OnboardingStep.ChooseIdentity -> {
                         Text(stringResource(R.string.onb_choose_identity_title), style = MaterialTheme.typography.titleMedium)
@@ -486,9 +501,27 @@ private fun BackupKeyStep(keyBase58: String, onContinue: () -> Unit) {
     }
 }
 
-/** Camera step for scanning a raw identity-key QR from another device (O4). Requests CAMERA inline. */
+/** Camera step for scanning a raw identity-key QR from another device (O4). */
 @Composable
-private fun KeyScanStep(onScanned: (String) -> Unit, onCancel: () -> Unit) {
+private fun KeyScanStep(onScanned: (String) -> Unit, onCancel: () -> Unit) =
+    CameraScanStep(
+        title = stringResource(R.string.onb_scan_identity_qr_title),
+        onScanned = onScanned,
+        onCancel = onCancel,
+    )
+
+/**
+ * Camera step that decodes a QR code and hands each raw payload to [onScanned]. Requests CAMERA inline and
+ * shows a rationale plus a grant button when the permission is denied. [description] is optional helper
+ * text shown under the title.
+ */
+@Composable
+private fun CameraScanStep(
+    title: String,
+    onScanned: (String) -> Unit,
+    onCancel: () -> Unit,
+    description: String? = null,
+) {
     val context = LocalContext.current
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -504,7 +537,11 @@ private fun KeyScanStep(onScanned: (String) -> Unit, onCancel: () -> Unit) {
         if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
-    Text(stringResource(R.string.onb_scan_identity_qr_title), style = MaterialTheme.typography.titleMedium)
+    Text(title, style = MaterialTheme.typography.titleMedium)
+    if (description != null) {
+        Spacer(Modifier.height(8.dp))
+        Text(description, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+    }
     Spacer(Modifier.height(12.dp))
     if (hasCameraPermission) {
         QrScanner(

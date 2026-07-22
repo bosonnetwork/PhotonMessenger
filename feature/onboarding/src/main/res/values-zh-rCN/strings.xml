@@ -3,13 +3,16 @@
     <string name="onb_welcome_tagline">基于 BosonNetwork 的联邦消息服务</string>
 
     <string name="onb_server_step_title">连接到您的超级节点</string>
-    <string name="onb_server_url_label">服务器地址</string>
-    <string name="onb_server_url_placeholder">https://your-node:9000</string>
+    <string name="onb_server_url_label">超级节点地址</string>
+    <string name="onb_server_url_placeholder">https://example.com</string>
     <string name="onb_server_id_label">服务器 ID(高级)</string>
     <string name="onb_server_id_placeholder">Boson 节点 ID(用于自签名服务器)</string>
     <string name="onb_server_id_supporting_text">信任自签名 HTTPS 服务器时必填;使用公共 CA 证书时留空。</string>
     <string name="onb_advanced_options">高级选项</string>
     <string name="onb_continue">继续</string>
+    <string name="onb_scan_super_node">扫描超级节点二维码</string>
+    <string name="onb_scan_super_node_title">扫描超级节点二维码</string>
+    <string name="onb_scan_super_node_desc">将相机对准超级节点门户中的二维码,即可自动填写其地址。</string>
 
     <string name="onb_choose_identity_title">设置您的身份</string>
     <string name="onb_choose_identity_desc_can_create">创建新的身份密钥,或从其他设备导入现有密钥。</string>
@@ -68,6 +71,7 @@
     <string name="onb_error_create_account_failed">无法创建您的账户,请重试</string>
 
     <string name="onb_error_invalid_server_id">服务器 ID 无效(应为 Boson 节点 ID)</string>
+    <string name="onb_error_invalid_super_node_qr">该二维码不是有效的超级节点二维码</string>
     <string name="onb_error_pow_timeout">安全检查未能及时完成,请重试</string>
     <string name="onb_error_registration_rejected">注册被拒绝,请重试</string>
     <string name="onb_error_identity_taken">该身份已被占用,请重试</string>

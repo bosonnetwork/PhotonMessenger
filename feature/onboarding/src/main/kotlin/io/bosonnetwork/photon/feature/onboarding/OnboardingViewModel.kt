@@ -46,9 +46,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 enum class OnboardingStep {
-    Server, ChooseMethod, ChooseIdentity, CreateProfile, ScanKey, PasteKey, Passphrase, Solving, BackupKey, Authenticated
+    Server, ScanServer, ChooseMethod, ChooseIdentity, CreateProfile, ScanKey, PasteKey, Passphrase, Solving, BackupKey, Authenticated
 }
 
 data class OnboardingUiState(
@@ -141,6 +142,44 @@ class OnboardingViewModel @Inject constructor(
 
     /** Returns to the server step to point at a different Director. */
     fun editServer() = _uiState.update { it.copy(step = OnboardingStep.Server, error = null) }
+
+    /** Opens the camera to scan a super node QR code and prefill the server fields. */
+    fun scanServerQr() = _uiState.update {
+        lastScannedServerValue = null
+        it.copy(step = OnboardingStep.ScanServer, error = null)
+    }
+
+    /** Returns to the manual server step, discarding any in-progress scan. */
+    fun cancelServerScan() = _uiState.update { it.copy(step = OnboardingStep.Server, error = null) }
+
+    // The scanner re-emits the same payload every frame; only act on the first sighting of each value.
+    private var lastScannedServerValue: String? = null
+
+    /**
+     * Handles a super node QR payload: a small JSON object `{"url": "...", "id": "..."}` where "url" is
+     * the super node address and the optional "id" is the Boson node id used to pin a self-signed cert.
+     * On success the server fields are filled and the flow returns to the (editable) server step; an
+     * unrecognized payload leaves the scanner open with an error.
+     */
+    fun onServerQrScanned(text: String) {
+        if (text == lastScannedServerValue) return
+        lastScannedServerValue = text
+        val parsed = runCatching { JSONObject(text) }.getOrNull()
+        val url = parsed?.optString("url").orEmpty().trim()
+        if (url.isEmpty()) {
+            _uiState.update { it.copy(error = context.getString(R.string.onb_error_invalid_super_node_qr)) }
+            return
+        }
+        val nodeId = parsed?.optString("id").orEmpty().trim()
+        _uiState.update {
+            it.copy(
+                step = OnboardingStep.Server,
+                serverUrl = url,
+                directorNodeId = nodeId,
+                error = null,
+            )
+        }
+    }
 
     /**
      * Saves the entered Director URL, then probes that server for its OAuth providers AND whether it

@@ -3,13 +3,16 @@
     <string name="onb_welcome_tagline">Federated messaging powered by BosonNetwork</string>
 
     <string name="onb_server_step_title">Connect to your super node</string>
-    <string name="onb_server_url_label">Server URL</string>
-    <string name="onb_server_url_placeholder">https://your-node:9000</string>
+    <string name="onb_server_url_label">Super Node URL</string>
+    <string name="onb_server_url_placeholder">https://example.com</string>
     <string name="onb_server_id_label">Server ID (advanced)</string>
     <string name="onb_server_id_placeholder">Boson node id (for a self-signed server)</string>
     <string name="onb_server_id_supporting_text">Required to trust a self-signed HTTPS server; leave blank for a public CA.</string>
     <string name="onb_advanced_options">Advanced options</string>
     <string name="onb_continue">Continue</string>
+    <string name="onb_scan_super_node">Scan super node QR code</string>
+    <string name="onb_scan_super_node_title">Scan the super node QR code</string>
+    <string name="onb_scan_super_node_desc">Point your camera at the QR code from the super node portal to fill in its address automatically.</string>
 
     <string name="onb_choose_identity_title">Set up your identity</string>
     <string name="onb_choose_identity_desc_can_create">Create a new identity key, or bring an existing one from another device.</string>
@@ -68,6 +71,7 @@
     <string name="onb_error_create_account_failed">Couldn\'t create your account; please try again</string>
 
     <string name="onb_error_invalid_server_id">Invalid Server ID (expected a Boson node id)</string>
+    <string name="onb_error_invalid_super_node_qr">That QR code is not a valid super node code</string>
     <string name="onb_error_pow_timeout">Couldn\'t complete the security check in time; please try again</string>
     <string name="onb_error_registration_rejected">Registration was rejected; please try again</string>
     <string name="onb_error_identity_taken">That identity is already taken; please try again</string>

@@ -135,8 +135,14 @@ class AuthRepository @Inject constructor(
 
     private suspend fun config(): DirectorConfig = configStore.config.first()
 
-    /** Current Director base URL (prefilled into the pre-login server step, O1). */
-    suspend fun currentDirectorUrl(): String = config().baseUrl
+    /**
+     * Current Director base URL for prefilling the pre-login server step (O1), or "" when none has been
+     * configured yet so the field starts empty (the built-in placeholder default is not surfaced as text
+     * the user would have to clear).
+     */
+    suspend fun currentDirectorUrl(): String = config().baseUrl.let { url ->
+        if (url.trimEnd('/') == DirectorConfigStore.DEFAULT_DIRECTOR_URL.trimEnd('/')) "" else url
+    }
 
     /** Current Director node id used to identity-pin its cert, or "" when none is set (prefill, O1). */
     suspend fun currentDirectorNodeId(): String = config().nodeId.orEmpty()
