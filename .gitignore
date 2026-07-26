@@ -4,6 +4,7 @@ build/
 /build
 /*/build
 **/build/
+app/release/
 
 # Kotlin incremental compilation cache
 .kotlin/

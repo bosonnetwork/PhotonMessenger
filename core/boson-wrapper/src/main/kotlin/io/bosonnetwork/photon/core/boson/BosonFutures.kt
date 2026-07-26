@@ -28,19 +28,24 @@ import java.util.concurrent.CompletableFuture
 import kotlinx.coroutines.future.await as cfAwait
 
 /**
- * The two Boson libraries expose different async types, so the data layer needs two bridges
+ * The Boson libraries expose two async types, so the data layer needs two bridges
  * (design spec section 4.5):
  *
- *  - MessagingClient returns java.util.concurrent.CompletableFuture -> bridge with
- *    kotlinx-coroutines-jdk8 await().
- *  - IonStore returns Vert.x io.vertx.core.Future -> bridge with the Vert.x coroutine coAwait().
+ *  - MessagingClient returns java.util.concurrent.CompletableFuture, and IonStore returns a
+ *    ContextualFuture (which *is* a CompletableFuture, completing on the caller's Vert.x context)
+ *    -> both bridge with kotlinx-coroutines-jdk8 await().
+ *  - The Vert.x io.vertx.core.Future surfaces (the messaging store SPI this app implements) ->
+ *    bridge with the Vert.x coroutine coAwait().
  *
  * These thin aliases give call sites a single, consistent suspend point and a place to centralize
  * error mapping later (see [io.bosonnetwork.photon.core.model.AppError]).
  */
 
-/** Suspends until this MessagingClient future completes, rethrowing its cause on failure. */
+/**
+ * Suspends until this future completes, rethrowing its cause on failure. Covers both the
+ * MessagingClient futures and IonStore's ContextualFuture.
+ */
 suspend fun <T> CompletableFuture<T>.awaitResult(): T = cfAwait()
 
-/** Suspends until this IonStore Vert.x future completes, rethrowing its cause on failure. */
+/** Suspends until this Vert.x future completes, rethrowing its cause on failure. */
 suspend fun <T> Future<T>.awaitResult(): T = coAwait()

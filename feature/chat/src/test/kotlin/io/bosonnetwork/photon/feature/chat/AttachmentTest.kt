@@ -24,14 +24,21 @@ package io.bosonnetwork.photon.feature.chat
 
 import io.bosonnetwork.photon.feature.chat.model.AttachmentCarrier
 import io.bosonnetwork.photon.feature.chat.model.AttachmentKind
+import io.bosonnetwork.photon.feature.chat.model.AttachmentRefKeys
 import io.bosonnetwork.photon.feature.chat.model.AttachmentSource
 import io.bosonnetwork.photon.feature.chat.model.INLINE_MAX_BYTES
 import io.bosonnetwork.photon.feature.chat.model.chooseCarrier
 import io.bosonnetwork.photon.feature.chat.model.kindOf
+import io.bosonnetwork.photon.feature.chat.model.newAttachmentKey
 import io.bosonnetwork.photon.feature.chat.model.remoteAttachmentFromMap
 import io.bosonnetwork.photon.feature.chat.model.remoteAttachmentToMap
+import io.bosonnetwork.crypto.SecretStream
+import io.bosonnetwork.photonmessaging.impl.MessageContent
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AttachmentTest {
@@ -92,5 +99,87 @@ class AttachmentTest {
     @Test
     fun `malformed map yields null`() {
         assertNull(remoteAttachmentFromMap(mapOf("mime" to "image/png")))
+    }
+
+    @Test
+    fun `attachment keys are one-time and correctly sized for the store cipher`() {
+        val a = newAttachmentKey()
+        val b = newAttachmentKey()
+        assertEquals(SecretStream.KEY_BYTES, a.size)
+        // Two uploads never share a key; a fixed or reused key would defeat the whole design.
+        assertNotEquals("keys must not repeat", a.toList(), b.toList())
+    }
+
+    @Test
+    fun `the object key round-trips in the ref, and its absence means not encrypted`() {
+        val key = newAttachmentKey()
+        val encrypted = remoteAttachmentFromMap(
+            remoteAttachmentToMap(
+                uri = "ions://p/r",
+                contentId = "cid",
+                mime = "application/pdf",
+                size = 10,
+                name = "doc.pdf",
+                width = null,
+                height = null,
+                key = key,
+            ),
+        )!!
+        assertArrayEquals(key, (encrypted.source as AttachmentSource.Remote).key)
+
+        // A ref written before attachment encryption existed carries no key and must keep decoding as a
+        // plaintext object, so those attachments stay downloadable.
+        val legacy = remoteAttachmentFromMap(
+            remoteAttachmentToMap(
+                uri = "ions://p/r",
+                contentId = "cid",
+                mime = "application/pdf",
+                size = 10,
+                name = "doc.pdf",
+                width = null,
+                height = null,
+            ),
+        )!!
+        assertNull((legacy.source as AttachmentSource.Remote).key)
+    }
+
+    @Test
+    fun `a wrong-length key is dropped rather than carried into the download`() {
+        val map = mapOf(
+            "uri" to "ions://p/r",
+            "cid" to "c",
+            "mime" to "image/png",
+            "size" to 10,
+            "name" to "a.png",
+            AttachmentRefKeys.KEY to ByteArray(8),
+        )
+        assertNull((remoteAttachmentFromMap(map)!!.source as AttachmentSource.Remote).key)
+    }
+
+    @Test
+    fun `the key survives the real CBOR message body round-trip`() {
+        // The key travels as CBOR binary inside the message body. Nothing else in the app relies on a
+        // byte[] value in an object body, so pin it against the library's own codec rather than assume
+        // Jackson-CBOR keeps it binary: a key that came back base64-as-String would fail only later,
+        // in the download.
+        val key = newAttachmentKey()
+        val ref = remoteAttachmentToMap(
+            uri = "ions://p/r",
+            contentId = "cid",
+            mime = "image/jpeg",
+            size = 4096,
+            name = "photo.jpg",
+            width = 800,
+            height = 600,
+            key = key,
+        )
+
+        val wire = MessageContent.parse(MessageContent.`object`(ref).serialize())
+        val decoded = wire.asMap(String::class.java, Any::class.java)
+        assertTrue("key must decode as binary", decoded[AttachmentRefKeys.KEY] is ByteArray)
+
+        val att = remoteAttachmentFromMap(decoded)!!
+        assertArrayEquals(key, (att.source as AttachmentSource.Remote).key)
+        assertEquals("ions://p/r", (att.source as AttachmentSource.Remote).uri)
     }
 }

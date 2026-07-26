@@ -43,11 +43,11 @@ import io.bosonnetwork.photon.feature.chat.model.UiForwardTarget
 import io.bosonnetwork.photon.feature.chat.model.UiMessage
 import io.bosonnetwork.photon.feature.chat.model.chooseCarrier
 import io.bosonnetwork.photon.feature.chat.model.kindOf
+import io.bosonnetwork.photon.feature.chat.model.newAttachmentKey
 import io.bosonnetwork.photon.feature.chat.model.remoteAttachmentToMap
 import io.bosonnetwork.photon.feature.chat.model.toUi
 import io.bosonnetwork.Id
 import io.bosonnetwork.ionstore.IonStore
-import io.bosonnetwork.ionstore.PutOptions
 import io.bosonnetwork.photonmessaging.Channel
 import io.bosonnetwork.photonmessaging.ContentDisposition
 import io.bosonnetwork.photonmessaging.InviteTicket
@@ -323,8 +323,16 @@ class ChatRepositoryImpl @Inject constructor(
 
             AttachmentCarrier.ION_STORE -> {
                 val store = ionStore()
-                val options = PutOptions.builder().name(media.name).contentType(media.mime).build()
-                val obj = store.put(media.bytes, options).awaitResult()
+                // IonStore retrieval is permissionless, so the payload is encrypted with a one-time key
+                // that only this ref carries - and the ref travels inside the encrypted message body.
+                val key = newAttachmentKey()
+                val obj = store.put()
+                    .name(media.name)
+                    .contentType(media.mime)
+                    .encrypt(key)
+                    .content(media.bytes)
+                    .send()
+                    .awaitResult()
                 val uri = obj.uri ?: "ions://${store.servicePeerId}/${obj.id}"
                 val ref = remoteAttachmentToMap(
                     uri = uri,
@@ -334,6 +342,7 @@ class ChatRepositoryImpl @Inject constructor(
                     name = media.name,
                     width = media.width,
                     height = media.height,
+                    key = key,
                 )
                 client().message(to)
                     .contentObject(ref)
@@ -364,8 +373,14 @@ class ChatRepositoryImpl @Inject constructor(
                 // Safety net for a VBR spike beyond the inline voice ceiling: store the bytes and send
                 // the ref (with duration) exactly like a large attachment.
                 val store = ionStore()
-                val options = PutOptions.builder().name(name).contentType(VOICE_MIME).build()
-                val obj = store.put(bytes, options).awaitResult()
+                val key = newAttachmentKey()
+                val obj = store.put()
+                    .name(name)
+                    .contentType(VOICE_MIME)
+                    .encrypt(key)
+                    .content(bytes)
+                    .send()
+                    .awaitResult()
                 val uri = obj.uri ?: "ions://${store.servicePeerId}/${obj.id}"
                 val ref = remoteAttachmentToMap(
                     uri = uri,
@@ -376,6 +391,7 @@ class ChatRepositoryImpl @Inject constructor(
                     width = null,
                     height = null,
                     durationMs = durationMs,
+                    key = key,
                 )
                 client().message(to)
                     .contentObject(ref)
@@ -414,15 +430,19 @@ class ChatRepositoryImpl @Inject constructor(
             // never interleave their bytes into one another's output.
             val part = File.createTempFile("dl-", ".part", cached.parentFile)
             try {
-                val meta = if (peerId == store.servicePeerId)
-                    store.get(refId, part.toPath()).awaitResult()
-                else
-                    store.get(peerId, refId, part.toPath()).awaitResult()
+                // An own-peer ref is fetched directly; any other peer is fetched through this service,
+                // which resolves and caches it. The key (when the ref carries one) decrypts the stream
+                // on the way to disk, so the temp file already holds plaintext.
+                val request = if (peerId == store.servicePeerId) store.get(refId) else store.get(peerId, refId)
+                source.key?.let { request.decrypt(it) }
+                val meta = request.toFile(part.toPath()).awaitResult()
 
                 val obj = meta.orElse(null)
                     ?: throw AppError.NotFound(context.getString(R.string.chat_error_attachment_unavailable))
                 // End-to-end integrity: the library verifies bytes against the server-advertised content
-                // id; additionally pin it to the content id the sender committed to in the message.
+                // id; additionally pin it to the content id the sender committed to in the message. The
+                // content id is over the stored form, so for an encrypted object this pins the
+                // ciphertext - and the decryption above authenticates the plaintext behind it.
                 if (obj.contentId != expected)
                     throw AppError.Integrity(context.getString(R.string.chat_error_content_id_mismatch))
                 if (!part.renameTo(cached)) part.copyTo(cached, overwrite = true)
@@ -463,6 +483,8 @@ class ChatRepositoryImpl @Inject constructor(
                 // The bytes already live in IonStore; forwarding re-sends the SAME ref (no re-upload).
                 // The new recipient fetches them cross-peer by ref exactly like downloadAttachment does.
                 // A voice note carries its duration in the ref so it stays a voice bubble downstream.
+                // The object's key rides along too - forwarding an attachment means sharing the one key
+                // that opens it, which is what forwarding the bytes would have meant anyway.
                 val ref = remoteAttachmentToMap(
                     uri = source.uri,
                     contentId = source.contentId,
@@ -472,6 +494,7 @@ class ChatRepositoryImpl @Inject constructor(
                     width = attachment.width,
                     height = attachment.height,
                     durationMs = attachment.durationMs,
+                    key = source.key,
                 )
                 client().message(to)
                     .contentObject(ref)

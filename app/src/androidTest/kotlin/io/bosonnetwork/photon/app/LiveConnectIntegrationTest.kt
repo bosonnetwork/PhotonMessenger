@@ -23,27 +23,16 @@
 package io.bosonnetwork.photon.app
 
 import android.content.Context
-import android.util.Base64
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.bosonnetwork.photon.core.boson.BosonClientFactory
-import io.bosonnetwork.photon.core.boson.BosonCrypto
-import io.bosonnetwork.photon.core.database.MessagingStoreFactory
-import io.bosonnetwork.photon.core.model.AuthTokenStore
-import io.bosonnetwork.photon.core.network.ServiceDiscovery
-import io.bosonnetwork.photon.core.network.model.SelfRegisterRequest
 import io.bosonnetwork.Id
-import io.bosonnetwork.photonmessaging.ConnectionListener
 import io.bosonnetwork.photonmessaging.FriendRequestListener
 import io.bosonnetwork.photonmessaging.Message
 import io.bosonnetwork.photonmessaging.MessageListener
 import io.bosonnetwork.photonmessaging.MessagingClient
-import io.vertx.core.Vertx
-import java.io.File
-import java.security.SecureRandom
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -64,83 +53,30 @@ class LiveConnectIntegrationTest {
 
     private val timeout = 30L
 
-    private class MutableTokenStore : AuthTokenStore {
-        @Volatile private var token: String? = null
-        override fun currentToken(): String? = token
-        override suspend fun setToken(token: String?) { this.token = token }
-        override suspend fun clear() { token = null }
-    }
-
     /** A registered + connected client and the Boson identity it owns. */
     private class Peer(val client: MessagingClient, val userId: Id, val name: String)
 
-    // Director's Jackson endpoints decode byte[] with Base64Variants.MODIFIED_FOR_URL (base64url, no pad).
-    private fun b64(bytes: ByteArray): String =
-        Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
-
     /**
-     * Registers a fresh user + device with the live Director, builds a MessagingClient backed by an
-     * in-memory Room store, starts it, and waits for READY.
+     * Registers a fresh user + device with the live Director and connects a MessagingClient (in-memory
+     * Room store) to READY. Registration + discovery + connection all go through [LiveTestHarness], so
+     * this drives the same production pinned-TLS path as the other live suites and follows the node's
+     * registration policy (proof-of-work where the node requires it).
      */
-    private fun registerAndConnect(context: Context, vertx: Vertx, name: String): Peer {
-        val userKp = BosonCrypto.generateKeyPair()
-        val deviceKp = BosonCrypto.generateKeyPair()
-        val userId = BosonCrypto.idOf(userKp)
-        val nonce = ByteArray(32).also { SecureRandom().nextBytes(it) }
-
-        val request = SelfRegisterRequest(
-            userId = userId.toString(),
-            // No passphrase: the app onboards OAuth-style, so gated ops stay passphrase-free (M6).
-            passphrase = null,
-            userName = name,
-            deviceId = BosonCrypto.idOf(deviceKp).toString(),
-            deviceName = "emulator",
-            appName = "PhotonMessenger-IT",
-            nonce = b64(nonce),
-            userSig = b64(BosonCrypto.sign(userKp, nonce)),
-            deviceSig = b64(BosonCrypto.sign(deviceKp, nonce)),
-        )
-
-        val tokenStore = MutableTokenStore()
-        // Register + discover over the production identity-pinned Director client (pinned to the dev
-        // node id from the first request, see LiveDirectorTls), so this exercises the real pinned TLS
-        // handshake. The messaging client below likewise pins its own service by peerId.
-        val api = LiveDirectorTls.pinnedApiFactory(tokenStore).create(TestSuperNode.directorConfig)
-        val coords = runBlocking {
-            tokenStore.setToken(api.register(request).token)
-            ServiceDiscovery.toServiceCoords(api.getNodeStatus())
-        }
-
-        val store = MessagingStoreFactory.createInMemory(context, vertx)
-        val factory = BosonClientFactory(vertx)
-        val config = factory.buildConfiguration(
-            coords = coords,
-            userKey64 = BosonCrypto.privateKeyBytes64(userKp),
-            deviceKey64 = BosonCrypto.privateKeyBytes64(deviceKp),
-            dataDir = File(context.cacheDir, "it-$name-${System.nanoTime()}").apply { mkdirs() }.toPath(),
-            store = store,
-        )
-        val mc = factory.createMessagingClient(config)
-
-        val ready = CountDownLatch(1)
-        mc.addConnectionListener(object : ConnectionListener {
-            override fun onContactSynced() = ready.countDown()
-        })
-        mc.start().get(timeout, TimeUnit.SECONDS)
-        assertTrue("$name did not reach READY", ready.await(timeout, TimeUnit.SECONDS))
-        return Peer(mc, userId, name)
+    private fun registerAndConnect(harness: LiveTestHarness, name: String): Peer {
+        val account = harness.register(name)
+        return Peer(harness.connect(account), account.userId, name)
     }
 
     @Test
     fun registersAndConnectsToLiveNode() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val vertx = BosonClientFactory.newVertx()
-        var peer: Peer? = null
+        val harness = LiveTestHarness(context, vertx)
         try {
-            peer = registerAndConnect(context, vertx, "Solo")
+            val peer = registerAndConnect(harness, "Solo")
             assertTrue("client not connected", peer.client.isConnected)
         } finally {
-            runCatching { peer?.client?.stop()?.get(10, TimeUnit.SECONDS) }
+            harness.close()
             vertx.close()
         }
     }
@@ -149,10 +85,10 @@ class LiveConnectIntegrationTest {
     fun friendRequestAndDirectMessageRoundTrip() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val vertx = BosonClientFactory.newVertx()
-        val peers = mutableListOf<Peer>()
+        val harness = LiveTestHarness(context, vertx)
         try {
-            val alice = registerAndConnect(context, vertx, "Alice").also { peers += it }
-            val bob = registerAndConnect(context, vertx, "Bob").also { peers += it }
+            val alice = registerAndConnect(harness, "Alice")
+            val bob = registerAndConnect(harness, "Bob")
 
             // Bob waits for Alice's friend request; Alice waits for Bob's acceptance.
             // (Plain vars are safe here: CountDownLatch establishes happens-before between threads.)
@@ -196,7 +132,7 @@ class LiveConnectIntegrationTest {
             assertTrue("bob did not receive the direct message", bobGotMessage.await(timeout, TimeUnit.SECONDS))
             assertEquals("hello bob", receivedText)
         } finally {
-            peers.forEach { runCatching { it.client.stop().get(10, TimeUnit.SECONDS) } }
+            harness.close()
             vertx.close()
         }
     }

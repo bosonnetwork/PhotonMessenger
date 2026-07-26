@@ -67,7 +67,7 @@ class LiveIdleMemoryTest {
         val vertx = BosonClientFactory.newVertx()
         val harness = LiveTestHarness(context, vertx)
         try {
-            val alice = harness.register("AliceIdle")
+            val alice = harness.sharedAccount(LiveTestHarness.SHARED_ALICE)
             harness.connect(alice)
 
             // Let the connection settle, then take a baseline.

@@ -22,6 +22,9 @@
 
 package io.bosonnetwork.photon.feature.chat.model
 
+import io.bosonnetwork.crypto.Random
+import io.bosonnetwork.crypto.SecretStream
+
 /**
  * Media attachment model + the carrier/wire conventions shared by send and receive (spec 1.5, 4.6,
  * M5). Two carriers are supported:
@@ -35,6 +38,13 @@ package io.bosonnetwork.photon.feature.chat.model
  * The receiver discriminates purely on the Content-Disposition header: an attachment disposition
  * means the body is an [AttachmentRef] map; an inline disposition (with a non-text content type)
  * means the body is the raw bytes. Plain text messages carry no disposition at all.
+ *
+ * Inline bytes are confidential because the message body is: they are covered by the same end-to-end
+ * encryption as the text. An IonStore object is not - retrieval is permissionless, so anyone holding
+ * the ref could read it. The IonStore carrier therefore encrypts the payload with a one-time
+ * [newAttachmentKey] and carries that key in the ref (see [AttachmentRefKeys.KEY]), which travels
+ * inside the encrypted body: the service only ever holds ciphertext, and only the conversation can
+ * read it.
  */
 
 /** Broad rendering category derived from the MIME type. */
@@ -50,8 +60,22 @@ sealed interface AttachmentSource {
         override fun hashCode(): Int = bytes.contentHashCode()
     }
 
-    /** Bytes stored in IonStore; [uri] is `ions://<peerId>/<refId>`, [contentId] is the SHA-256. */
-    data class Remote(val uri: String, val contentId: String) : AttachmentSource
+    /**
+     * Bytes stored in IonStore; [uri] is `ions://<peerId>/<refId>`, [contentId] is the SHA-256 of the
+     * object as stored (the ciphertext, when encrypted).
+     *
+     * [key] is the one-time secret the payload was encrypted with before upload, or null for an
+     * object stored in the clear - which is what a ref written before attachment encryption existed
+     * looks like, so those keep downloading unchanged.
+     */
+    data class Remote(val uri: String, val contentId: String, val key: ByteArray? = null) : AttachmentSource {
+        override fun equals(other: Any?): Boolean =
+            this === other || (other is Remote && uri == other.uri && contentId == other.contentId &&
+                key.contentEquals(other.key))
+
+        override fun hashCode(): Int =
+            (uri.hashCode() * 31 + contentId.hashCode()) * 31 + key.contentHashCode()
+    }
 
     /**
      * A locally-picked content uri, shown optimistically while the attachment is still being sent
@@ -128,7 +152,25 @@ object AttachmentRefKeys {
     const val WIDTH = "w"
     const val HEIGHT = "h"
     const val DURATION = "dur"
+
+    /**
+     * The object's one-time encryption key, as CBOR binary. Absent means the object is stored in the
+     * clear, so its presence is what tells the receiver to decrypt - which matches how IonStore reads
+     * it back: a get must supply a key for an encrypted object and must not supply one otherwise.
+     */
+    const val KEY = "k"
 }
+
+/**
+ * A fresh secret for one IonStore upload, sized for the store's stream cipher
+ * (`PutRequest.encrypt`/`GetRequest.decrypt` both require exactly [SecretStream.KEY_BYTES]).
+ *
+ * One key per object, never reused and never derived from the conversation: it is only ever seen by
+ * the conversation it is sent in, a compromised key exposes that one attachment, and because the key
+ * rides in the ref rather than being recomputed, an object stays readable across channel session-key
+ * rotation and when a ref is forwarded to another conversation.
+ */
+fun newAttachmentKey(): ByteArray = Random.randomBytesSecure(SecretStream.KEY_BYTES)
 
 /** Encodes a remote attachment as the CBOR object map sent in the message body. */
 fun remoteAttachmentToMap(
@@ -140,6 +182,7 @@ fun remoteAttachmentToMap(
     width: Int?,
     height: Int?,
     durationMs: Long? = null,
+    key: ByteArray? = null,
 ): Map<String, Any> = buildMap {
     put(AttachmentRefKeys.URI, uri)
     put(AttachmentRefKeys.CONTENT_ID, contentId)
@@ -149,6 +192,7 @@ fun remoteAttachmentToMap(
     width?.let { put(AttachmentRefKeys.WIDTH, it) }
     height?.let { put(AttachmentRefKeys.HEIGHT, it) }
     durationMs?.let { put(AttachmentRefKeys.DURATION, it) }
+    key?.let { put(AttachmentRefKeys.KEY, it) }
 }
 
 /** Decodes the CBOR object map from a received message body into a [UiAttachment]. */
@@ -161,6 +205,10 @@ fun remoteAttachmentFromMap(map: Map<*, *>): UiAttachment? {
     val width = (map[AttachmentRefKeys.WIDTH] as? Number)?.toInt()
     val height = (map[AttachmentRefKeys.HEIGHT] as? Number)?.toInt()
     val durationMs = (map[AttachmentRefKeys.DURATION] as? Number)?.toLong()
+    // A key of the wrong length would only fail deep inside the download, so drop it here and let the
+    // ref read as "not encrypted" - the get then fails with the store's own encrypted/plaintext
+    // mismatch, which says what is actually wrong.
+    val key = (map[AttachmentRefKeys.KEY] as? ByteArray)?.takeIf { it.size == SecretStream.KEY_BYTES }
     return UiAttachment(
         kind = if (isVoice(mime, durationMs != null)) AttachmentKind.VOICE else kindOf(mime),
         mime = mime,
@@ -169,6 +217,6 @@ fun remoteAttachmentFromMap(map: Map<*, *>): UiAttachment? {
         width = width,
         height = height,
         durationMs = durationMs,
-        source = AttachmentSource.Remote(uri, contentId),
+        source = AttachmentSource.Remote(uri, contentId, key),
     )
 }
