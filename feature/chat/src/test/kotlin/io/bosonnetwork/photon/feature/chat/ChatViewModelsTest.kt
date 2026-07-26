@@ -105,10 +105,21 @@ class ChatViewModelsTest {
             joinedTickets += ticket
             return joinResult
         }
-        override suspend fun sendAttachment(recipientId: String, uriString: String) = sendResult
-        override suspend fun sendVoice(recipientId: String, filePath: String, durationMs: Long): Result<Unit> {
+        /** Send ids seen by [sendAttachment], in order - a retry must reuse the first attempt's id. */
+        val attachmentSendIds = mutableListOf<String>()
+        /** Send ids [discardSend] was asked to forget. */
+        val discardedSendIds = mutableListOf<String>()
+
+        override suspend fun sendAttachment(recipientId: String, uriString: String, sendId: String): Result<Unit> {
+            attachmentSendIds += sendId
+            return sendResult
+        }
+        override suspend fun sendVoice(recipientId: String, filePath: String, durationMs: Long, sendId: String): Result<Unit> {
             sentVoices += Triple(recipientId, filePath, durationMs)
             return sendResult
+        }
+        override fun discardSend(sendId: String) {
+            discardedSendIds += sendId
         }
         override fun optimisticAttachment(uriString: String) = UiAttachment(
             kind = AttachmentKind.IMAGE,
@@ -358,6 +369,53 @@ class ChatViewModelsTest {
             val bubble = withBubble.messages.single()
             assertEquals("hi", bubble.text)
             assertTrue(bubble.fromMe)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `retrying an attachment reuses the original send id`() = runTest {
+        // The send id is what lets the repository skip a re-upload on retry: if the retry arrived under
+        // a fresh id it would look like a brand-new send and pay for the whole upload again.
+        val repo = FakeChatRepo(convosFlow, msgsFlow, sendResult = Result.failure(IllegalStateException("nope")))
+        val vm = chatVm(repo, "abc")
+
+        vm.uiState.test {
+            var state = awaitItem()
+            while (state.loading) state = awaitItem()
+
+            vm.sendAttachment("content://pick/1")
+            var failed = awaitItem()
+            while (failed.messages.singleOrNull()?.status != MessageStatus.FAILED) failed = awaitItem()
+
+            vm.retryAttachment(failed.messages.single())
+            while (repo.attachmentSendIds.size < 2) awaitItem()
+
+            assertEquals(2, repo.attachmentSendIds.size)
+            assertEquals(repo.attachmentSendIds[0], repo.attachmentSendIds[1])
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `dismissing a failed attachment releases its uploaded payload`() = runTest {
+        // Abandoning the send has to tell the repository, or a payload it uploaded for the retry that
+        // never came would be held until eviction.
+        val repo = FakeChatRepo(convosFlow, msgsFlow, sendResult = Result.failure(IllegalStateException("nope")))
+        val vm = chatVm(repo, "abc")
+
+        vm.uiState.test {
+            var state = awaitItem()
+            while (state.loading) state = awaitItem()
+
+            vm.sendAttachment("content://pick/1")
+            var failed = awaitItem()
+            while (failed.messages.singleOrNull()?.status != MessageStatus.FAILED) failed = awaitItem()
+            val bubble = failed.messages.single()
+
+            vm.deleteMessage(bubble)
+
+            assertEquals(listOf(bubble.id), repo.discardedSendIds)
             cancelAndIgnoreRemainingEvents()
         }
     }

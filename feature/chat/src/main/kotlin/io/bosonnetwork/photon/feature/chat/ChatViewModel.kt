@@ -72,9 +72,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.slf4j.LoggerFactory
 
 /** Cadence of the recording-bar timer + mic-level updates. Fast enough for a smooth centisecond readout. */
 private const val RECORDING_TICK_MS = 50L
+
+private val log = LoggerFactory.getLogger("io.bosonnetwork.photon.chat")
 
 data class ChatUiState(
     val loading: Boolean = true,
@@ -299,6 +302,7 @@ class ChatViewModel @Inject constructor(
                     pending.update { list ->
                         list.map { if (it.id == pendingId) it.copy(status = MessageStatus.FAILED) else it }
                     }
+                    logSendFailure("message", e)
                     _sendFailures.tryEmit(SendFailure(sendErrorMessage(e), text, pendingId))
                 }
         }
@@ -332,6 +336,9 @@ class ChatViewModel @Inject constructor(
     fun deleteMessage(message: UiMessage) {
         removedIds.update { it + message.id }
         pending.update { list -> list.filterNot { it.id == message.id } }
+        // Dismissing a failed bubble abandons its send for good; release anything it had uploaded so
+        // the ref is not kept alive waiting for a retry that will never come.
+        repository.discardSend(message.id)
         val rid = message.rid ?: return
         viewModelScope.launch {
             repository.removeMessage(rid).onFailure { e ->
@@ -412,16 +419,28 @@ class ChatViewModel @Inject constructor(
 
     private fun launchSendAttachment(pendingId: String, uri: String) {
         viewModelScope.launch {
-            repository.sendAttachment(conversationId, uri)
+            // The pending bubble's id doubles as the send id, so a retry is recognised as the same
+            // send and reuses whatever the first attempt already uploaded.
+            repository.sendAttachment(conversationId, uri, pendingId)
                 // The confirmed message arrives on the live stream, so drop the optimistic bubble.
                 .onSuccess { pending.update { list -> list.filterNot { it.id == pendingId } } }
                 .onFailure { e ->
                     pending.update { list ->
                         list.map { if (it.id == pendingId) it.copy(status = MessageStatus.FAILED) else it }
                     }
+                    logSendFailure("attachment", e)
                     _messages.tryEmit(sendErrorMessage(e, context.getString(R.string.chat_noun_attachment)))
                 }
         }
+    }
+
+    /**
+     * Records why a send failed. The user-facing text deliberately says nothing about the cause, and
+     * without this the cause is gone: these failures are intermittent and field-reported, and a report
+     * that cannot name the failing leg cannot be acted on.
+     */
+    private fun logSendFailure(what: String, e: Throwable) {
+        log.warn("Sending {} failed", what, e)
     }
 
     // --- Voice messages -----------------------------------------------------------------------
@@ -541,12 +560,13 @@ class ChatViewModel @Inject constructor(
 
     private fun launchSendVoice(pendingId: String, filePath: String, durationMs: Long) {
         viewModelScope.launch {
-            repository.sendVoice(conversationId, filePath, durationMs)
+            repository.sendVoice(conversationId, filePath, durationMs, pendingId)
                 .onSuccess { pending.update { list -> list.filterNot { it.id == pendingId } } }
                 .onFailure { e ->
                     pending.update { list ->
                         list.map { if (it.id == pendingId) it.copy(status = MessageStatus.FAILED) else it }
                     }
+                    logSendFailure("voice message", e)
                     _messages.tryEmit(sendErrorMessage(e, context.getString(R.string.chat_noun_voice_message)))
                 }
         }

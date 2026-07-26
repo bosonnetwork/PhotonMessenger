@@ -26,6 +26,7 @@ import android.content.Context
 import io.bosonnetwork.photon.core.boson.BosonSessionManager
 import io.bosonnetwork.photon.core.boson.awaitResult
 import io.bosonnetwork.photon.core.model.AppError
+import io.bosonnetwork.photon.core.model.ConnectionState
 import io.bosonnetwork.photon.core.model.DisplayProfile
 import io.bosonnetwork.photon.core.model.ProfileResolver
 import io.bosonnetwork.photon.core.model.cachedDisplay
@@ -63,11 +64,13 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Conversations + 1:1 messages over the Boson [MessagingClient] (spec screens 3-4, M3). Returns UI
@@ -91,15 +94,26 @@ interface ChatRepository {
      */
     suspend fun joinChannel(ticket: ByteArray): Result<String>
 
-    /** Prepares (compresses) the picked media at [uriString] and sends it inline or via IonStore. */
-    suspend fun sendAttachment(recipientId: String, uriString: String): Result<Unit>
+    /**
+     * Prepares (compresses) the picked media at [uriString] and sends it inline or via IonStore.
+     *
+     * [sendId] identifies this send across retries (the caller's optimistic bubble id). A send that
+     * uploads to IonStore and then fails to deliver the message keeps its uploaded object under that
+     * id, so retrying the same [sendId] re-sends the message without re-uploading the payload - see
+     * [uploads].
+     */
+    suspend fun sendAttachment(recipientId: String, uriString: String, sendId: String): Result<Unit>
 
     /**
      * Sends a recorded voice note (the Opus/Ogg file at [filePath], [durationMs] long). It rides
      * inline in the message body with a duration header; only an oversized note (VBR spike) falls
-     * back to IonStore. See [chooseCarrier] for [AttachmentKind.VOICE].
+     * back to IonStore. See [chooseCarrier] for [AttachmentKind.VOICE]. [sendId] carries an uploaded
+     * payload across a retry exactly as in [sendAttachment].
      */
-    suspend fun sendVoice(recipientId: String, filePath: String, durationMs: Long): Result<Unit>
+    suspend fun sendVoice(recipientId: String, filePath: String, durationMs: Long, sendId: String): Result<Unit>
+
+    /** Forgets any payload [sendId] uploaded but never delivered (the user abandoned the send). */
+    fun discardSend(sendId: String)
 
     /**
      * Builds the optimistic UI attachment (name/mime/kind) for a just-picked content uri, without
@@ -144,6 +158,41 @@ interface ChatRepository {
     }
 }
 
+/**
+ * An attachment payload already committed to IonStore, held so that a send which failed *after* the
+ * upload can be retried without paying for the upload again (and without orphaning the object it
+ * already stored). Everything the message needs to reference the object, and nothing else.
+ */
+private data class UploadedPayload(
+    val uri: String,
+    val contentId: String,
+    val mime: String,
+    val size: Long,
+    val name: String,
+    val key: ByteArray,
+    val width: Int? = null,
+    val height: Int? = null,
+    val durationMs: Long? = null,
+) {
+    override fun equals(other: Any?): Boolean =
+        this === other || (other is UploadedPayload && uri == other.uri && contentId == other.contentId &&
+            mime == other.mime && size == other.size && name == other.name && key.contentEquals(other.key) &&
+            width == other.width && height == other.height && durationMs == other.durationMs)
+
+    override fun hashCode(): Int {
+        var result = uri.hashCode()
+        result = 31 * result + contentId.hashCode()
+        result = 31 * result + mime.hashCode()
+        result = 31 * result + size.hashCode()
+        result = 31 * result + name.hashCode()
+        result = 31 * result + key.contentHashCode()
+        result = 31 * result + (width ?: 0)
+        result = 31 * result + (height ?: 0)
+        result = 31 * result + (durationMs?.hashCode() ?: 0)
+        return result
+    }
+}
+
 @Singleton
 class ChatRepositoryImpl @Inject constructor(
     private val session: BosonSessionManager,
@@ -169,6 +218,69 @@ class ChatRepositoryImpl @Inject constructor(
 
     private fun downloadLock(contentId: String): Mutex =
         downloadLocks.computeIfAbsent(contentId) { Mutex() }
+
+    /**
+     * Payloads uploaded to IonStore whose message has not been delivered yet, keyed by send id.
+     *
+     * A large attachment is sent in two legs - upload the bytes, then send a message referencing them
+     * - and only the second leg is cheap. Losing the first leg's work every time the second one fails
+     * means a retry re-uploads the whole payload and abandons the object it stored on the previous
+     * attempt (an encrypted put is never deduplicated, so it really is a second copy). Holding the ref
+     * here makes a retry re-send just the message.
+     *
+     * Bounded by [MAX_PENDING_UPLOADS] and evicted oldest-first: an entry is dropped on delivery or
+     * when the caller abandons the send, but a bubble left sitting in its failed state forever would
+     * otherwise keep one alive for the life of the process.
+     */
+    private val uploads = object : LinkedHashMap<String, UploadedPayload>(16, 0.75f, false) {
+        override fun removeEldestEntry(eldest: Map.Entry<String, UploadedPayload>): Boolean =
+            size > MAX_PENDING_UPLOADS
+    }
+
+    // Plain monitor rather than a coroutine Mutex: every access is a single map operation that never
+    // suspends, and discardSend is called from a non-suspending path, so one lock serves them all.
+    private fun rememberUpload(sendId: String, payload: UploadedPayload) {
+        synchronized(uploads) { uploads[sendId] = payload }
+    }
+
+    private fun recallUpload(sendId: String): UploadedPayload? =
+        synchronized(uploads) { uploads[sendId] }
+
+    private fun forgetUpload(sendId: String) {
+        synchronized(uploads) { uploads.remove(sendId) }
+    }
+
+    override fun discardSend(sendId: String) = forgetUpload(sendId)
+
+    /**
+     * Waits briefly for the session to be usable before publishing.
+     *
+     * The transport drops and re-establishes itself routinely - a mobile OS closes idle sockets, so a
+     * reconnect every few minutes is normal, not a fault - and it is back within a couple of seconds.
+     * A send that happens to land in that window would otherwise fail on the spot and ask the user to
+     * press Retry for something that fixes itself. Attachments are the worst hit: their message goes
+     * out seconds after the user pressed send, once the upload finishes, so the connection they were
+     * shown when they pressed it says nothing about the connection the message actually meets.
+     *
+     * Bounded, and deliberately silent on timeout: if the link is genuinely down the send proceeds and
+     * fails with its own error, which is the honest one to report.
+     */
+    private suspend fun awaitSendable() {
+        // CONNECTED, not READY: publishing needs the transport, and nothing more. READY additionally
+        // requires the startup contact sync, which a send does not depend on - waiting for it would
+        // stall sends over a link that is perfectly able to carry them.
+        if (isSendable(session.connectionState.value)) return
+        // Nothing to wait for when there is no session at all (signed out, or the first connect has
+        // not run yet) - only a live client can reconnect. Let the send fail with its own error now
+        // rather than making the user watch a timeout first.
+        if (session.messagingClient == null) return
+        withTimeoutOrNull(SEND_READY_TIMEOUT_MS) {
+            session.connectionState.first { isSendable(it) }
+        }
+    }
+
+    private fun isSendable(state: ConnectionState): Boolean =
+        state == ConnectionState.CONNECTED || state == ConnectionState.READY
 
     // Keyed off the session's client flow (not a one-shot read) so a cold start - which composes the
     // UI before connect() completes - fills the list as soon as the session comes up, instead of
@@ -267,6 +379,7 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     override suspend fun sendText(recipientId: String, text: String): Result<Unit> = runCatching {
+        awaitSendable()
         client().message(parseId(recipientId)).contentText(text).send().awaitResult()
         Unit
     }
@@ -309,17 +422,27 @@ class ChatRepositoryImpl @Inject constructor(
                 Result.failure(AppError.InvalidInput(context.getString(R.string.chat_error_attachment_still_sending)))
         }
 
-    override suspend fun sendAttachment(recipientId: String, uriString: String): Result<Unit> = runCatching {
+    override suspend fun sendAttachment(recipientId: String, uriString: String, sendId: String): Result<Unit> = runCatching {
         val to = parseId(recipientId)
+
+        // A retry of a send that already got its payload into IonStore skips straight to the message.
+        recallUpload(sendId)?.let { uploaded ->
+            sendUploaded(to, uploaded)
+            forgetUpload(sendId)
+            return@runCatching
+        }
+
         val media = mediaPreparer.prepare(uriString)
         val size = media.bytes.size.toLong()
         when (chooseCarrier(kindOf(media.mime), size)) {
-            AttachmentCarrier.INLINE ->
+            AttachmentCarrier.INLINE -> {
+                awaitSendable()
                 client().message(to)
                     .contentBinary(media.bytes)
                     .contentType(media.mime)
                     .contentDisposition(ContentDisposition.inline(media.name))
                     .send().awaitResult()
+            }
 
             AttachmentCarrier.ION_STORE -> {
                 val store = ionStore()
@@ -333,41 +456,49 @@ class ChatRepositoryImpl @Inject constructor(
                     .content(media.bytes)
                     .send()
                     .awaitResult()
-                val uri = obj.uri ?: "ions://${store.servicePeerId}/${obj.id}"
-                val ref = remoteAttachmentToMap(
-                    uri = uri,
+                val uploaded = UploadedPayload(
+                    uri = obj.uri ?: "ions://${store.servicePeerId}/${obj.id}",
                     contentId = obj.contentId.toString(),
                     mime = media.mime,
                     size = size,
                     name = media.name,
+                    key = key,
                     width = media.width,
                     height = media.height,
-                    key = key,
                 )
-                client().message(to)
-                    .contentObject(ref)
-                    .contentType(media.mime)
-                    .contentDisposition(ContentDisposition.attachment(media.name))
-                    .send().awaitResult()
+                // Recorded before the message goes out, so a failure on that leg leaves the uploaded
+                // object reusable rather than orphaned.
+                rememberUpload(sendId, uploaded)
+                sendUploaded(to, uploaded)
+                forgetUpload(sendId)
             }
         }
         Unit
     }
 
-    override suspend fun sendVoice(recipientId: String, filePath: String, durationMs: Long): Result<Unit> = runCatching {
+    override suspend fun sendVoice(recipientId: String, filePath: String, durationMs: Long, sendId: String): Result<Unit> = runCatching {
         val to = parseId(recipientId)
+
+        recallUpload(sendId)?.let { uploaded ->
+            sendUploaded(to, uploaded)
+            forgetUpload(sendId)
+            return@runCatching
+        }
+
         val file = File(filePath)
         val bytes = file.readBytes()
         val size = bytes.size.toLong()
         val name = file.name
         when (chooseCarrier(AttachmentKind.VOICE, size)) {
-            AttachmentCarrier.INLINE ->
+            AttachmentCarrier.INLINE -> {
+                awaitSendable()
                 client().message(to)
                     .contentBinary(bytes)
                     .contentType(VOICE_MIME)
                     .contentDisposition(ContentDisposition.inline(name))
                     .header(VoiceHeaders.DURATION, durationMs)
                     .send().awaitResult()
+            }
 
             AttachmentCarrier.ION_STORE -> {
                 // Safety net for a VBR spike beyond the inline voice ceiling: store the bytes and send
@@ -381,26 +512,42 @@ class ChatRepositoryImpl @Inject constructor(
                     .content(bytes)
                     .send()
                     .awaitResult()
-                val uri = obj.uri ?: "ions://${store.servicePeerId}/${obj.id}"
-                val ref = remoteAttachmentToMap(
-                    uri = uri,
+                val uploaded = UploadedPayload(
+                    uri = obj.uri ?: "ions://${store.servicePeerId}/${obj.id}",
                     contentId = obj.contentId.toString(),
                     mime = VOICE_MIME,
                     size = size,
                     name = name,
-                    width = null,
-                    height = null,
-                    durationMs = durationMs,
                     key = key,
+                    durationMs = durationMs,
                 )
-                client().message(to)
-                    .contentObject(ref)
-                    .contentType(VOICE_MIME)
-                    .contentDisposition(ContentDisposition.attachment(name))
-                    .send().awaitResult()
+                rememberUpload(sendId, uploaded)
+                sendUploaded(to, uploaded)
+                forgetUpload(sendId)
             }
         }
         Unit
+    }
+
+    /** Sends the message that references an already-stored payload. The cheap, retryable leg. */
+    private suspend fun sendUploaded(to: Id, uploaded: UploadedPayload) {
+        val ref = remoteAttachmentToMap(
+            uri = uploaded.uri,
+            contentId = uploaded.contentId,
+            mime = uploaded.mime,
+            size = uploaded.size,
+            name = uploaded.name,
+            width = uploaded.width,
+            height = uploaded.height,
+            durationMs = uploaded.durationMs,
+            key = uploaded.key,
+        )
+        awaitSendable()
+        client().message(to)
+            .contentObject(ref)
+            .contentType(uploaded.mime)
+            .contentDisposition(ContentDisposition.attachment(uploaded.name))
+            .send().awaitResult()
     }
 
     override suspend fun downloadAttachment(attachment: UiAttachment): Result<File> = runCatching {
@@ -496,6 +643,7 @@ class ChatRepositoryImpl @Inject constructor(
                     durationMs = attachment.durationMs,
                     key = source.key,
                 )
+                awaitSendable()
                 client().message(to)
                     .contentObject(ref)
                     .contentType(attachment.mime)
@@ -503,15 +651,17 @@ class ChatRepositoryImpl @Inject constructor(
                     .send().awaitResult()
             }
 
-            is AttachmentSource.Inline ->
+            is AttachmentSource.Inline -> {
                 // Inline attachments have no IonStore object to point at, so re-send the bytes. A voice
                 // note re-sends its duration header so it stays a voice bubble for the new recipient.
+                awaitSendable()
                 client().message(to)
                     .contentBinary(source.bytes)
                     .contentType(attachment.mime)
                     .contentDisposition(ContentDisposition.inline(attachment.name))
                     .apply { attachment.durationMs?.let { header(VoiceHeaders.DURATION, it) } }
                     .send().awaitResult()
+            }
 
             is AttachmentSource.Local ->
                 throw AppError.InvalidInput(context.getString(R.string.chat_error_attachment_still_sending))
@@ -605,5 +755,17 @@ class ChatRepositoryImpl @Inject constructor(
         } catch (e: Exception) {
             throw AppError.InvalidInput("Malformed attachment URI: $uri", e)
         }
+    }
+
+    private companion object {
+        /**
+         * How long a send waits for the session to come back before going ahead anyway. Sized for the
+         * routine reconnect (a couple of seconds: backoff plus handshake plus contact sync), not for
+         * an actual outage - a link that is really down should report that promptly.
+         */
+        const val SEND_READY_TIMEOUT_MS = 6_000L
+
+        /** Undelivered uploads retained for retry; see [uploads]. */
+        const val MAX_PENDING_UPLOADS = 16
     }
 }
