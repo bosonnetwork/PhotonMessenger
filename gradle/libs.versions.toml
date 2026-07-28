@@ -30,8 +30,8 @@ zxing = "3.5.3"
 # Security
 securityCrypto = "1.1.0-alpha06"
 # Boson stack (installed in mavenLocal). Vert.x/Jackson/Netty match boson-dependencies BOM.
-# 3.0.2-SNAPSHOT carries the MessagingStore persistence seam (Option A).
-boson = "3.0.2-SNAPSHOT"
+# 3.0.2 carries the MessagingStore persistence seam (Option A).
+boson = "3.0.2"
 vertx = "5.0.11"
 # Testing
 junit = "4.13.2"
