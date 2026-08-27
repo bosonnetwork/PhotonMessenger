@@ -29,6 +29,8 @@ import io.bosonnetwork.photon.feature.contacts.model.UiChannel
 import io.bosonnetwork.photon.feature.contacts.model.UiChannelDetail
 import io.bosonnetwork.photon.feature.contacts.model.UiChannelPermission
 import io.bosonnetwork.photon.feature.contacts.model.UiChannelRole
+import io.bosonnetwork.photonmessaging.exceptions.rpc.ChannelLimitExceededException
+import io.bosonnetwork.photonmessaging.exceptions.rpc.ForbiddenRpcRequestException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -112,6 +114,102 @@ class ChannelViewModelsTest {
         vm.events.test {
             vm.create()
             assertEquals(CreateChannelEvent.Error("nope"), awaitItem())
+        }
+    }
+
+    @Test
+    fun `create refused by the plan explains the limit instead of echoing the server`() = runTest {
+        val vm = CreateChannelViewModel(
+            FakeChannelRepository(
+                createResult = Result.failure(
+                    ChannelLimitExceededException("Channel limit reached: allowed 3, owned 3"),
+                ),
+            ),
+            fakeContext(),
+        )
+        vm.setName("Team")
+        vm.events.test {
+            vm.create()
+            assertEquals(
+                CreateChannelEvent.Error(stringId(R.string.contacts_error_channel_limit_reached)),
+                awaitItem(),
+            )
+        }
+    }
+
+    @Test
+    fun `create refused because channels are off the plan says so`() = runTest {
+        val vm = CreateChannelViewModel(
+            FakeChannelRepository(
+                createResult = Result.failure(
+                    ForbiddenRpcRequestException("Channels are not available on this user's plan"),
+                ),
+            ),
+            fakeContext(),
+        )
+        vm.setName("Team")
+        vm.events.test {
+            vm.create()
+            assertEquals(
+                CreateChannelEvent.Error(stringId(R.string.contacts_error_channels_not_available)),
+                awaitItem(),
+            )
+        }
+    }
+
+    @Test
+    fun `a transfer refusal is reported against the recipient's plan`() = runTest {
+        val vm = ChannelDetailViewModel(
+            FakeChannelRepository(
+                actionResult = Result.failure(
+                    ChannelLimitExceededException("Channel limit reached: allowed 3, owned 3"),
+                ),
+            ),
+            FakeProfileResolver(),
+            SavedStateHandle(mapOf("channelId" to "CHAN1")),
+            fakeContext(),
+        )
+        vm.messages.test {
+            vm.transferOwnership("MEMBER2")
+            assertEquals(stringId(R.string.contacts_error_transfer_limit_reached), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a forbidden transfer is reported against the recipient's plan`() = runTest {
+        val vm = ChannelDetailViewModel(
+            FakeChannelRepository(
+                actionResult = Result.failure(
+                    ForbiddenRpcRequestException("Channels are not available on this user's plan"),
+                ),
+            ),
+            FakeProfileResolver(),
+            SavedStateHandle(mapOf("channelId" to "CHAN1")),
+            fakeContext(),
+        )
+        vm.messages.test {
+            vm.transferOwnership("MEMBER2")
+            assertEquals(stringId(R.string.contacts_error_transfer_not_available), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a forbidden leave keeps the generic wording`() = runTest {
+        // ForbiddenRpcRequestException is the server's answer to several unrelated refusals ("not a
+        // member or banned", "cannot leave the owner"), so only the two allowance-consuming actions
+        // may read it as "not on that plan".
+        val vm = ChannelDetailViewModel(
+            FakeChannelRepository(actionResult = Result.failure(ForbiddenRpcRequestException("Cannot leave the owner"))),
+            FakeProfileResolver(),
+            SavedStateHandle(mapOf("channelId" to "CHAN1")),
+            fakeContext(),
+        )
+        vm.messages.test {
+            vm.leave()
+            assertTrue(awaitItem().contains("Cannot leave the owner"))
+            cancelAndIgnoreRemainingEvents()
         }
     }
 

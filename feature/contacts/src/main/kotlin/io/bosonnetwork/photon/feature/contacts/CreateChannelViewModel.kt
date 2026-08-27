@@ -28,6 +28,8 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.bosonnetwork.photon.feature.contacts.data.ChannelRepository
 import io.bosonnetwork.photon.feature.contacts.model.UiChannelPermission
+import io.bosonnetwork.photonmessaging.exceptions.rpc.ChannelLimitExceededException
+import io.bosonnetwork.photonmessaging.exceptions.rpc.ForbiddenRpcRequestException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -81,11 +83,21 @@ class CreateChannelViewModel @Inject constructor(
                 permission = state.permission,
                 announce = state.announce,
             ).onSuccess { _events.tryEmit(CreateChannelEvent.Created(it)) }
-                .onFailure {
-                    val message = it.message ?: context.getString(R.string.contacts_error_create_channel_failed)
-                    _events.tryEmit(CreateChannelEvent.Error(message))
-                }
+                .onFailure { _events.tryEmit(CreateChannelEvent.Error(it.toUserMessage())) }
             _uiState.update { it.copy(submitting = false) }
         }
+    }
+
+    /**
+     * Maps the plan refusals a create can hit to a specific, user-facing message; the server text
+     * they carry states the raw allowance and is not translated.
+     *
+     * A [ForbiddenRpcRequestException] means "channels are not on this plan" only for a create - other
+     * channel actions use it for unrelated refusals - so it is mapped here rather than app-wide.
+     */
+    private fun Throwable.toUserMessage(): String = when (this) {
+        is ChannelLimitExceededException -> context.getString(R.string.contacts_error_channel_limit_reached)
+        is ForbiddenRpcRequestException -> context.getString(R.string.contacts_error_channels_not_available)
+        else -> message ?: context.getString(R.string.contacts_error_create_channel_failed)
     }
 }

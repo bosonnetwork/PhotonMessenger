@@ -50,11 +50,23 @@ internal class FakeProfileResolver(
  * The ViewModels now build their snackbar copy from string resources (`context.getString(format, prefix,
  * reason)`), so echoing the args keeps assertions that a message contains the underlying failure reason
  * (e.g. "boom", "denied") valid without pinning exact localized text.
+ *
+ * A lookup with no format arguments has nothing to echo, so it yields the resource id instead: that is
+ * what lets a test assert WHICH message a failure was mapped to (see [stringId]) without pinning the
+ * localized wording.
  */
 internal fun fakeContext(): Context = mockk(relaxed = true) {
+    // getString(int) and getString(int, vararg) are distinct methods, so both need stubbing.
+    every { getString(any()) } answers { stringId(firstArg()) }
     every { getString(any(), *anyVararg()) } answers {
-        invocation.args.drop(1)
+        val args = invocation.args.drop(1)
             .flatMap { if (it is Array<*>) it.toList() else listOf(it) }
-            .joinToString(": ") { it?.toString().orEmpty() }
+        if (args.isEmpty())
+            stringId(firstArg())
+        else
+            args.joinToString(": ") { it?.toString().orEmpty() }
     }
 }
+
+/** The text [fakeContext] returns for an argument-less lookup of [resId]. */
+internal fun stringId(resId: Int): String = "string:$resId"

@@ -203,6 +203,13 @@
     <string name="contacts_error_create_channel_failed">Couldn\'t create channel</string>
     <string name="contacts_error_send_invitation_failed">Couldn\'t send invitation</string>
 
+    <!-- Plan limits: the server refuses the action, so retrying it changes nothing -->
+    <string name="contacts_error_channel_limit_reached">You already have as many channels as your plan allows. Delete one to create another.</string>
+    <string name="contacts_error_channels_not_available">Channels aren\'t available on your plan.</string>
+    <string name="contacts_error_channel_full">This channel is full: it already has as many members as its owner\'s plan allows.</string>
+    <string name="contacts_error_transfer_limit_reached">That member already has as many channels as their plan allows, so they can\'t take this one.</string>
+    <string name="contacts_error_transfer_not_available">Channels aren\'t available on that member\'s plan, so they can\'t take this one.</string>
+
     <!-- Repository-level errors (surfaced via AppError.message) -->
     <string name="contacts_error_not_connected">Not connected to the messaging service</string>
     <string name="contacts_error_contact_not_found">Contact not found</string>

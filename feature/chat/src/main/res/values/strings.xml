@@ -85,6 +85,8 @@
     <string name="chat_error_load_older">Couldn\'t load older messages: %1$s</string>
     <string name="chat_error_delete_message">Couldn\'t delete message: %1$s</string>
     <string name="chat_error_join_channel">Couldn\'t join channel: %1$s</string>
+    <!-- Plan limit: the server refuses the join, so retrying it changes nothing -->
+    <string name="chat_error_channel_full">This channel is full: it already has as many members as its owner\'s plan allows.</string>
     <string name="chat_error_play">Couldn\'t play: %1$s</string>
     <string name="chat_error_save">Couldn\'t save: %1$s</string>
     <string name="chat_error_open">Couldn\'t open: %1$s</string>

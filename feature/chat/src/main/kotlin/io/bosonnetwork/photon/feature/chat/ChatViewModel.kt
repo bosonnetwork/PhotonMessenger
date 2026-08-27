@@ -49,6 +49,7 @@ import io.bosonnetwork.photon.feature.chat.model.UiMessage
 import io.bosonnetwork.photon.feature.chat.model.VOICE_MIME
 import io.bosonnetwork.photonmessaging.exceptions.MessageTimeoutException
 import io.bosonnetwork.photonmessaging.exceptions.NotConnectedException
+import io.bosonnetwork.photonmessaging.exceptions.rpc.ChannelMemberLimitExceededException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -369,8 +370,14 @@ class ChatViewModel @Inject constructor(
                     _joinedChannel.tryEmit(it)
                 }
                 .onFailure { e ->
-                    val reason = e.message ?: context.getString(R.string.chat_error_unknown)
-                    _messages.tryEmit(context.getString(R.string.chat_error_join_channel, reason))
+                    // The member limit belongs to the channel's OWNER, not to whoever is joining, so
+                    // a full channel is reported as such instead of as this user's own plan limit.
+                    if (e is ChannelMemberLimitExceededException) {
+                        _messages.tryEmit(context.getString(R.string.chat_error_channel_full))
+                    } else {
+                        val reason = e.message ?: context.getString(R.string.chat_error_unknown)
+                        _messages.tryEmit(context.getString(R.string.chat_error_join_channel, reason))
+                    }
                 }
         }
     }

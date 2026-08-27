@@ -52,6 +52,7 @@ import io.bosonnetwork.photon.feature.chat.model.chooseCarrier
 import io.bosonnetwork.photon.feature.chat.model.remoteAttachmentFromMap
 import io.bosonnetwork.photon.feature.chat.model.remoteAttachmentToMap
 import io.bosonnetwork.photonmessaging.exceptions.NotConnectedException
+import io.bosonnetwork.photonmessaging.exceptions.rpc.ChannelMemberLimitExceededException
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -196,6 +197,8 @@ class ChatViewModelsTest {
             R.string.chat_error_load_older to "Couldn't load older messages: %1\$s",
             R.string.chat_error_delete_message to "Couldn't delete message: %1\$s",
             R.string.chat_error_join_channel to "Couldn't join channel: %1\$s",
+            R.string.chat_error_channel_full to
+                "This channel is full: it already has as many members as its owner's plan allows.",
             R.string.chat_error_play to "Couldn't play: %1\$s",
             R.string.chat_error_save to "Couldn't save: %1\$s",
             R.string.chat_error_open to "Couldn't open: %1\$s",
@@ -594,6 +597,34 @@ class ChatViewModelsTest {
         assertEquals(1, repo.joinedTickets.size)
         assertArrayEquals(ticketBytes, repo.joinedTickets.first())
         assertEquals(InviteAction.JOINED, store.state.value["inv1"])
+    }
+
+    @Test
+    fun `joining a full channel explains the channel is full, not the ticket`() = runTest {
+        val repo = FakeChatRepo(convosFlow, msgsFlow).apply {
+            joinResult = Result.failure(
+                ChannelMemberLimitExceededException("Channel member limit reached: allowed 20, joined 20"),
+            )
+        }
+        val store = FakeChannelInviteStore()
+        val vm = chatVm(repo, "abc", inviteStore = store)
+        val invite = ChannelInvite(
+            ticket = byteArrayOf(1, 2, 3),
+            channelName = "Design",
+            expiresAt = System.currentTimeMillis() + 60_000,
+        )
+        val message = UiMessage("inv3", "", fromMe = false, createdAt = 1, invite = invite)
+
+        vm.errors.test {
+            vm.joinInvite(message)
+            val shown = awaitItem()
+            assertTrue(shown.contains("full"))
+            // The raw server text states the owner's allowance and is not translated: it must not leak.
+            assertFalse(shown.contains("allowed 20"))
+            cancelAndIgnoreRemainingEvents()
+        }
+        // A refusal leaves the card joinable: nothing is persisted.
+        assertTrue(store.state.value.isEmpty())
     }
 
     @Test

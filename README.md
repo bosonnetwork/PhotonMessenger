@@ -290,12 +290,12 @@ send. Create a channel from Contacts to start a group.
 
 ### Prerequisites
 
-| Requirement | Version |
-|---|---|
-| JDK | 17 (Eclipse Temurin recommended) |
-| Android SDK | Platform `android-36`, build-tools 36.x |
+| Requirement | Version                                            |
+|---|----------------------------------------------------|
+| JDK | 17 (Eclipse Temurin recommended)                   |
+| Android SDK | Platform `android-36`, build-tools 36.x            |
 | Android Studio | Ladybug or later (optional, but the supported IDE) |
-| Boson client artifacts | `3.0.2` in the local Maven repository (see below) |
+| Boson client artifacts | `3.1.0` in the local Maven repository (see below)  |
 
 Photon supports **Android 13 (API 33) and later**, compiles against API 36, and enables Java 8+
 API desugaring because it dexes the JVM Boson stack (Vert.x 5, Netty, Jackson).

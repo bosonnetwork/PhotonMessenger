@@ -33,6 +33,7 @@ import io.bosonnetwork.photon.feature.contacts.model.UiChannelPermission
 import io.bosonnetwork.photon.feature.contacts.model.UiChannelRole
 import io.bosonnetwork.photon.feature.contacts.model.UiContact
 import io.bosonnetwork.photon.feature.contacts.model.UiFriendRequest
+import io.bosonnetwork.photonmessaging.exceptions.rpc.ChannelMemberLimitExceededException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -206,6 +207,27 @@ class ContactsViewModelTest {
         vm.messages.test {
             vm.joinChannel("nope")
             assert(awaitItem().contains("bad ticket"))
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `joining a full channel reports the channel, not the joiner's own plan`() = runTest {
+        val vm = ContactsViewModel(
+            FakeRepo(contactsFlow, requestsFlow),
+            FakeChannelRepo(
+                joinResult = Result.failure(
+                    ChannelMemberLimitExceededException("Channel member limit reached: allowed 20, joined 20"),
+                ),
+            ),
+            FakeProfileResolver(),
+            fakeContext(),
+        )
+        vm.messages.test {
+            vm.joinChannel("ticket")
+            // Not the generic "Couldn't join channel: <server text>" wording: the limit is the channel
+            // owner's, and the server text stating it is untranslated.
+            assertEquals(stringId(R.string.contacts_error_channel_full), awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

@@ -85,6 +85,8 @@
     <string name="chat_error_load_older">无法加载更早的消息:%1$s</string>
     <string name="chat_error_delete_message">无法删除消息:%1$s</string>
     <string name="chat_error_join_channel">无法加入频道:%1$s</string>
+    <!-- Plan limit: the server refuses the join, so retrying it changes nothing -->
+    <string name="chat_error_channel_full">该频道成员已满，已达频道所有者套餐允许的上限。</string>
     <string name="chat_error_play">无法播放:%1$s</string>
     <string name="chat_error_save">无法保存:%1$s</string>
     <string name="chat_error_open">无法打开:%1$s</string>

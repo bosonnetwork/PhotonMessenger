@@ -33,6 +33,7 @@ import io.bosonnetwork.photon.feature.contacts.data.ChannelRepository
 import io.bosonnetwork.photon.feature.contacts.data.ContactRepository
 import io.bosonnetwork.photon.feature.contacts.model.UiContact
 import io.bosonnetwork.photon.feature.contacts.model.UiFriendRequest
+import io.bosonnetwork.photonmessaging.exceptions.rpc.ChannelMemberLimitExceededException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -181,9 +182,14 @@ class ContactsViewModel @Inject constructor(
     }
 
     private fun errorMessage(@StringRes failurePrefixRes: Int, e: Throwable): String =
-        context.getString(
-            R.string.contacts_error_format,
-            context.getString(failurePrefixRes),
-            e.message ?: context.getString(R.string.contacts_error_unknown),
-        )
+        // The member limit belongs to the channel's OWNER, not to whoever is joining, so the message
+        // explains that the channel is full rather than pointing at this user's own plan.
+        if (e is ChannelMemberLimitExceededException)
+            context.getString(R.string.contacts_error_channel_full)
+        else
+            context.getString(
+                R.string.contacts_error_format,
+                context.getString(failurePrefixRes),
+                e.message ?: context.getString(R.string.contacts_error_unknown),
+            )
 }

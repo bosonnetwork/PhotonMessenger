@@ -37,6 +37,8 @@ import io.bosonnetwork.photon.feature.contacts.model.UiChannelRole
 import io.bosonnetwork.photonmessaging.exceptions.ChannelNotExistsException
 import io.bosonnetwork.photonmessaging.exceptions.InsufficientPermissionException
 import io.bosonnetwork.photonmessaging.exceptions.NotChannelMemberException
+import io.bosonnetwork.photonmessaging.exceptions.rpc.ChannelLimitExceededException
+import io.bosonnetwork.photonmessaging.exceptions.rpc.ForbiddenRpcRequestException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -149,8 +151,27 @@ class ChannelDetailViewModel @Inject constructor(
         }
     }
 
-    fun transferOwnership(memberId: String) =
-        run(R.string.contacts_error_prefix_transfer_ownership) { repository.transferOwnership(channelId, memberId) }
+    /**
+     * Hands the channel to another member. The channel moves into the RECIPIENT's channel allowance,
+     * so the server decides on their plan, not this user's - a refusal here is about them, and the
+     * message says so.
+     *
+     * A [ForbiddenRpcRequestException] means "channels are not on that plan" only for this action;
+     * leaving a channel uses it for unrelated refusals, which is why [toUserMessage] does not map it.
+     */
+    fun transferOwnership(memberId: String) {
+        viewModelScope.launch {
+            repository.transferOwnership(channelId, memberId).onFailure { e ->
+                _messages.tryEmit(when (e) {
+                    is ChannelLimitExceededException ->
+                        context.getString(R.string.contacts_error_transfer_limit_reached)
+                    is ForbiddenRpcRequestException ->
+                        context.getString(R.string.contacts_error_transfer_not_available)
+                    else -> e.toUserMessage(R.string.contacts_error_prefix_transfer_ownership)
+                })
+            }
+        }
+    }
 
     fun updateInfo(name: String?, notice: String?) =
         run(R.string.contacts_error_prefix_update_channel) { repository.updateInfo(channelId, name, notice) }

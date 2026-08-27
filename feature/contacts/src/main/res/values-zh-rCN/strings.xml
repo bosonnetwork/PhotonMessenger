@@ -202,6 +202,13 @@
     <string name="contacts_error_create_channel_failed">创建频道失败</string>
     <string name="contacts_error_send_invitation_failed">发送邀请失败</string>
 
+    <!-- Plan limits: the server refuses the action, so retrying it changes nothing -->
+    <string name="contacts_error_channel_limit_reached">你的频道数量已达套餐上限，请先删除一个频道再创建。</string>
+    <string name="contacts_error_channels_not_available">你的套餐不支持频道功能。</string>
+    <string name="contacts_error_channel_full">该频道成员已满，已达频道所有者套餐允许的上限。</string>
+    <string name="contacts_error_transfer_limit_reached">该成员的频道数量已达其套餐上限，无法接管此频道。</string>
+    <string name="contacts_error_transfer_not_available">该成员的套餐不支持频道功能，无法接管此频道。</string>
+
     <!-- Repository-level errors (surfaced via AppError.message) -->
     <string name="contacts_error_not_connected">未连接到消息服务</string>
     <string name="contacts_error_contact_not_found">未找到该联系人</string>
