@@ -38,6 +38,12 @@
 # AsyncCache instead, so these references are never reached. (See project notes on the Caffeine swap.)
 -dontwarn com.github.benmanes.caffeine.cache.**
 
+# bucket4j backs core-api's shared RateLimiter (promoted to the common API in Boson e556beb), which
+# only the services and the Director ever construct - the client never touches it. It is optional in
+# core-api's pom, so the jar is absent here while RateLimiter.class still references it, and R8
+# resolves every reference in its program input before deciding what is live.
+-dontwarn io.github.bucket4j.**
+
 # Reactor BlockHound (optional debug SPI) and JDK9+ ProcessHandle (ApplicationLock, desktop-only) are
 # referenced but not on the mobile path.
 -dontwarn reactor.blockhound.**
