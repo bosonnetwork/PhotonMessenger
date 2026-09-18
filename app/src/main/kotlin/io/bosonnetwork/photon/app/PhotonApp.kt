@@ -29,7 +29,8 @@ import android.os.Bundle
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
-import io.bosonnetwork.photon.app.image.DirectorImageCallFactory
+import io.bosonnetwork.photon.app.image.DirectorAvatarFetcher
+import io.bosonnetwork.photon.core.boson.DirectorClients
 import io.bosonnetwork.photon.app.notification.NotificationSettings
 import io.bosonnetwork.photon.app.session.NetworkMonitor
 import io.bosonnetwork.photon.app.session.SessionController
@@ -51,7 +52,7 @@ class PhotonApp : Application(), ImageLoaderFactory {
     lateinit var notificationPreferencesStore: NotificationPreferencesStore
 
     @Inject
-    lateinit var imageCallFactory: DirectorImageCallFactory
+    lateinit var directorClients: DirectorClients
 
     @Inject
     lateinit var notificationSettings: NotificationSettings
@@ -101,14 +102,13 @@ class PhotonApp : Application(), ImageLoaderFactory {
     }
 
     /**
-     * App-wide Coil loader: avatar fetches go through the Director-pinned, authenticated HTTP stack
-     * (remote users' avatars require the CWT). Coil respects the endpoint's cache headers, so its
-     * disk cache + conditional GETs handle avatar-image persistence. The disk cache is per-profile so
-     * a signed-out profile's cached avatars never surface under a different active profile.
+     * App-wide Coil loader: avatars load through the Director client (see [DirectorAvatarFetcher]), which
+     * authenticates and pins the request as it does every Director call. The disk cache is per-profile so
+     * a signed-out profile's cached images never surface under a different active profile.
      */
     override fun newImageLoader(): ImageLoader =
         ImageLoader.Builder(this)
-            .callFactory(imageCallFactory)
+            .components { add(DirectorAvatarFetcher.Factory(directorClients)) }
             .diskCache {
                 DiskCache.Builder()
                     .directory(File(profileManager.activeCacheRoot(), "image_cache"))

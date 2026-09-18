@@ -20,54 +20,65 @@
  * SOFTWARE.
  */
 
-package io.bosonnetwork.photon.core.network
+package io.bosonnetwork.photon.core.boson
 
+import io.bosonnetwork.Id
+import io.bosonnetwork.director.client.NodeStatus
+import io.bosonnetwork.json.Json
 import io.bosonnetwork.photon.core.model.AppError
-import io.bosonnetwork.photon.core.network.model.NodeStatusDto
-import io.bosonnetwork.photon.core.network.model.ServiceDto
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class ServiceDiscoveryTest {
 
-    private fun status(services: List<ServiceDto>) = NodeStatusDto(nodeId = "node-1", services = services)
+    private val nodeId = Id.random()
+    private val messagingPeer = Id.random()
+    private val ionStorePeer = Id.random()
 
-    private val messaging = ServiceDto(
-        serviceId = ServiceDiscovery.MESSAGING_SERVICE_ID,
-        serviceName = "messaging",
-        peerId = "peerMsg",
-        endpoint = "mqtts://host:8883",
-    )
-    private val ionStore = ServiceDto(
-        serviceId = ServiceDiscovery.ION_STORE_SERVICE_ID,
-        serviceName = "ion-store",
-        peerId = "peerIon",
-        endpoint = "https://host:9443",
+    private val messaging =
+        """{"serviceId":"${NodeStatus.Service.PHOTON_MESSAGING}","serviceName":"messaging",""" +
+            """"peerId":"$messagingPeer","endpoint":"mqtts://host:8883"}"""
+    private val ionStore =
+        """{"serviceId":"${NodeStatus.Service.ION_STORE}","serviceName":"ion-store",""" +
+            """"peerId":"$ionStorePeer","endpoint":"https://host:9443"}"""
+
+    // Parsed as the Director client parses the node's answer.
+    private fun status(vararg services: String): NodeStatus = Json.parse(
+        """{"nodeId":"$nodeId","running":true,"startedAt":1,"services":[${services.joinToString(",")}]}""",
+        NodeStatus::class.java,
     )
 
     @Test
     fun `maps both services into coords`() {
-        val coords = ServiceDiscovery.toServiceCoords(status(listOf(messaging, ionStore)))
+        val coords = ServiceDiscovery.toServiceCoords(status(messaging, ionStore))
 
-        assertEquals("node-1", coords.directorNodeId)
-        assertEquals("peerMsg", coords.messagingPeerId)
+        assertEquals(nodeId.toString(), coords.directorNodeId)
+        assertEquals(messagingPeer.toString(), coords.messagingPeerId)
         assertEquals("mqtts://host:8883", coords.messagingEndpoint)
-        assertEquals("peerIon", coords.ionStorePeerId)
+        assertEquals(ionStorePeer.toString(), coords.ionStorePeerId)
         assertEquals("https://host:9443", coords.ionStoreUrl)
     }
 
     @Test
     fun `throws when messaging service absent`() {
         assertThrows(AppError.NotFound::class.java) {
-            ServiceDiscovery.toServiceCoords(status(listOf(ionStore)))
+            ServiceDiscovery.toServiceCoords(status(ionStore))
         }
     }
 
     @Test
     fun `throws when ion-store service absent`() {
         assertThrows(AppError.NotFound::class.java) {
-            ServiceDiscovery.toServiceCoords(status(listOf(messaging)))
+            ServiceDiscovery.toServiceCoords(status(messaging))
+        }
+    }
+
+    @Test
+    fun `throws when a service has no endpoint`() {
+        val noEndpoint = """{"serviceId":"${NodeStatus.Service.ION_STORE}","peerId":"$ionStorePeer"}"""
+        assertThrows(AppError.NotFound::class.java) {
+            ServiceDiscovery.toServiceCoords(status(messaging, noEndpoint))
         }
     }
 }

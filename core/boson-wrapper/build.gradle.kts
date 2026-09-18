@@ -68,6 +68,10 @@ dependencies {
     api(libs.boson.ion.store.client) {
         exclude(group = "ch.qos.logback")
     }
+    // All Director communication (client API, OAuth sign-in, device pairing).
+    api(libs.boson.director.client) {
+        exclude(group = "ch.qos.logback")
+    }
     // slf4j 2.x binding for Android (System.err -> logcat). A logcat-native binding
     // (slf4j-handroid / logback-android) is a M6 polish upgrade.
     runtimeOnly(libs.slf4j.simple)

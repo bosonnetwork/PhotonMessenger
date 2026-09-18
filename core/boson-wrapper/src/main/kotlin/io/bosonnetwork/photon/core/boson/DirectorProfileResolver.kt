@@ -20,36 +20,37 @@
  * SOFTWARE.
  */
 
-package io.bosonnetwork.photon.core.network
+package io.bosonnetwork.photon.core.boson
 
+import io.bosonnetwork.Id
 import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.core.model.ProfileResolver
 import io.bosonnetwork.photon.core.model.ResolvedProfile
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.CancellationException
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.future.await
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.filterNotNull
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 
 /**
- * [ProfileResolver] backed by the Director's public-profile endpoint with an in-memory TTL cache.
+ * [ProfileResolver] backed by the Director's public profiles with an in-memory TTL cache.
  *
- * Cache design: profiles carry no updatedAt (any persistence would be TTL-guessing anyway), the
- * Director itself caches remote profiles for 24h, and avatar BYTES are persistently cached for free
- * by the image loader's HTTP disk cache (the endpoint serves full cache headers) - so an in-memory
- * cache per process is the sweet spot. 404s are negative-cached briefly; transient failures retry
- * after a short window. The whole cache is dropped when the Director config changes (profiles are
- * per-Director).
+ * Cache design: profiles carry no updatedAt (any persistence would be TTL-guessing anyway), and the
+ * Director itself caches remote profiles for 24h - so an in-memory cache per process is the sweet spot.
+ * 404s are negative-cached briefly; transient failures retry after a short window. The whole cache is
+ * dropped when the Director config changes (profiles are per-Director).
+ *
+ * [lookup] fetches one profile, returning null for an unknown user; [directorChanges] emits whenever
+ * the Director changes. [create] wires both to the Director client.
  */
 class DirectorProfileResolver(
-    private val apiFactory: DirectorApiFactory,
-    configStore: DirectorConfigStore,
+    directorChanges: Flow<Any>,
+    private val lookup: suspend (userId: String) -> ResolvedProfile?,
     private val scope: CoroutineScope,
     private val nowMs: () -> Long = System::currentTimeMillis,
 ) : ProfileResolver {
@@ -65,13 +66,9 @@ class DirectorProfileResolver(
     private val entries = ConcurrentHashMap<String, MutableStateFlow<Entry?>>()
     private val inFlight = ConcurrentHashMap<String, Job>()
 
-    /** The API + base URL for the current Director config; null until the config first loads. */
-    private val current = MutableStateFlow<Pair<DirectorApi, String>?>(null)
-
     init {
         scope.launch {
-            configStore.config.collect { cfg ->
-                current.value = apiFactory.create(cfg) to cfg.baseUrl
+            directorChanges.collect {
                 // Profiles are per-Director: reset entries IN PLACE (never replace the StateFlow
                 // instances - active collectors stay attached and observe the reset).
                 entries.values.forEach { it.value = null }
@@ -113,19 +110,8 @@ class DirectorProfileResolver(
     }
 
     private suspend fun fetch(userId: String) {
-        val (api, baseUrl) = current.filterNotNull().first() // suspend until the config first loads
         val entry = try {
-            val dto = api.getUserProfile(userId)
-            Entry.Found(
-                ResolvedProfile(
-                    userId = dto.id,
-                    name = dto.name?.takeIf { it.isNotBlank() },
-                    bio = dto.bio?.takeIf { it.isNotBlank() },
-                    avatarUrl = if (dto.avatar.isNullOrBlank()) null
-                    else "$baseUrl/api/v1/client/avatar/${dto.id}",
-                ),
-                nowMs(),
-            )
+            lookup(userId)?.let { Entry.Found(it, nowMs()) } ?: Entry.NotFound(nowMs())
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -137,9 +123,28 @@ class DirectorProfileResolver(
         entryFlow(userId).value = entry
     }
 
-    private companion object {
-        const val FOUND_TTL_MS = 60L * 60 * 1000 // 1h; the Director caches remote profiles 24h
-        const val NOT_FOUND_TTL_MS = 10L * 60 * 1000 // unknown users re-checked after 10min
-        const val FAILED_RETRY_MS = 30L * 1000 // transient failures retry quickly
+    companion object {
+        private const val FOUND_TTL_MS = 60L * 60 * 1000 // 1h; the Director caches remote profiles 24h
+        private const val NOT_FOUND_TTL_MS = 10L * 60 * 1000 // unknown users re-checked after 10min
+        private const val FAILED_RETRY_MS = 30L * 1000 // transient failures retry quickly
+
+        /** A resolver over the Director [clients] of the active profile. */
+        fun create(clients: DirectorClients, scope: CoroutineScope): DirectorProfileResolver =
+            DirectorProfileResolver(
+                directorChanges = clients.config,
+                lookup = { userId ->
+                    // The user may belong to another node: the Director resolves it for its own users.
+                    clients.client().getUserProfile(Id.of(userId)).await()?.let { profile ->
+                        ResolvedProfile(
+                            userId = profile.id.toString(),
+                            name = profile.name.orElse(null)?.takeIf { it.isNotBlank() },
+                            bio = profile.bio.orElse(null)?.takeIf { it.isNotBlank() },
+                            avatarUrl = if (profile.avatar.orElse("").isBlank()) null
+                            else DirectorAvatars.uri(profile.id.toString()),
+                        )
+                    }
+                },
+                scope = scope,
+            )
     }
 }

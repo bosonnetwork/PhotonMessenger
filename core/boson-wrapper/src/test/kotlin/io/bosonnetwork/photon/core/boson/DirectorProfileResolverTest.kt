@@ -20,66 +20,47 @@
  * SOFTWARE.
  */
 
-package io.bosonnetwork.photon.core.network
+package io.bosonnetwork.photon.core.boson
 
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
-import androidx.datastore.preferences.core.Preferences
-import io.bosonnetwork.photon.core.model.AuthTokenStore
-import java.io.File
+import io.bosonnetwork.director.client.exceptions.DirectorException
+import io.bosonnetwork.photon.core.model.ResolvedProfile
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import okhttp3.mockwebserver.Dispatcher
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
-import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Before
-import org.junit.Rule
 import org.junit.Test
-import org.junit.rules.TemporaryFolder
 
 class DirectorProfileResolverTest {
 
-    @get:Rule
-    val tmp = TemporaryFolder()
-
-    private lateinit var server: MockWebServer
     private lateinit var scope: CoroutineScope
-    private lateinit var configStore: DirectorConfigStore
     private lateinit var resolver: DirectorProfileResolver
     private val clock = AtomicLong(1_000_000L)
+    private val directorChanges = MutableSharedFlow<Any>(extraBufferCapacity = 1)
 
-    private class FakeTokenStore : AuthTokenStore {
-        override fun currentToken(): String? = "cwt"
-        override suspend fun setToken(token: String?) = Unit
-        override suspend fun clear() = Unit
-    }
+    /** What the Director answers, and how often it was asked. */
+    @Volatile
+    private var answer: suspend (String) -> ResolvedProfile? = { null }
+    private val lookups = AtomicInteger()
 
     @Before
     fun setUp() {
-        server = MockWebServer()
-        server.start()
-        // A real multi-threaded scope: the resolver's fetches run truly async against MockWebServer.
+        // A real multi-threaded scope: the resolver's fetches run truly async.
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        val dataStore: DataStore<Preferences> = PreferenceDataStoreFactory.create(scope = scope) {
-            File(tmp.root, "resolver_test.preferences_pb")
-        }
-        configStore = DirectorConfigStore(dataStore)
-        runBlocking { configStore.setBaseUrl(server.url("/").toString().trimEnd('/')) }
         resolver = DirectorProfileResolver(
-            apiFactory = DirectorApiFactory(FakeTokenStore()),
-            configStore = configStore,
+            directorChanges = directorChanges,
+            lookup = { userId -> lookups.incrementAndGet(); answer(userId) },
             scope = scope,
             nowMs = clock::get,
         )
@@ -87,27 +68,17 @@ class DirectorProfileResolverTest {
 
     @After
     fun tearDown() {
-        server.shutdown()
         scope.cancel()
     }
 
-    private fun serveProfile(userId: String = "USER1", name: String = "Alice", withAvatar: Boolean = true) {
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse = when {
-                request.path!!.contains("/client/profile/") -> {
-                    val avatar = if (withAvatar) ""","avatar":"bnr://node/api/v1/client/avatar/$userId"""" else ""
-                    MockResponse().setBody("""{"id":"$userId","name":"$name","bio":"hi"$avatar}""")
-                }
-                else -> MockResponse().setResponseCode(404)
-            }
+    private fun serveProfile(name: String = "Alice", withAvatar: Boolean = true) {
+        answer = { userId ->
+            ResolvedProfile(userId, name, "hi", if (withAvatar) DirectorAvatars.uri(userId) else null)
         }
     }
 
-    private fun serveStatus(code: Int) {
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse =
-                MockResponse().setResponseCode(code)
-        }
+    private fun serveFailure(status: Int) {
+        answer = { throw DirectorException.fromResponse(status, "failed", null) }
     }
 
     private fun awaitTrue(timeoutMs: Long = 5_000, condition: () -> Boolean) {
@@ -130,17 +101,17 @@ class DirectorProfileResolverTest {
 
         assertEquals("Alice", profile.name)
         assertEquals("hi", profile.bio)
-        assertEquals(true, profile.avatarUrl!!.endsWith("/api/v1/client/avatar/USER1"))
-        val requests = server.requestCount
+        assertEquals(DirectorAvatars.uri("USER1"), profile.avatarUrl)
+        val requests = lookups.get()
 
         // Fresh entry: another collection answers from the cache with no new request.
         assertEquals("Alice", resolveBlocking("USER1").name)
-        assertEquals(requests, server.requestCount)
+        assertEquals(requests, lookups.get())
         assertEquals("Alice", resolver.cached("USER1")?.name)
     }
 
     @Test
-    fun `no avatar field yields a null avatarUrl`() {
+    fun `no avatar yields a null avatarUrl`() {
         serveProfile(withAvatar = false)
         assertNull(resolveBlocking("USER1").avatarUrl)
     }
@@ -149,45 +120,59 @@ class DirectorProfileResolverTest {
     fun `a stale entry is refetched after the TTL`() {
         serveProfile(name = "Alice")
         resolveBlocking("USER1")
-        val requests = server.requestCount
+        val requests = lookups.get()
 
         serveProfile(name = "Alicia")
         clock.addAndGet(2L * 60 * 60 * 1000) // beyond the 1h found-TTL
         resolver.prefetch("USER1")
 
-        awaitTrue { server.requestCount > requests }
+        awaitTrue { lookups.get() > requests }
         awaitTrue { resolver.cached("USER1")?.name == "Alicia" }
     }
 
     @Test
-    fun `404 is negative-cached within its TTL`() {
-        serveStatus(404)
+    fun `an unknown user is negative-cached within its TTL`() {
+        answer = { null }
 
         resolver.prefetch("GHOST")
-        awaitTrue { server.requestCount == 1 }
+        awaitTrue { lookups.get() == 1 }
         assertNull(resolver.cached("GHOST"))
 
         // Within the negative TTL: no re-request.
         resolver.prefetch("GHOST")
         runBlocking { delay(100) }
-        assertEquals(1, server.requestCount)
+        assertEquals(1, lookups.get())
 
         // After the negative TTL: checked again.
         clock.addAndGet(11L * 60 * 1000)
         resolver.prefetch("GHOST")
-        awaitTrue { server.requestCount == 2 }
+        awaitTrue { lookups.get() == 2 }
+    }
+
+    @Test
+    fun `a 404 failure is negative-cached like an unknown user`() {
+        serveFailure(404)
+
+        resolver.prefetch("GHOST")
+        awaitTrue { lookups.get() == 1 }
+
+        // A transient failure would retry after 30s; a 404 waits out the 10min negative TTL.
+        clock.addAndGet(60L * 1000)
+        resolver.prefetch("GHOST")
+        runBlocking { delay(100) }
+        assertEquals(1, lookups.get())
     }
 
     @Test
     fun `a transient failure retries only after its window`() {
-        serveStatus(500)
+        serveFailure(500)
 
         resolver.prefetch("USER1")
-        awaitTrue { server.requestCount == 1 }
+        awaitTrue { lookups.get() == 1 }
 
         resolver.prefetch("USER1")
         runBlocking { delay(100) }
-        assertEquals(1, server.requestCount)
+        assertEquals(1, lookups.get())
 
         clock.addAndGet(60L * 1000)
         serveProfile()
@@ -197,25 +182,24 @@ class DirectorProfileResolverTest {
 
     @Test
     fun `concurrent prefetches of the same user issue one request`() {
-        // A slow response keeps the first fetch in flight while the others arrive.
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse =
-                MockResponse().setBody("""{"id":"USER1","name":"Alice"}""")
-                    .setBodyDelay(300, java.util.concurrent.TimeUnit.MILLISECONDS)
+        // A slow answer keeps the first fetch in flight while the others arrive.
+        answer = { userId ->
+            delay(300)
+            ResolvedProfile(userId, "Alice", null, null)
         }
 
         repeat(10) { resolver.prefetch("USER1") }
 
         awaitTrue { resolver.cached("USER1") != null }
-        assertEquals(1, server.requestCount)
+        assertEquals(1, lookups.get())
     }
 
     @Test
-    fun `a Director config change clears the cache`() {
+    fun `a Director change clears the cache`() {
         serveProfile()
         resolveBlocking("USER1")
 
-        runBlocking { configStore.setBaseUrl(server.url("/other").toString().trimEnd('/')) }
+        directorChanges.tryEmit(Unit)
 
         awaitTrue { resolver.cached("USER1") == null }
     }

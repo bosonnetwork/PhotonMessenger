@@ -15,10 +15,6 @@ hilt = "2.54"
 hiltNavigationCompose = "1.2.0"
 # Async
 coroutines = "1.9.0"
-# Networking
-retrofit = "2.11.0"
-okhttp = "4.12.0"
-kotlinxSerialization = "1.7.3"
 # Persistence
 datastore = "1.1.1"
 room = "2.6.1"
@@ -33,6 +29,10 @@ securityCrypto = "1.1.0-alpha06"
 # 3.0.2 carries the MessagingStore persistence seam (Option A).
 # 3.1.0 carries the typed channel/member limit refusals the plan-limit messages need.
 boson = "3.1.0"
+# The Director client is not released yet: the locally installed snapshot (mvn clean install in
+# Boson clients/director). It brings boson-api of the same snapshot, which Gradle resolves in place of
+# the 3.1.0 one the other Boson clients ask for.
+bosonDirectorClient = "3.1.2-SNAPSHOT"
 vertx = "5.0.11"
 # Testing
 junit = "4.13.2"
@@ -80,12 +80,6 @@ kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 kotlinx-coroutines-jdk8 = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-jdk8", version.ref = "coroutines" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 # Networking
-retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
-retrofit-serialization = { group = "com.squareup.retrofit2", name = "converter-kotlinx-serialization", version.ref = "retrofit" }
-okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
-okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
-okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
-kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 # Persistence
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
@@ -104,6 +98,7 @@ desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", ver
 # Boson stack (mavenLocal)
 boson-messaging-client = { group = "io.bosonnetwork", name = "boson-messaging-client", version.ref = "boson" }
 boson-ion-store-client = { group = "io.bosonnetwork", name = "boson-ion-store-client", version.ref = "boson" }
+boson-director-client = { group = "io.bosonnetwork", name = "boson-director-client", version.ref = "bosonDirectorClient" }
 vertx-lang-kotlin-coroutines = { group = "io.vertx", name = "vertx-lang-kotlin-coroutines", version.ref = "vertx" }
 slf4j-simple = { group = "org.slf4j", name = "slf4j-simple", version.ref = "slf4j" }
 # Testing
@@ -124,7 +119,6 @@ android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
-kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }

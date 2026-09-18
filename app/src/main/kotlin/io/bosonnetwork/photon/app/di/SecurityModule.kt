@@ -24,8 +24,8 @@ package io.bosonnetwork.photon.app.di
 
 import android.content.Context
 import io.bosonnetwork.photon.core.boson.KeyManager
-import io.bosonnetwork.photon.core.model.AuthTokenStore
-import io.bosonnetwork.photon.core.security.EncryptedAuthTokenStore
+import io.bosonnetwork.photon.core.model.SessionStore
+import io.bosonnetwork.photon.core.security.EncryptedSessionStore
 import io.bosonnetwork.photon.core.security.ProfileManager
 import io.bosonnetwork.photon.core.security.SecretStore
 import dagger.Module
@@ -50,7 +50,7 @@ object SecurityModule {
 
     @Provides
     @Singleton
-    fun provideAuthTokenStore(secrets: SecretStore): AuthTokenStore = EncryptedAuthTokenStore(secrets)
+    fun provideSessionStore(secrets: SecretStore): SessionStore = EncryptedSessionStore(secrets)
 
     @Provides
     @Singleton

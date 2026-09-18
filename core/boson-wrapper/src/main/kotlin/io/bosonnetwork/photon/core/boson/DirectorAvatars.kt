@@ -20,38 +20,29 @@
  * SOFTWARE.
  */
 
-package io.bosonnetwork.photon.core.network.model
+package io.bosonnetwork.photon.core.boson
 
-import kotlinx.serialization.Serializable
-
-/**
- * GET /api/v1/client/id -> the super node's Boson id (base58). Public/auth-less; used to detect which
- * super node the device is registered with.
- */
-@Serializable
-data class NodeIdDto(
-    val id: String,
-)
+import android.net.Uri
+import io.bosonnetwork.Id
 
 /**
- * GET /api/v1/client/node -> NodeStatus (Director). Only the fields PhotonMessenger needs are
- * modeled; the JSON also carries info/startedAt/running which we ignore. See spec 1.7.
+ * Avatar image models. An avatar is loaded through the Director client, which authenticates the request -
+ * the Director fetches another node's user's avatar only for a signed-in user of its own - so the image
+ * loader is handed this app-private URI rather than an HTTP URL: `director-avatar://<userId>[?v=<n>]`.
+ * The optional version changes the URI, and so the image cache key, when the avatar is known to have
+ * changed.
  */
-@Serializable
-data class NodeStatusDto(
-    val nodeId: String? = null,
-    val services: List<ServiceDto> = emptyList(),
-)
+object DirectorAvatars {
+    const val SCHEME = "director-avatar"
 
-/**
- * A discovered service. `serviceId` is the service type, e.g.
- * "io.bosonnetwork.photonmessaging" (messaging) or "io.bosonnetwork.ionstore" (ion-store).
- * `endpoint` is the mqtts URI (messaging) or https URL (ion-store).
- */
-@Serializable
-data class ServiceDto(
-    val serviceId: String,
-    val serviceName: String? = null,
-    val peerId: String,
-    val endpoint: String,
-)
+    /** The avatar model for [userId]; pass [version] (e.g. the profile's update time) to bust caches. */
+    fun uri(userId: String, version: Long? = null): String =
+        "$SCHEME://$userId" + (version?.let { "?v=$it" } ?: "")
+
+    /** The user whose avatar [uri] names, or null when it is not an avatar model. */
+    fun userIdOf(uri: Uri): Id? {
+        if (uri.scheme != SCHEME) return null
+        val userId = uri.host?.takeIf { it.isNotBlank() } ?: return null
+        return runCatching { Id.of(userId) }.getOrNull()
+    }
+}

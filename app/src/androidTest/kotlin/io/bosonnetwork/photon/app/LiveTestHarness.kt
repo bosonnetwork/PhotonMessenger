@@ -23,21 +23,19 @@
 package io.bosonnetwork.photon.app
 
 import android.content.Context
-import android.util.Base64
+import io.bosonnetwork.director.client.DirectorAuth
+import io.bosonnetwork.director.client.DirectorClient
+import io.bosonnetwork.director.client.UserRegistration
 import io.bosonnetwork.photon.core.boson.BosonClientFactory
 import io.bosonnetwork.photon.core.boson.BosonCrypto
+import io.bosonnetwork.photon.core.boson.ServiceDiscovery
 import io.bosonnetwork.photon.core.boson.awaitResult
+import io.bosonnetwork.photon.core.boson.toDirectorError
 import io.bosonnetwork.photon.core.database.MessagingStoreFactory
 import io.bosonnetwork.photon.core.model.AppError
-import io.bosonnetwork.photon.core.model.AuthTokenStore
 import io.bosonnetwork.photon.core.model.ServiceCoords
-import io.bosonnetwork.photon.core.network.DirectorApi
-import io.bosonnetwork.photon.core.network.ServiceDiscovery
-import io.bosonnetwork.photon.core.network.toDirectorError
-import io.bosonnetwork.photon.core.network.model.SelfRegisterRequest
 import io.bosonnetwork.Id
 import io.bosonnetwork.crypto.Signature
-import io.bosonnetwork.crypto.pow.RegistrationPowClient
 import io.bosonnetwork.ionstore.IonStore
 import io.bosonnetwork.photonmessaging.ConnectionListener
 import io.bosonnetwork.photonmessaging.MessagingClient
@@ -47,17 +45,16 @@ import java.io.File
 import java.security.SecureRandom
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.future.await
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertTrue
 
 /**
  * Shared harness for the LIVE integration tests (X-T3). Requires the dev super node running and
  * reachable at [TestSuperNode] (Director) / the discovered mqtts + ion-store endpoints. Centralizes
- * self-registration (non-OAuth), service discovery, client/IonStore construction, and keys so the
- * per-phase test classes stay focused on the behavior under test.
+ * self-registration (non-OAuth), service discovery, Director/messaging/IonStore client construction, and
+ * keys so the per-phase test classes stay focused on the behavior under test.
  *
  * Construct one per test with a fresh [Vertx]; call [close] in a finally block to stop clients +
  * close Vertx.
@@ -66,13 +63,14 @@ class LiveTestHarness(
     private val context: Context,
     private val vertx: Vertx,
 ) {
-    /** A registered Boson identity plus the discovery + REST handles it owns (not yet connected). */
+    /**
+     * A registered Boson identity plus its discovered services (not yet connected). It holds no Director
+     * client: a pooled account outlives the harness - and the Vert.x - that registered it; see [director].
+     */
     class Account(
         val name: String,
         val userKey: Signature.KeyPair,
         val deviceKey: Signature.KeyPair,
-        val tokenStore: AuthTokenStore,
-        val api: DirectorApi,
         val coords: ServiceCoords,
     ) {
         val userId: Id get() = BosonCrypto.idOf(userKey)
@@ -81,19 +79,21 @@ class LiveTestHarness(
 
     private val startedClients = mutableListOf<MessagingClient>()
     private val openStores = mutableListOf<IonStore>()
-
-    private class MutableTokenStore : AuthTokenStore {
-        @Volatile private var token: String? = null
-        override fun currentToken(): String? = token
-        override suspend fun setToken(token: String?) { this.token = token }
-        override suspend fun clear() { token = null }
-    }
-
-    /** Director Jackson endpoints decode byte[] with base64url, no pad (see reference_director_wire_encoding). */
-    fun b64(bytes: ByteArray): String =
-        Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+    private val openDirectors = mutableListOf<DirectorClient>()
+    private val openAuths = mutableListOf<DirectorAuth>()
 
     fun newNonce(): ByteArray = ByteArray(32).also { SecureRandom().nextBytes(it) }
+
+    /** A Director client acting as [account]'s user, on this harness's Vert.x; closed by [close]. */
+    fun director(account: Account): DirectorClient =
+        LiveDirector.client(vertx, account.userKey).also { openDirectors += it }
+
+    /** A Director client acting as [userId] through its device [deviceKey]; closed by [close]. */
+    fun deviceDirector(userId: Id, deviceKey: Signature.KeyPair): DirectorClient =
+        LiveDirector.deviceClient(vertx, userId, deviceKey).also { openDirectors += it }
+
+    /** The Director client for sign-in and pairing, on this harness's Vert.x; closed by [close]. */
+    fun directorAuth(): DirectorAuth = LiveDirector.auth(vertx).also { openAuths += it }
 
     /**
      * An identity from the shared pool, registered on first use and reused by every later request for
@@ -115,123 +115,60 @@ class LiveTestHarness(
     fun register(name: String): Account {
         val userKp = BosonCrypto.generateKeyPair()
         val deviceKp = BosonCrypto.generateKeyPair()
-        val tokenStore = MutableTokenStore()
-        // Identity-pinned from the first request: the dev node id is a stable known value, so register
-        // + discovery + every later call all drive the production pinned trust path (see LiveDirectorTls).
-        val api = LiveDirectorTls.pinnedApiFactory(tokenStore).create(TestSuperNode.directorConfig)
-        val coords = runBlocking {
-            tokenStore.setToken(selfRegister(api, name, userKp, deviceKp))
-            ServiceDiscovery.toServiceCoords(api.getNodeStatus())
+        // Identity-pinned from the first request when the dev node id is set: register + discovery all
+        // drive the production trust path (see LiveDirector).
+        val director = LiveDirector.client(vertx, userKp, deviceKp)
+        try {
+            val coords = runBlocking {
+                selfRegister(director, name)
+                ServiceDiscovery.toServiceCoords(director.nodeStatus.await())
+            }
+            return Account(name, userKp, deviceKp, coords)
+        } finally {
+            director.close()
         }
-        return Account(name, userKp, deviceKp, tokenStore, api, coords)
     }
 
     /**
-     * Submits the registration, retrying with a fresh challenge when the proof of work does not land.
+     * Registers the user with its initial device, retrying on a fresh challenge when the proof of work
+     * does not land. The Director client fetches the challenge and solves it; `(n, k)`/effort always come
+     * from the challenge.
      *
      * Two failure modes are retried, both of which an emulator hits for real. A 403 means the challenge
      * expired between solve and submit. A solve that overruns [POW_SOLVE_TIMEOUT_MS] is abandoned: the
      * search is memory-hard with high run-to-run variance by design, so an unlucky one can run for many
      * minutes - long enough to look like a hung test run rather than a slow one. Either way the retry
-     * needs a fresh challenge AND a fresh solve (the two are bound), so the whole request is rebuilt on
-     * a new challenge, which also re-rolls the search.
+     * registers again, which solves a fresh challenge and so also re-rolls the search.
      *
      * The abandoned solve cannot be interrupted (it is a tight CPU/memory loop with no cancellation
-     * points), so its thread runs to completion in the background; that costs some CPU but keeps a bad
-     * roll from stalling the suite.
+     * points), so it runs to completion in the background; that costs some CPU but keeps a bad roll from
+     * stalling the suite. Should it then land after all, the retry finds the user registered (409),
+     * which is the outcome wanted.
      */
-    private suspend fun selfRegister(
-        api: DirectorApi,
-        name: String,
-        userKp: Signature.KeyPair,
-        deviceKp: Signature.KeyPair,
-    ): String {
+    private suspend fun selfRegister(director: DirectorClient, name: String) {
+        // No passphrase: the app onboards OAuth-style, so gated ops stay passphrase-free (M6).
+        val registration = UserRegistration().name(name).initialDevice("emulator", APP_NAME)
         var lastFailure: Throwable? = null
-        repeat(POW_ATTEMPTS) {
-            val request = withTimeoutOrNull(POW_SOLVE_TIMEOUT_MS) {
-                selfRegisterRequest(api, name, userKp, deviceKp)
-            }
-            if (request == null) {
-                lastFailure = AssertionError("proof-of-work solve exceeded ${POW_SOLVE_TIMEOUT_MS}ms")
-                return@repeat
-            }
+        repeat(POW_ATTEMPTS) { attempt ->
             try {
-                return api.register(request).token
+                val registered = withTimeoutOrNull(POW_SOLVE_TIMEOUT_MS) {
+                    director.registerUser(registration).await()
+                    true
+                }
+                if (registered == true) return
+                lastFailure = AssertionError("proof-of-work solve exceeded ${POW_SOLVE_TIMEOUT_MS}ms")
             } catch (e: Exception) {
-                if (e.toDirectorError() !is AppError.Forbidden) throw e
-                lastFailure = e
+                when (e.toDirectorError()) {
+                    is AppError.Forbidden -> lastFailure = e
+                    is AppError.Conflict -> if (attempt > 0) return else throw e
+                    else -> throw e
+                }
             }
         }
         throw AssertionError(
             "registering $name did not complete its proof of work in $POW_ATTEMPTS attempts " +
                 "(expired challenge or a solve slower than ${POW_SOLVE_TIMEOUT_MS}ms)",
             lastFailure,
-        )
-    }
-
-    /**
-     * Builds the registration request the node's policy actually accepts: a proof-of-work registration
-     * when the node offers a challenge (the `pow`/`either` policy, which is what the dev node runs -
-     * a legacy nonce request is rejected there with 400), or the legacy nonce form when the challenge
-     * endpoint 404s (an `open`/OAuth-only node). Mirrors AuthRepository.createAccountWithPow;
-     * `(n, k)`/effort always come from the challenge.
-     */
-    private suspend fun selfRegisterRequest(
-        api: DirectorApi,
-        name: String,
-        userKp: Signature.KeyPair,
-        deviceKp: Signature.KeyPair,
-    ): SelfRegisterRequest {
-        val userId = BosonCrypto.idOf(userKp).toString()
-        val deviceId = BosonCrypto.idOf(deviceKp).toString()
-        // Retrofit's HttpException is internal to :core:network, so branch on the mapped domain error -
-        // exactly as AuthRepository.powAvailable does.
-        val challenge = try {
-            api.getRegistrationChallenge()
-        } catch (e: Exception) {
-            if (e.toDirectorError() is AppError.NotFound) null else throw e
-        }
-
-        if (challenge == null) {
-            val nonce = newNonce()
-            return SelfRegisterRequest(
-                userId = userId,
-                // No passphrase: the app onboards OAuth-style, so gated ops stay passphrase-free (M6).
-                passphrase = null,
-                userName = name,
-                deviceId = deviceId,
-                deviceName = "emulator",
-                appName = APP_NAME,
-                nonce = b64(nonce),
-                userSig = b64(BosonCrypto.sign(userKp, nonce)),
-                deviceSig = b64(BosonCrypto.sign(deviceKp, nonce)),
-            )
-        }
-
-        val superNodeId = Id.of(api.getNodeId().id).bytesUnsafe()
-        val challengeNonce = Base64.decode(challenge.nonce, Base64.URL_SAFE)
-        val solved = withContext(Dispatchers.Default) {
-            RegistrationPowClient.solve(
-                superNodeId, userKp, challenge.n, challenge.k, challenge.effort,
-                challengeNonce, MAX_POW_NONCES,
-            )
-        }
-        val deviceSig = RegistrationPowClient.sign(
-            superNodeId, deviceKp, challengeNonce, solved.powNonce, challenge.effort,
-        )
-        return SelfRegisterRequest(
-            userId = userId,
-            passphrase = null,
-            userName = name,
-            deviceId = deviceId,
-            deviceName = "emulator",
-            appName = APP_NAME,
-            userSig = b64(solved.signature),
-            deviceSig = b64(deviceSig),
-            challenge = challenge.challenge,
-            challengeSig = challenge.challengeSig,
-            powNonce = b64(solved.powNonce),
-            solution = solved.solution.toList(),
         )
     }
 
@@ -275,6 +212,10 @@ class LiveTestHarness(
         ).also { openStores += it }
 
     fun close() {
+        openDirectors.forEach { runCatching { it.close().get(10, TimeUnit.SECONDS) } }
+        openDirectors.clear()
+        openAuths.forEach { runCatching { it.close().get(10, TimeUnit.SECONDS) } }
+        openAuths.clear()
         startedClients.forEach { runCatching { it.stop().get(10, TimeUnit.SECONDS) } }
         startedClients.clear()
         openStores.forEach { runCatching { runBlocking { it.close().awaitResult() } } }
@@ -291,10 +232,7 @@ class LiveTestHarness(
         // Process-scoped so the pool survives a per-test harness (and spans test classes in one run).
         private val sharedAccounts = mutableMapOf<String, Account>()
 
-        private const val APP_NAME = "PhotonMessenger-IT"
-
-        /** Equihash nonce search budget, as in AuthRepository (the solve is memory-hard by design). */
-        private const val MAX_POW_NONCES = 1_000_000L
+        const val APP_NAME = "PhotonMessenger-IT"
 
         /** Fresh challenge + solve attempts before giving up on registration (see selfRegister). */
         private const val POW_ATTEMPTS = 3

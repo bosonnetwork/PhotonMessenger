@@ -28,14 +28,11 @@ import io.bosonnetwork.photon.app.notification.FriendRequestNotifier
 import io.bosonnetwork.photon.app.notification.MessageNotifier
 import io.bosonnetwork.photon.app.service.MessagingForegroundService
 import io.bosonnetwork.photon.core.boson.BosonSessionManager
+import io.bosonnetwork.photon.core.boson.DirectorClients
+import io.bosonnetwork.photon.core.boson.ServiceDiscovery
+import io.bosonnetwork.photon.core.boson.toDirectorError
 import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.core.model.ConnectionState
-import io.bosonnetwork.photon.core.network.DirectorApi
-import io.bosonnetwork.photon.core.network.DirectorApiFactory
-import io.bosonnetwork.photon.core.network.DirectorConfig
-import io.bosonnetwork.photon.core.network.DirectorConfigStore
-import io.bosonnetwork.photon.core.network.ServiceDiscovery
-import io.bosonnetwork.photon.core.network.toDirectorError
 import io.bosonnetwork.photon.feature.onboarding.data.AuthRepository
 import io.bosonnetwork.photon.feature.onboarding.data.NodeMigration
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -48,8 +45,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.future.await
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -70,8 +67,7 @@ data class SessionStatus(val phase: SessionPhase, val message: String? = null)
 @Singleton
 class SessionController @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val apiFactory: DirectorApiFactory,
-    private val configStore: DirectorConfigStore,
+    private val directorClients: DirectorClients,
     private val sessionManager: BosonSessionManager,
     private val messageNotifier: MessageNotifier,
     private val friendRequestNotifier: FriendRequestNotifier,
@@ -88,9 +84,6 @@ class SessionController @Inject constructor(
         combine(own, active, sessionManager.connectionState) { own, active, transport ->
             if (active) SessionStatus(transport.toPhase()) else own
         }.stateIn(scope, SharingStarted.Eagerly, SessionStatus(SessionPhase.IDLE))
-
-    @Volatile
-    private var cachedApi: Pair<DirectorConfig, DirectorApi>? = null
 
     // True between ensureConnected() and disconnect(): the user intends to be online, so a
     // network-regain should retry a bring-up that failed while offline.
@@ -110,12 +103,6 @@ class SessionController @Inject constructor(
 
     @Volatile
     private var migrationConfirmed = false
-
-    private suspend fun api(): DirectorApi {
-        val cfg: DirectorConfig = configStore.config.first()
-        cachedApi?.let { (cached, api) -> if (cached == cfg) return api }
-        return apiFactory.create(cfg).also { cachedApi = cfg to it }
-    }
 
     /** Discovers coordinates and connects the messaging client. Safe to call repeatedly. */
     fun ensureConnected() {
@@ -142,7 +129,7 @@ class SessionController @Inject constructor(
                 // not in the user's device table, so an unregistered device connects but never reaches
                 // READY. Idempotent (409 = already registered).
                 authRepository.ensureDeviceRegistered()
-                val coords = ServiceDiscovery.toServiceCoords(api().getNodeStatus())
+                val coords = ServiceDiscovery.toServiceCoords(directorClients.client().getNodeStatus().await())
                 sessionManager.connect(coords)
             }.onSuccess {
                 // Hold the hosting process up with the foreground service only once a session is
@@ -212,7 +199,6 @@ class SessionController @Inject constructor(
         scope.launch {
             active.value = false
             own.value = SessionStatus(SessionPhase.IDLE)
-            cachedApi = null
             messageNotifier.detach()
             friendRequestNotifier.detach()
             runCatching { sessionManager.disconnect() }

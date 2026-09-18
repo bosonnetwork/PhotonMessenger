@@ -43,7 +43,7 @@ the device holds the authoritative copy of your data.
 What a super node does is route ciphertext and hold it briefly for offline delivery. What it does
 **not** do is read it. See [Security](#security).
 
-**Project status:** version 0.5.0, feature-complete for the core messaging experience and in active
+**Project status:** version 0.5.1, feature-complete for the core messaging experience and in active
 development. APIs, wire formats, and storage schemas may still change between releases.
 
 ---
@@ -231,10 +231,10 @@ injection with Hilt, asynchrony with coroutines bridged onto the Boson libraries
                      notifications, session control, account switching
 :core:model          Pure-Kotlin domain entities, unified AppError model, display-profile policy
 :core:designsystem   Material 3 theme (light/dark/dynamic), tokens, shared components
-:core:network        Director REST client (Retrofit/OkHttp), identity pinning, token renewal
+:core:network        Director configuration and app preferences (DataStore)
 :core:security       Android Keystore key management, encrypted secret store, profile isolation
 :core:database       Room storage for cold-start rendering and app-owned state
-:core:boson-wrapper  MessagingClient + IonStore construction, coroutine bridges, CBOR codecs
+:core:boson-wrapper  Director, MessagingClient and IonStore clients, coroutine bridges, CBOR codecs
 :core:qr             QR encoding and camera scanning (CameraX + ML Kit)
 :feature:onboarding  Super node selection, registration (PoW / OAuth / import), identity binding
 :feature:chat        Conversations list, chat thread, forwarding, image viewer, attachments
@@ -296,15 +296,17 @@ send. Create a channel from Contacts to start a group.
 | Android SDK | Platform `android-36`, build-tools 36.x            |
 | Android Studio | Ladybug or later (optional, but the supported IDE) |
 | Boson client artifacts | `3.1.0` in the local Maven repository (see below)  |
+| Boson Director client | `3.1.2-SNAPSHOT` in the local Maven repository (see below) |
 
 Photon supports **Android 13 (API 33) and later**, compiles against API 36, and enables Java 8+
 API desugaring because it dexes the JVM Boson stack (Vert.x 5, Netty, Jackson).
 
 ### 1. Install the Boson client libraries
 
-Photon resolves `io.bosonnetwork:boson-messaging-client` and
-`io.bosonnetwork:boson-ion-store-client` from `mavenLocal()`. Build them from their own
-repositories, in this order - each one installs artifacts the next depends on:
+Photon resolves `io.bosonnetwork:boson-messaging-client`,
+`io.bosonnetwork:boson-ion-store-client` and `io.bosonnetwork:boson-director-client` from
+`mavenLocal()`. Build them from their own repositories, in this order - each one installs artifacts
+the next depends on:
 
 ```bash
 # 1. Parent POM and dependency BOM
@@ -324,7 +326,15 @@ git clone https://github.com/bosonnetwork/Boson.Messaging.Client.git
 
 git clone https://github.com/bosonnetwork/Boson.IonStore.Client.git
 (cd Boson.IonStore.Client && ./mvnw clean install -DskipTests)
+
+# 4. The Director client, which all Director communication goes through
+git clone https://github.com/bosonnetwork/Boson.Director.Client.git
+(cd Boson.Director.Client && ./mvnw clean install -DskipTests)
 ```
+
+The Director client is not released yet: Photon uses its `3.1.2-SNAPSHOT`, which needs the parent
+POM, dependency BOM and core at that same snapshot version in the local repository. It also brings
+`boson-api` of that version, which Gradle then resolves in place of the `3.1.0` one.
 
 > **Always include `clean`.** A bare incremental `install` can package whatever already sits in
 > `target/classes` - including classes built by the IDE's compiler, which may embed errors that

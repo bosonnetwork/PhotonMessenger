@@ -37,7 +37,6 @@ dependencies {
     implementation(project(":core:qr"))
 
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.okhttp)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)

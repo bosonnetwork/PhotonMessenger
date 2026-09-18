@@ -23,28 +23,18 @@
 package io.bosonnetwork.photon.core.network
 
 /**
- * Director base-URL configuration. All client routes are mounted under "/api/v1/client/..." and
- * auth routes under "/api/v1/auth/..." (design spec sections 1.7, 2.1). The base URL is
- * user-configurable (advanced override) and persisted in DataStore; this holder is filled in M1.
+ * The Director this profile talks to: its base URL (scheme, host, port and any path prefix, without
+ * `/api/v1`), user-configurable and persisted in DataStore (design spec sections 1.7, 2.1).
  */
 data class DirectorConfig(
     val baseUrl: String,
     /**
-     * SHA-256 SPKI pins ("sha256/<base64>") for the Director host, applied by [DirectorApiFactory]
-     * when [baseUrl] is HTTPS. Empty means no pinning (the dev default, which is cleartext anyway).
-     * Populated from [KnownDirectorPins] when the config is built. X-S4 / M1-4.
-     */
-    val certificatePins: List<String> = emptyList(),
-    /**
-     * The Director's Boson node id (base58). When set and [baseUrl] is HTTPS, [DirectorApiFactory]
-     * pins the connection to this Boson identity via a [DirectorTrustManagerProvider] - the same
-     * identity-pinning model the messaging and ion-store clients use - so the Director's self-signed
-     * ECDSA certificate (Ed25519 identity binding) is trusted without a public CA. Null falls back to
-     * default system-CA trust (e.g. a Director fronted by a real CA certificate). X-S4.
+     * The Director's Boson node id (base58). When set and [baseUrl] is HTTPS, the Director client pins
+     * the connection to this Boson identity - the same identity-pinning model the messaging and ion-store
+     * clients use - so the Director's self-signed ECDSA certificate (Ed25519 identity binding) is trusted
+     * without a public CA; a CA-signed certificate is still accepted. It also binds the client's access
+     * tokens to this node. Null leaves default system-CA trust (e.g. a Director fronted by a real CA
+     * certificate), with tokens bound to the node id the Director reports. X-S4.
      */
     val nodeId: String? = null,
-) {
-    val apiPrefix: String get() = "$baseUrl/api/v1"
-    val clientPrefix: String get() = "$apiPrefix/client"
-    val authPrefix: String get() = "$apiPrefix/auth"
-}
+)

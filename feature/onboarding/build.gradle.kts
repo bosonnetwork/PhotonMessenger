@@ -53,7 +53,6 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
-    testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.mockk)
     testImplementation(libs.androidx.datastore.preferences)
     androidTestImplementation(libs.androidx.junit)

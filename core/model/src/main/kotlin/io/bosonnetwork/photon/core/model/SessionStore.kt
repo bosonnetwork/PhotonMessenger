@@ -19,29 +19,23 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-
-package io.bosonnetwork.photon.core.network
-
-import io.bosonnetwork.photon.core.model.AuthTokenStore
-import okhttp3.Interceptor
-import okhttp3.Response
+package io.bosonnetwork.photon.core.model
 
 /**
- * Attaches `Authorization: Bearer <CWT>` when a token is present (spec 2.1). Auth-less endpoints
- * (providers, OAuth) simply carry an ignored header when no token exists yet.
+ * Whether this profile is signed in, and as whom. Signing out ends the session only: the identity keys
+ * and local data stay, so signing back in needs no import (see ProfileManager).
+ *
+ * The session carries no credential. Director calls authenticate with tokens the Director client issues
+ * itself from the device's keys, so the session only records that the user chose to be signed in here.
+ * [currentSession] is synchronous so startup can pick its first screen without suspending.
  */
-class AuthInterceptor(
-    private val tokenStore: AuthTokenStore,
-) : Interceptor {
-    override fun intercept(chain: Interceptor.Chain): Response {
-        val token = tokenStore.currentToken()
-        val request = if (token.isNullOrEmpty()) {
-            chain.request()
-        } else {
-            chain.request().newBuilder()
-                .header("Authorization", "Bearer $token")
-                .build()
-        }
-        return chain.proceed(request)
-    }
+interface SessionStore {
+    /** The id (base58) of the signed-in user, or null when signed out. */
+    fun currentSession(): String?
+
+    /** Records [userId] as signed in (or signs out, when null). */
+    suspend fun setSession(userId: String?)
+
+    /** Signs out. */
+    suspend fun clear()
 }

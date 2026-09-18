@@ -24,30 +24,21 @@ package io.bosonnetwork.photon.feature.settings.data
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
-import io.bosonnetwork.photon.core.boson.BosonCrypto
-import io.bosonnetwork.photon.core.boson.DevicePairing
-import io.bosonnetwork.photon.core.boson.KeyManager
-import io.bosonnetwork.photon.core.boson.PairingPayload
-import io.bosonnetwork.photon.core.model.AppError
-import io.bosonnetwork.photon.core.model.AuthTokenStore
-import io.bosonnetwork.photon.core.network.DirectorApi
-import io.bosonnetwork.photon.core.network.DirectorApiFactory
-import io.bosonnetwork.photon.core.network.DirectorConfig
-import io.bosonnetwork.photon.core.network.DirectorConfigStore
-import io.bosonnetwork.photon.core.network.model.ClientAuthRequest
-import io.bosonnetwork.photon.core.network.model.FinishRegistrationRequest
-import io.bosonnetwork.photon.core.network.model.RegisterDeviceRequest
-import io.bosonnetwork.photon.core.network.model.ReplyRegistrationRequest
-import io.bosonnetwork.photon.core.network.toDirectorError
-import io.bosonnetwork.photon.feature.settings.R
 import io.bosonnetwork.crypto.CryptoBox
 import io.bosonnetwork.crypto.Signature
-import java.security.SecureRandom
-import java.util.Base64
+import io.bosonnetwork.photon.core.boson.BosonCrypto
+import io.bosonnetwork.photon.core.boson.DevicePairing
+import io.bosonnetwork.photon.core.boson.DirectorClients
+import io.bosonnetwork.photon.core.boson.KeyManager
+import io.bosonnetwork.photon.core.boson.PairingPayload
+import io.bosonnetwork.photon.core.boson.toDirectorError
+import io.bosonnetwork.photon.core.model.AppError
+import io.bosonnetwork.photon.core.model.SessionStore
+import io.bosonnetwork.photon.feature.settings.R
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.future.await
 import kotlinx.coroutines.withContext
 
 /** What a new device shows in its pairing QR plus the handle used to wait for approval (spec 2.4). */
@@ -79,7 +70,7 @@ data class PairingRequestInfo(
 interface DevicePairingRepository {
     suspend fun createInvite(deviceName: String): Result<PairingInvite>
 
-    /** Long-polls until approval; on success stores the received user key + a CWT. Returns the userId. */
+    /** Long-polls until approval; on success stores the received user key and signs in. Returns the userId. */
     suspend fun awaitApproval(): Result<String>
 
     suspend fun readRequest(qrText: String): Result<PairingRequestInfo>
@@ -95,10 +86,9 @@ interface DevicePairingRepository {
 
 @Singleton
 class DevicePairingRepositoryImpl @Inject constructor(
-    private val apiFactory: DirectorApiFactory,
-    private val configStore: DirectorConfigStore,
+    private val directorClients: DirectorClients,
     private val keyManager: KeyManager,
-    private val tokenStore: AuthTokenStore,
+    private val sessionStore: SessionStore,
     @ApplicationContext private val context: Context,
 ) : DevicePairingRepository {
 
@@ -112,33 +102,17 @@ class DevicePairingRepositoryImpl @Inject constructor(
     @Volatile
     private var active: ActivePairing? = null
 
-    @Volatile
-    private var cachedApi: Pair<String, DirectorApi>? = null
-
-    private suspend fun config(): DirectorConfig = configStore.config.first()
-
-    private suspend fun api(): DirectorApi {
-        val cfg = config()
-        cachedApi?.let { (url, api) -> if (url == cfg.baseUrl) return api }
-        return apiFactory.create(cfg).also { cachedApi = cfg.baseUrl to it }
-    }
-
     override suspend fun createInvite(deviceName: String): Result<PairingInvite> = runCatching {
         withContext(Dispatchers.IO) {
             // The pairing registration binds this device key server-side BEFORE the adopted identity
             // is known, so a key ever registered under a previous identity must be rotated NOW - the
             // paired identity is guaranteed new-or-unknown (never reuse a device key across users).
             val deviceKey = keyManager.ensureDeviceKeyFor(null)
-            val deviceId = BosonCrypto.idOf(deviceKey).toString()
-            val nonce = newNonce()
-            val request = RegisterDeviceRequest(
-                deviceId = deviceId,
-                deviceName = deviceName.ifBlank { context.getString(R.string.settings_default_device_name) },
-                appName = context.getString(R.string.settings_about_app_name),
-                nonce = b64(nonce),
-                sig = b64(BosonCrypto.sign(deviceKey, nonce)),
-            )
-            val registrationId = api().registerDevice(request).registrationId
+            val registrationId = directorClients.auth().requestDeviceRegistration(
+                deviceKey,
+                deviceName.ifBlank { context.getString(R.string.settings_default_device_name) },
+                context.getString(R.string.settings_about_app_name),
+            ).await()
 
             val ephemeral = DevicePairing.generateEphemeralKeyPair()
             active = ActivePairing(registrationId, deviceKey, ephemeral)
@@ -151,53 +125,34 @@ class DevicePairingRepositoryImpl @Inject constructor(
         withContext(Dispatchers.IO) {
             val pairing = active
                 ?: throw AppError.InvalidInput(context.getString(R.string.settings_pairing_error_no_active))
-            val deviceId = BosonCrypto.idOf(pairing.deviceKey).toString()
 
-            // finishRegistration long-polls server-side until the request is approved/denied/timed out.
-            val finishNonce = newNonce()
-            val response = api().finishRegistration(
-                pairing.registrationId,
-                FinishRegistrationRequest(
-                    deviceId = deviceId,
-                    nonce = b64(finishNonce),
-                    sig = b64(BosonCrypto.sign(pairing.deviceKey, finishNonce)),
-                ),
-            )
+            // The Director holds this call until the request is approved, denied or expired.
+            val approval = directorClients.auth()
+                .finishDeviceRegistration(pairing.deviceKey, pairing.registrationId).await()
 
-            val sealed = b64Decode(response.userPrivateKey)
-            val userKey64 = DevicePairing.openUserKey(sealed, pairing.ephemeral)
+            val userKey64 = DevicePairing.openUserKey(approval.userKey, pairing.ephemeral)
             keyManager.storeUserKey(userKey64)
-
-            // Device sign-in to obtain this device's CWT now that the key is in place.
-            val authNonce = newNonce()
-            val token = api().clientAuth(
-                ClientAuthRequest(
-                    userId = response.userId,
-                    deviceId = deviceId,
-                    nonce = b64(authNonce),
-                    deviceSig = b64(BosonCrypto.sign(pairing.deviceKey, authNonce)),
-                ),
-            ).token
-            tokenStore.setToken(token)
+            val userId = approval.userId.toString()
+            sessionStore.setSession(userId)
 
             // Pairing registered this device server-side: record the super node so the first bring-up
             // after pairing skips re-registration (its presence also marks the key as registered).
-            keyManager.setRegisteredNodeId(api().getNodeId().id)
+            keyManager.setRegisteredNodeId(directorClients.client().nodeId.await().toString())
 
             active = null
-            response.userId
+            userId
         }
     }
 
     override suspend fun readRequest(qrText: String): Result<PairingRequestInfo> = runCatching {
         val payload = decodePayload(qrText)
-        val info = api().getRegistration(payload.registrationId)
+        val info = directorClients.client().getDeviceRegistration(payload.registrationId).await()
         PairingRequestInfo(
             registrationId = payload.registrationId,
-            deviceId = info.deviceId,
-            deviceName = info.deviceName?.takeIf { it.isNotBlank() }
+            deviceId = info.deviceId.toString(),
+            deviceName = info.deviceName.takeIf { it.isNotBlank() }
                 ?: context.getString(R.string.settings_default_device_name),
-            appName = info.appName?.takeIf { it.isNotBlank() }
+            appName = info.appName.takeIf { it.isNotBlank() }
                 ?: context.getString(R.string.settings_about_app_name),
         )
     }
@@ -208,42 +163,24 @@ class DevicePairingRepositoryImpl @Inject constructor(
             val userKey = keyManager.userKeyPair()
                 ?: throw AppError.InvalidInput(context.getString(R.string.settings_pairing_error_no_identity))
             val userKey64 = BosonCrypto.privateKeyBytes64(userKey)
+            // Sealed to the new device's ephemeral key: the Director relays it without reading it.
             val sealed = DevicePairing.sealUserKey(userKey64, payload.ephemeralPublicKey)
-            api().replyRegistration(
-                payload.registrationId,
-                ReplyRegistrationRequest(
-                    approved = true,
-                    passphrase = passphrase,
-                    userPrivateKey = b64(sealed),
-                ),
-            )
+            directorClients.client().approveDeviceRegistration(payload.registrationId, sealed, passphrase).await()
             Unit
         }
     }.mapDirectorError()
 
     override suspend fun deny(qrText: String): Result<Unit> = runCatching {
         val payload = decodePayload(qrText)
-        api().replyRegistration(payload.registrationId, ReplyRegistrationRequest(approved = false))
+        directorClients.client().denyDeviceRegistration(payload.registrationId).await()
+        Unit
     }
 
     private fun decodePayload(qrText: String): PairingPayload =
         PairingPayload.decode(qrText)
             ?: throw AppError.InvalidInput(context.getString(R.string.settings_pairing_error_invalid_code))
 
-    private fun newNonce(): ByteArray = ByteArray(NONCE_BYTES).also { RANDOM.nextBytes(it) }
-
-    private fun b64(bytes: ByteArray): String = B64URL.encodeToString(bytes)
-
-    private fun b64Decode(text: String): ByteArray = B64URL_DEC.decode(text)
-
-    /** Re-wraps a Director HTTP failure as an [AppError] so the UI can tell 428/403 apart (M6 passphrase). */
+    /** Re-wraps a Director failure as an [AppError] so the UI can tell 428/403 apart (M6 passphrase). */
     private fun <T> Result<T>.mapDirectorError(): Result<T> =
         recoverCatching { throw it.toDirectorError() }
-
-    private companion object {
-        const val NONCE_BYTES = 32
-        val RANDOM = SecureRandom()
-        val B64URL: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()
-        val B64URL_DEC: Base64.Decoder = Base64.getUrlDecoder()
-    }
 }

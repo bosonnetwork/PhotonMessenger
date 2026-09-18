@@ -24,26 +24,21 @@ package io.bosonnetwork.photon.feature.settings.data
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.bosonnetwork.director.client.ProfileUpdate
 import io.bosonnetwork.photon.core.boson.BosonSessionManager
+import io.bosonnetwork.photon.core.boson.DirectorAvatars
+import io.bosonnetwork.photon.core.boson.DirectorClients
 import io.bosonnetwork.photon.core.boson.KeyManager
 import io.bosonnetwork.photon.core.boson.awaitResult
+import io.bosonnetwork.photon.core.boson.toDirectorError
 import io.bosonnetwork.photon.core.model.AppError
-import io.bosonnetwork.photon.core.model.AuthTokenStore
+import io.bosonnetwork.photon.core.model.SessionStore
 import io.bosonnetwork.photon.core.model.NotificationPreferences
 import io.bosonnetwork.photon.core.model.ThemeMode
 import io.bosonnetwork.photon.core.model.ThemePreferences
 import io.bosonnetwork.photon.core.model.shortId
-import io.bosonnetwork.photon.core.network.DirectorApi
-import io.bosonnetwork.photon.core.network.DirectorApiFactory
-import io.bosonnetwork.photon.core.network.DirectorConfig
-import io.bosonnetwork.photon.core.network.DirectorConfigStore
 import io.bosonnetwork.photon.core.network.NotificationPreferencesStore
 import io.bosonnetwork.photon.core.network.ThemePreferencesStore
-import io.bosonnetwork.photon.core.network.model.ClearPassphraseRequest
-import io.bosonnetwork.photon.core.network.model.RemoveDeviceRequest
-import io.bosonnetwork.photon.core.network.model.SetPassphraseRequest
-import io.bosonnetwork.photon.core.network.model.UpdateProfileRequest
-import io.bosonnetwork.photon.core.network.toDirectorError
 import io.bosonnetwork.photon.feature.settings.R
 import io.bosonnetwork.photon.feature.settings.model.UiDevice
 import io.bosonnetwork.photon.feature.settings.model.UiProfile
@@ -52,9 +47,7 @@ import io.bosonnetwork.photonmessaging.SessionInfo
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
+import kotlinx.coroutines.future.await
 
 /**
  * Settings backend (spec 2.6, screen 6, M6-1/2/3/5/7): profile + avatar over the Director, the
@@ -101,53 +94,43 @@ interface SettingsRepository {
     suspend fun setNotificationsEnabled(enabled: Boolean): Result<Unit>
     suspend fun setNotificationPreview(showPreview: Boolean): Result<Unit>
 
-    /** Drops the Director session, disconnects messaging, and wipes the token + local keys (M6-7). */
+    /** Ends the session and disconnects messaging; the profile's keys and data stay (M6-7). */
     suspend fun signOut(): Result<Unit>
 }
 
 @Singleton
 class SettingsRepositoryImpl @Inject constructor(
-    private val apiFactory: DirectorApiFactory,
-    private val configStore: DirectorConfigStore,
+    private val directorClients: DirectorClients,
     private val themeStore: ThemePreferencesStore,
     private val notificationStore: NotificationPreferencesStore,
-    private val tokenStore: AuthTokenStore,
+    private val sessionStore: SessionStore,
     private val keyManager: KeyManager,
     private val session: BosonSessionManager,
     private val avatarPreparer: AvatarPreparer,
     @ApplicationContext private val context: Context,
 ) : SettingsRepository {
 
-    @Volatile
-    private var cachedApi: Pair<DirectorConfig, DirectorApi>? = null
-
-    private suspend fun config(): DirectorConfig = configStore.config.first()
-
-    private suspend fun api(): DirectorApi {
-        val cfg = config()
-        cachedApi?.let { (cached, api) -> if (cached == cfg) return api }
-        return apiFactory.create(cfg).also { cachedApi = cfg to it }
-    }
+    private suspend fun director() = directorClients.client()
 
     override val themePreferences: Flow<ThemePreferences> = themeStore.preferences
 
     override val notificationPreferences: Flow<NotificationPreferences> = notificationStore.preferences
 
     override suspend fun loadProfile(): Result<UiProfile> = runCatching {
-        val cfg = config()
-        val dto = api().getProfile()
-        // Avatar is read from the public, auth-less endpoint; bust caches when the profile changes.
-        val avatarUrl = dto.avatar?.takeIf { it.isNotBlank() }?.let {
-            "${cfg.baseUrl}/api/v1/client/avatar/${dto.id}?v=${dto.updatedAt}"
+        val profile = director().profile.await()
+        val id = profile.id.toString()
+        // Bust the image cache when the profile changes.
+        val avatarUrl = profile.avatar.orElse(null)?.takeIf { it.isNotBlank() }?.let {
+            DirectorAvatars.uri(id, profile.updatedAt)
         }
         UiProfile(
-            id = dto.id,
-            name = dto.name.orEmpty(),
-            bio = dto.bio.orEmpty(),
-            email = dto.email.orEmpty(),
+            id = id,
+            name = profile.name.orElse(""),
+            bio = profile.bio.orElse(""),
+            email = profile.email.orElse(""),
             avatarUrl = avatarUrl,
-            plan = dto.planName,
-            passphraseProtected = dto.passphraseProtected,
+            plan = profile.planName,
+            passphraseProtected = profile.isPassphraseProtected,
         )
     }
 
@@ -157,25 +140,38 @@ class SettingsRepositoryImpl @Inject constructor(
         email: String?,
         passphrase: String?,
     ): Result<Unit> = runCatching {
-        api().updateProfile(UpdateProfileRequest(name = name, bio = bio, email = email, passphrase = passphrase))
+        // Only the fields given are changed; a null one is left as it is, never cleared.
+        if (name == null && bio == null && email == null) return@runCatching
+        val update = ProfileUpdate()
+        name?.let { update.name(it) }
+        bio?.let { update.bio(it) }
+        email?.let { update.email(it) }
+        director().updateProfile(update, passphrase).await()
+        Unit
     }.mapDirectorError()
 
     override suspend fun setPassphrase(newPassphrase: String, currentPassphrase: String?): Result<Unit> = runCatching {
-        api().setPassphrase(SetPassphraseRequest(passphrase = newPassphrase, currentPassphrase = currentPassphrase))
+        val director = director()
+        if (currentPassphrase == null) director.setPassphrase(newPassphrase).await()
+        else director.updatePassphrase(currentPassphrase, newPassphrase).await()
+        Unit
     }.mapDirectorError()
 
     override suspend fun clearPassphrase(currentPassphrase: String): Result<Unit> = runCatching {
-        api().clearPassphrase(ClearPassphraseRequest(passphrase = currentPassphrase))
+        director().clearPassphrase(currentPassphrase).await()
+        Unit
     }.mapDirectorError()
 
     override suspend fun updateAvatar(uriString: String): Result<Unit> = runCatching {
         val prepared = avatarPreparer.prepare(uriString)
-        val body = prepared.bytes.toRequestBody(prepared.mime.toMediaType())
-        api().updateAvatar(body)
+        director().updateAvatar(prepared.bytes, prepared.mime).await()
         Unit
     }
 
-    override suspend fun removeAvatar(): Result<Unit> = runCatching { api().removeAvatar() }
+    override suspend fun removeAvatar(): Result<Unit> = runCatching {
+        director().removeAvatar().await()
+        Unit
+    }
 
     override suspend fun loadSessions(): Result<List<UiDevice>> = runCatching {
         // This screen lists messaging *sessions* (a service-level concept), not the Director device
@@ -187,8 +183,8 @@ class SettingsRepositoryImpl @Inject constructor(
         val currentDeviceId = client.deviceId?.toString()
         val sessions: List<SessionInfo> = client.getSessions().awaitResult()
 
-        val devicesById = runCatching { api().getDevices() }.getOrNull()
-            ?.associateBy { it.id }
+        val devicesById = runCatching { director().listDevices().await() }.getOrNull()
+            ?.associateBy { it.id.toString() }
             ?: emptyMap()
 
         sessions.map { s ->
@@ -197,10 +193,10 @@ class SettingsRepositoryImpl @Inject constructor(
             UiDevice(
                 deviceId = id,
                 name = device?.name?.takeIf { it.isNotBlank() } ?: shortId(id),
-                app = device?.app,
+                app = device?.app?.takeIf { it.isNotBlank() },
                 online = s.online(),
                 lastActive = maxOf(s.lastActive(), device?.lastSeen ?: 0L),
-                lastAddress = s.lastAddress()?.takeIf { it.isNotBlank() } ?: device?.lastAddress,
+                lastAddress = s.lastAddress()?.takeIf { it.isNotBlank() } ?: device?.lastAddress?.orElse(null),
                 registeredAt = device?.createdAt ?: 0L,
                 isCurrent = id == currentDeviceId,
             )
@@ -212,16 +208,17 @@ class SettingsRepositoryImpl @Inject constructor(
         // not it has a live messaging session. The current device is identified from the local device
         // key so it resolves even while the messaging client is disconnected.
         val currentDeviceId = keyManager.deviceId()?.toString()
-        api().getDevices().map { d ->
+        director().listDevices().await().map { d ->
+            val id = d.id.toString()
             UiDevice(
-                deviceId = d.id,
-                name = d.name?.takeIf { it.isNotBlank() } ?: shortId(d.id),
-                app = d.app,
+                deviceId = id,
+                name = d.name.takeIf { it.isNotBlank() } ?: shortId(id),
+                app = d.app.takeIf { it.isNotBlank() },
                 online = false,
                 lastActive = d.lastSeen,
-                lastAddress = d.lastAddress,
+                lastAddress = d.lastAddress.orElse(null),
                 registeredAt = d.createdAt,
-                isCurrent = d.id == currentDeviceId,
+                isCurrent = id == currentDeviceId,
             )
         }.sortedByDescending { it.lastActive } // most-recently-active first; no last-active (0) sinks to the end
     }
@@ -234,7 +231,8 @@ class SettingsRepositoryImpl @Inject constructor(
     }
 
     override suspend fun removeDevice(deviceId: String, passphrase: String?): Result<Unit> = runCatching {
-        api().removeDevice(deviceId, RemoveDeviceRequest(passphrase = passphrase))
+        director().removeDevice(parseId(deviceId), passphrase).await()
+        Unit
     }.mapDirectorError()
 
     override suspend fun setThemeMode(mode: ThemeMode): Result<Unit> = runCatching {
@@ -254,10 +252,8 @@ class SettingsRepositoryImpl @Inject constructor(
     }
 
     override suspend fun signOut(): Result<Unit> = runCatching {
-        runCatching { api().signOut() }
         runCatching { session.disconnect() }
-        tokenStore.clear()
-        cachedApi = null
+        sessionStore.clear()
         // Sign-out ends the session only; the profile's keys, registered-node marker, and local data
         // are retained (this device is federated - the client owns the permanent data). Removing an
         // identity is an explicit delete-profile action.

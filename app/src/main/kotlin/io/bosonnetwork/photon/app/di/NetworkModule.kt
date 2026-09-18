@@ -25,19 +25,15 @@ package io.bosonnetwork.photon.app.di
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
-import io.bosonnetwork.photon.app.session.ClientAuthReminter
-import io.bosonnetwork.photon.core.boson.BosonDirectorTrustManagerProvider
+import io.bosonnetwork.photon.core.boson.DirectorClients
+import io.bosonnetwork.photon.core.boson.DirectorProfileResolver
 import io.bosonnetwork.photon.core.boson.KeyManager
 import io.bosonnetwork.photon.core.security.ProfileManager
-import io.bosonnetwork.photon.core.model.AuthTokenStore
 import io.bosonnetwork.photon.core.model.ProfileResolver
-import io.bosonnetwork.photon.core.network.DirectorApiFactory
 import io.bosonnetwork.photon.core.network.DirectorConfigStore
-import io.bosonnetwork.photon.core.network.DirectorProfileResolver
-import io.bosonnetwork.photon.core.network.DirectorTrustManagerProvider
 import io.bosonnetwork.photon.core.network.NotificationPreferencesStore
-import io.bosonnetwork.photon.core.network.SessionReminter
 import io.bosonnetwork.photon.core.network.ThemePreferencesStore
+import io.vertx.core.Vertx
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -72,40 +68,22 @@ object NetworkModule {
     fun provideNotificationPreferencesStore(dataStore: DataStore<Preferences>): NotificationPreferencesStore =
         NotificationPreferencesStore(dataStore)
 
+    /** All Director communication of the active profile, on the shared Vert.x runtime. */
     @Provides
     @Singleton
-    fun provideDirectorTrustManagerProvider(): DirectorTrustManagerProvider =
-        BosonDirectorTrustManagerProvider()
-
-    @Provides
-    @Singleton
-    fun provideSessionReminter(
+    fun provideDirectorClients(
+        vertx: Vertx,
         configStore: DirectorConfigStore,
         keyManager: KeyManager,
-    ): SessionReminter = ClientAuthReminter(configStore, keyManager)
-
-    @Provides
-    @Singleton
-    fun provideDirectorApiFactory(
-        tokenStore: AuthTokenStore,
-        trustManagerProvider: DirectorTrustManagerProvider,
-        sessionReminter: SessionReminter,
-    ): DirectorApiFactory =
-        DirectorApiFactory(tokenStore, trustManagerProvider, sessionReminter)
+    ): DirectorClients = DirectorClients(vertx, configStore, keyManager)
 
     /**
-     * Resolves public profiles (name/bio/avatar) for ANY user id from the Director's
-     * `GET /api/v1/client/profile/{userId}`, with in-memory TTL caching. Enriches friend requests,
-     * channel member lists, and chat sender names beyond what the Boson library provides locally.
+     * Resolves public profiles (name/bio/avatar) for ANY user id from the Director, with in-memory TTL
+     * caching. Enriches friend requests, channel member lists, and chat sender names beyond what the
+     * Boson library provides locally.
      */
     @Provides
     @Singleton
-    fun provideProfileResolver(
-        apiFactory: DirectorApiFactory,
-        configStore: DirectorConfigStore,
-    ): ProfileResolver = DirectorProfileResolver(
-        apiFactory = apiFactory,
-        configStore = configStore,
-        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
-    )
+    fun provideProfileResolver(clients: DirectorClients): ProfileResolver =
+        DirectorProfileResolver.create(clients, CoroutineScope(SupervisorJob() + Dispatchers.IO))
 }

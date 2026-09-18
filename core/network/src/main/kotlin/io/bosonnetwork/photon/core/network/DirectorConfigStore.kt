@@ -38,10 +38,8 @@ class DirectorConfigStore(
     private val dataStore: DataStore<Preferences>,
 ) {
     val config: Flow<DirectorConfig> = dataStore.data.map { prefs ->
-        val baseUrl = prefs[BASE_URL]?.trimEnd('/') ?: DEFAULT_DIRECTOR_URL
         DirectorConfig(
-            baseUrl = baseUrl,
-            certificatePins = KnownDirectorPins.pinsFor(baseUrl),
+            baseUrl = prefs[BASE_URL]?.trimEnd('/') ?: DEFAULT_DIRECTOR_URL,
             nodeId = prefs[NODE_ID]?.takeIf { it.isNotBlank() },
         )
     }

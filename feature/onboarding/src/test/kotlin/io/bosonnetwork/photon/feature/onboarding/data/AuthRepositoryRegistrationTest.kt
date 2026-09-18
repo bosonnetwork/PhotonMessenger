@@ -26,27 +26,30 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import io.bosonnetwork.Id
 import io.bosonnetwork.photon.core.boson.BosonCrypto
+import io.bosonnetwork.photon.core.boson.DirectorClients
 import io.bosonnetwork.photon.core.boson.KeyManager
-import io.bosonnetwork.photon.core.model.AuthTokenStore
-import io.bosonnetwork.photon.core.network.DirectorApiFactory
+import io.bosonnetwork.photon.core.model.AppError
+import io.bosonnetwork.photon.core.model.SessionStore
 import io.bosonnetwork.photon.core.network.DirectorConfigStore
 import io.bosonnetwork.photon.core.security.ProfileManager
 import io.bosonnetwork.photon.core.security.SecretStore
+import io.bosonnetwork.utils.Base58
 import io.mockk.every
 import io.mockk.mockk
+import io.vertx.core.Vertx
+import io.vertx.core.http.HttpServer
 import java.io.File
 import java.security.SecureRandom
 import java.util.Base64
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
-import okhttp3.mockwebserver.Dispatcher
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
-import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -59,39 +62,51 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 /**
- * Device registration management semantics: the connect path probes the Director's super node id
- * (public GET /client/id) and skips re-registration while the stored registered-node id matches; a
- * node change re-registers. (Rotation of the device key on identity change lives in KeyManager's
- * ensureDeviceKeyFor / AuthRepository.adoptIdentity and is unit-tested in KeyManagerTest.)
+ * The account flows of [AuthRepository] against a stand-in Director, through the real Director client:
+ * device registration management (the connect path probes the super node id and skips re-registration
+ * while the stored registered-node id matches; a node change re-registers), the OAuth session, proof-of-
+ * work registration, key import, and the profile each identity lands in. (Rotation of the device key on
+ * identity change lives in KeyManager's ensureDeviceKeyFor / AuthRepository.adoptIdentity and is
+ * unit-tested in KeyManagerTest.)
  */
 class AuthRepositoryRegistrationTest {
 
     @get:Rule
     val tmp = TemporaryFolder()
 
-    private lateinit var server: MockWebServer
+    /** A request as the stand-in Director received it. */
+    private data class Received(val method: String, val path: String, val body: String)
+
+    /** The stand-in Director's answer: a status and an optional JSON body. */
+    private data class Answer(val status: Int, val json: String? = null)
+
+    private lateinit var vertx: Vertx
+    private lateinit var server: HttpServer
+    private val received = CopyOnWriteArrayList<Received>()
+
+    /** Answers every request; each test sets what the Director does. */
+    @Volatile
+    private var director: (Received) -> Answer = { Answer(404) }
+
     private lateinit var scope: CoroutineScope
     private lateinit var keyManager: KeyManager
     private lateinit var configStore: DirectorConfigStore
     private lateinit var profileManager: ProfileManager
     private lateinit var repository: AuthRepository
-    private lateinit var repoTokenStore: FakeTokenStore
+    private lateinit var sessionStore: FakeSessionStore
 
     /** Relaxed: only used to resolve user-facing error strings, whose exact text no test checks. */
     private fun fakeContext(): Context = mockk(relaxed = true)
 
     /** The super node id the Director's GET /client/id currently reports. */
-    private var nodeId = "NODE-1"
+    private val node1 = Id.random().toString()
+    private val node2 = Id.random().toString()
+    private var nodeId = node1
 
-    /** Mirrors EncryptedAuthTokenStore: an in-memory-only session token takes precedence over the
-     *  persisted [token]; setToken persists (and drops the override); clear wipes both. */
-    private class FakeTokenStore(@Volatile var token: String? = "cwt") : AuthTokenStore {
-        @Volatile private var session: String? = null
-        override fun currentToken(): String? = session ?: token
-        override suspend fun setToken(token: String?) { this.token = token; session = null }
-        override suspend fun clear() { token = null; session = null }
-        override fun setSessionOnly(token: String?) { session = token }
-        override fun clearSessionOnly() { session = null }
+    private class FakeSessionStore(@Volatile var session: String? = null) : SessionStore {
+        override fun currentSession(): String? = session
+        override suspend fun setSession(userId: String?) { session = userId }
+        override suspend fun clear() { session = null }
     }
 
     private fun inMemorySecrets(): SecretStore {
@@ -109,8 +124,18 @@ class AuthRepositoryRegistrationTest {
 
     @Before
     fun setUp() {
-        server = MockWebServer()
-        server.start()
+        vertx = Vertx.vertx()
+        server = vertx.createHttpServer().requestHandler { req ->
+            req.body().onSuccess { body ->
+                val request = Received(req.method().name(), req.path(), body.toString())
+                received += request
+                val answer = director(request)
+                val response = req.response().setStatusCode(answer.status)
+                if (answer.json != null) response.putHeader("Content-Type", "application/json").end(answer.json)
+                else response.end()
+            }
+        }.listen(0, "127.0.0.1").toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS)
+
         scope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher())
         val dataStore: DataStore<Preferences> = PreferenceDataStoreFactory.create(scope = scope) {
             File(tmp.root, "auth_test.preferences_pb")
@@ -118,11 +143,11 @@ class AuthRepositoryRegistrationTest {
         keyManager = KeyManager(inMemorySecrets())
         configStore = DirectorConfigStore(dataStore)
         profileManager = ProfileManager(tmp.newFolder("files"), tmp.newFolder("cache"))
-        repoTokenStore = FakeTokenStore()
+        sessionStore = FakeSessionStore()
         repository = AuthRepository(
-            apiFactory = DirectorApiFactory(FakeTokenStore()),
+            directorClients = DirectorClients(vertx, configStore, keyManager),
             configStore = configStore,
-            tokenStore = repoTokenStore,
+            sessionStore = sessionStore,
             keyManager = keyManager,
             profileManager = profileManager,
             context = fakeContext(),
@@ -131,47 +156,45 @@ class AuthRepositoryRegistrationTest {
 
     @After
     fun tearDown() {
-        server.shutdown()
         scope.cancel()
+        vertx.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS)
     }
 
-    private fun baseUrl(): String = server.url("/").toString().trimEnd('/')
+    private fun baseUrl(): String = "http://127.0.0.1:${server.actualPort()}"
 
+    /** An active profile signed in to an identity of its own. */
     private suspend fun givenSignedInUser(): String {
         configStore.setBaseUrl(baseUrl())
         val userKey = keyManager.generateUserKey()
-        return BosonCrypto.idOf(userKey).toString()
+        return BosonCrypto.idOf(userKey).toString().also { sessionStore.session = it }
     }
+
+    private fun Received.isTo(method: String, suffix: String) = this.method == method && path.endsWith(suffix)
+
+    // The Director client reads the node id to address the tokens it issues, so every stand-in answers it.
+    private fun nodeIdAnswer() = Answer(200, """{"id":"$nodeId"}""")
+
+    private fun profileJson(passphraseProtected: Boolean = false) =
+        """{"id":"${Id.random()}","planName":"Free","passphraseProtected":$passphraseProtected}"""
 
     /** Responds to the node-id probe, profile lookups (not passphrase protected), and registrations. */
     private fun serveDirector(addDeviceCode: Int = 201) {
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse = when {
-                request.path!!.endsWith("/client/id") ->
-                    MockResponse().setBody("""{"id":"$nodeId"}""")
-                request.path!!.endsWith("/client/profile") ->
-                    MockResponse().setBody("""{"id":"USER","passphraseProtected":false}""")
-                request.path!!.endsWith("/client/devices") ->
-                    MockResponse().setResponseCode(addDeviceCode).setBody("""{"token":"cwt2"}""")
-                else -> MockResponse().setResponseCode(404)
+        director = { r ->
+            when {
+                r.isTo("GET", "/client/id") -> nodeIdAnswer()
+                r.isTo("GET", "/client/profile") -> Answer(200, profileJson())
+                r.isTo("POST", "/client/devices") -> Answer(addDeviceCode)
+                else -> Answer(404)
             }
         }
     }
 
-    /** requestCount is cumulative, so track how many recorded requests were already consumed. */
+    /** Requests already looked at, so each check sees only the new ones. */
     private var taken = 0
 
-    private fun drainRequests(): List<RecordedRequest> {
-        val drained = mutableListOf<RecordedRequest>()
-        while (taken < server.requestCount) {
-            drained += server.takeRequest()
-            taken++
-        }
-        return drained
-    }
+    private fun drainRequests(): List<Received> = received.drop(taken).also { taken = received.size }
 
-    private fun countDeviceRegistrations(): Int =
-        drainRequests().count { it.path!!.endsWith("/client/devices") }
+    private fun countDeviceRegistrations(): Int = drainRequests().count { it.isTo("POST", "/client/devices") }
 
     @Test
     fun `ensureDeviceRegistered registers once then skips re-registering on the same node`() = runTest {
@@ -179,7 +202,7 @@ class AuthRepositoryRegistrationTest {
         serveDirector()
 
         repository.ensureDeviceRegistered()
-        assertTrue(server.requestCount > 0)
+        assertTrue(received.isNotEmpty())
         assertEquals(nodeId, keyManager.registeredNodeId())
 
         repository.ensureDeviceRegistered()
@@ -193,14 +216,14 @@ class AuthRepositoryRegistrationTest {
         givenSignedInUser()
         serveDirector()
         repository.ensureDeviceRegistered()
-        assertEquals("NODE-1", keyManager.registeredNodeId())
+        assertEquals(node1, keyManager.registeredNodeId())
 
         // The configured Director now reports a different super node.
-        nodeId = "NODE-2"
+        nodeId = node2
         repository.ensureDeviceRegistered()
 
         assertEquals(2, countDeviceRegistrations())
-        assertEquals("NODE-2", keyManager.registeredNodeId())
+        assertEquals(node2, keyManager.registeredNodeId())
     }
 
     @Test
@@ -229,16 +252,14 @@ class AuthRepositoryRegistrationTest {
     fun `ensureDeviceRegistered is a no-op without a local identity`() = runTest {
         configStore.setBaseUrl(baseUrl())
         repository.ensureDeviceRegistered()
-        assertEquals(0, server.requestCount)
+        assertTrue(received.isEmpty())
     }
 
     @Test
     fun `an unreachable node-id probe skips registration`() = runTest {
         givenSignedInUser()
-        // No dispatcher configured to answer /client/id successfully.
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(404)
-        }
+        // Nothing answers /client/id successfully.
+        director = { Answer(404) }
 
         repository.ensureDeviceRegistered()
 
@@ -256,6 +277,7 @@ class AuthRepositoryRegistrationTest {
         repository.signOut()
 
         // Sign-out ends the session only: the profile's key + registered node persist for re-auth.
+        assertNull(sessionStore.session)
         assertNotNull(keyManager.registeredNodeId())
         assertTrue(keyManager.hasUserKey())
     }
@@ -271,71 +293,80 @@ class AuthRepositoryRegistrationTest {
     fun `checkNodeMigration detects a deliberate node change`() = runTest {
         givenSignedInUser()
         serveDirector()
-        repository.ensureDeviceRegistered() // registers on NODE-1
+        repository.ensureDeviceRegistered() // registers on node1
         assertNull("same node is not a migration", repository.checkNodeMigration())
 
-        nodeId = "NODE-2" // the configured Director now reports a different super node
+        nodeId = node2 // the configured Director now reports a different super node
         val migration = repository.checkNodeMigration()
-        assertEquals("NODE-1", migration?.fromNodeId)
-        assertEquals("NODE-2", migration?.toNodeId)
+        assertEquals(node1, migration?.fromNodeId)
+        assertEquals(node2, migration?.toNodeId)
     }
 
-    /**
-     * Serves auth/me with the given bound identity (null = no bound identity), plus client/auth (the
-     * Authenticated branch of currentSession re-mints a Boson-identity session from the local key).
-     */
+    /** Serves auth/me with the given bound identity (null = no bound identity). */
     private fun serveMe(userId: String?) {
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse = when {
-                request.path!!.endsWith("/auth/me") -> {
-                    val body = if (userId != null) """{"sessionId":"s1","userId":"$userId"}"""
-                    else """{"sessionId":"s1"}"""
-                    MockResponse().setBody(body)
-                }
-                request.path!!.endsWith("/client/auth") -> MockResponse().setBody("""{"token":"cwt-user"}""")
-                else -> MockResponse().setResponseCode(404)
+        val sessionId = Id.random()
+        director = { r ->
+            when {
+                r.isTo("GET", "/auth/me") -> Answer(
+                    200,
+                    if (userId != null) """{"sessionId":"$sessionId","userId":"$userId"}"""
+                    else """{"sessionId":"$sessionId"}""",
+                )
+                else -> Answer(404)
             }
         }
     }
 
     @Test
-    fun `currentSession is Authenticated when the account matches the local key`() = runTest {
+    fun `an OAuth session for the local identity is Authenticated and signs in`() = runTest {
         val userId = givenSignedInUser()
+        sessionStore.session = null // signed out earlier; signing back in through OAuth
         serveMe(userId)
-        assertTrue(repository.currentSession() is SessionState.Authenticated)
+        assertTrue(repository.onAuthToken("oauth-token") is SessionState.Authenticated)
+        // The session recorded is the identity, never the OAuth token.
+        assertEquals(userId, sessionStore.session)
+        assertTrue("the OAuth token authenticated the session lookup", received.any { it.isTo("GET", "/auth/me") })
     }
 
     @Test
-    fun `currentSession reuses an existing profile bound to the signed-in identity`() = runTest {
+    fun `an OAuth session reuses an existing profile bound to the signed-in identity`() = runTest {
         givenSignedInUser() // active profile key = some identity U
         // Another on-device profile is already bound to the account's identity.
+        val otherUser = Id.random().toString()
         val other = profileManager.createProfile()
-        profileManager.bindUserId(other, "USER-OTHER", displayName = null, homeNodeId = null)
-        serveMe("USER-OTHER")
-        val state = repository.currentSession()
+        profileManager.bindUserId(other, otherUser, displayName = null, homeNodeId = null)
+        serveMe(otherUser)
+        val state = repository.onAuthToken("oauth-token")
         assertEquals(other, (state as? SessionState.ReuseProfile)?.profileId)
-        assertEquals("USER-OTHER", (state as? SessionState.ReuseProfile)?.userId)
+        assertEquals(otherUser, (state as? SessionState.ReuseProfile)?.userId)
     }
 
     @Test
-    fun `currentSession imports the key in-context when a bound account's identity is not on this device`() = runTest {
+    fun `an OAuth session imports the key in-context when a bound account's identity is not on this device`() = runTest {
         givenSignedInUser() // active profile key = some identity U (no profile for the account's identity)
-        serveMe("USER-OTHER") // the account is bound to a different identity
+        val otherUser = Id.random().toString()
+        serveMe(otherUser) // the account is bound to a different identity
         // No pre-key handoff: import in the current context and let the commit resolve the profile.
-        val state = repository.currentSession()
-        assertEquals("USER-OTHER", (state as? SessionState.NeedsKey)?.userId)
+        val state = repository.onAuthToken("oauth-token")
+        assertEquals(otherUser, (state as? SessionState.NeedsKey)?.userId)
     }
 
     @Test
-    fun `currentSession creates an identity in-context for an unbound account`() = runTest {
+    fun `an OAuth session creates an identity in-context for an unbound account`() = runTest {
         givenSignedInUser()
         serveMe(null) // the account has no bound identity
-        assertTrue(repository.currentSession() is SessionState.NeedsIdentity)
+        assertTrue(repository.onAuthToken("oauth-token") is SessionState.NeedsIdentity)
+    }
+
+    @Test
+    fun `currentSession without an OAuth session is unauthorized`() = runTest {
+        givenSignedInUser()
+        assertThrows(AppError.Unauthorized::class.java) {
+            kotlinx.coroutines.runBlocking { repository.currentSession() }
+        }
     }
 
     // --- Permissionless proof-of-work registration + self-sovereign key import ---
-
-    private fun realNodeId(): String = BosonCrypto.idOf(BosonCrypto.generateKeyPair()).toString()
 
     private fun randomNonceB64(): String {
         val bytes = ByteArray(32).also { SecureRandom().nextBytes(it) }
@@ -350,39 +381,35 @@ class AuthRepositoryRegistrationTest {
     @Test
     fun `powAvailable is false when the challenge endpoint 404s`() = runTest {
         configStore.setBaseUrl(baseUrl())
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse =
-                if (request.path!!.endsWith("/client/users/challenge")) MockResponse().setResponseCode(404)
-                else MockResponse().setResponseCode(500)
-        }
+        director = { r -> if (r.isTo("GET", "/client/users/challenge")) Answer(404) else Answer(500) }
         assertEquals(false, repository.powAvailable())
     }
 
     @Test
     fun `powAvailable is true when the challenge endpoint answers`() = runTest {
         configStore.setBaseUrl(baseUrl())
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse =
-                MockResponse().setBody(challengeJson(randomNonceB64()))
-        }
+        director = { Answer(200, challengeJson(randomNonceB64())) }
         assertTrue(repository.powAvailable())
     }
 
-    @Test
-    fun `createAccountWithPow solves the challenge and persists identity, token and node`() = runTest {
-        val node = realNodeId()
-        configStore.setBaseUrl(baseUrl())
+    /** Answers a proof-of-work registration of a user with its initial device. */
+    private fun serveRegistration(registrationCode: Int = 201) {
         val nonceB64 = randomNonceB64()
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse = when {
-                request.path!!.endsWith("/client/id") -> MockResponse().setBody("""{"id":"$node"}""")
-                request.path!!.endsWith("/client/users/challenge") ->
-                    MockResponse().setBody(challengeJson(nonceB64))
-                request.path!!.endsWith("/client/usersAndInitialDevice") ->
-                    MockResponse().setResponseCode(201).setBody("""{"token":"cwt-pow"}""")
-                else -> MockResponse().setResponseCode(404)
+        director = { r ->
+            when {
+                r.isTo("GET", "/client/id") -> nodeIdAnswer()
+                r.isTo("GET", "/client/users/challenge") -> Answer(200, challengeJson(nonceB64))
+                r.isTo("POST", "/client/usersAndInitialDevice") -> Answer(registrationCode, """{"token":"issued"}""")
+                r.isTo("GET", "/client/profile") -> Answer(200, profileJson())
+                else -> Answer(404)
             }
         }
+    }
+
+    @Test
+    fun `createAccountWithPow solves the challenge and persists identity, session and node`() = runTest {
+        configStore.setBaseUrl(baseUrl())
+        serveRegistration()
 
         // A fresh-scratch active profile hosts the new identity: it is persisted locally.
         val state = repository.createAccountWithPow("Alice", "hello", null) as SessionState.Authenticated
@@ -390,40 +417,62 @@ class AuthRepositoryRegistrationTest {
 
         assertTrue(keyManager.hasUserKey())
         assertEquals(userId, keyManager.userId()?.toString())
-        assertEquals("cwt-pow", repoTokenStore.token)
-        assertEquals(node, keyManager.registeredNodeId())
+        assertEquals(userId, sessionStore.session)
+        assertEquals(nodeId, keyManager.registeredNodeId())
 
-        val body = drainRequests().first { it.path!!.endsWith("/client/usersAndInitialDevice") }.body.readUtf8()
+        val body = drainRequests().first { it.isTo("POST", "/client/usersAndInitialDevice") }.body
         assertTrue(
             "the request carries the solved PoW fields",
             body.contains("solution") && body.contains("powNonce") &&
                 body.contains("userSig") && body.contains("deviceSig"),
         )
+        assertTrue("the entered name is registered", body.contains("Alice"))
     }
 
     @Test
-    fun `importing a key without a session signs in with the user key and never calls auth-me`() = runTest {
+    fun `createAccountWithPow recovers an already-registered identity of its own`() = runTest {
         configStore.setBaseUrl(baseUrl())
-        repoTokenStore.token = null // no OAuth session: the permissionless returning-device path
+        // A lost response: the registration went through, and the resubmit conflicts.
+        serveRegistration(registrationCode = 409)
+
+        val state = repository.createAccountWithPow("Alice", null, null) as SessionState.Authenticated
+
+        assertEquals(state.userId, sessionStore.session)
+        assertTrue("the identity is confirmed by acting as it", drainRequests().any { it.isTo("GET", "/client/profile") })
+    }
+
+    @Test
+    fun `importing a key without an OAuth session signs in with the user key and never calls auth-me`() = runTest {
+        configStore.setBaseUrl(baseUrl())
         val userKp = BosonCrypto.generateKeyPair()
         val keyText = BosonCrypto.privateKey64ToBase58(BosonCrypto.privateKeyBytes64(userKp))
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse =
-                if (request.path!!.endsWith("/client/auth")) MockResponse().setBody("""{"token":"cwt-user"}""")
-                else MockResponse().setResponseCode(404)
-        }
+        serveDirector()
 
         // A fresh-scratch active profile hosts the imported identity.
         val state = repository.importUserKeyText(keyText) as SessionState.Authenticated
 
         assertEquals(BosonCrypto.idOf(userKp).toString(), state.userId)
-        assertEquals("cwt-user", repoTokenStore.token)
+        assertEquals(state.userId, sessionStore.session)
         assertTrue(keyManager.hasUserKey())
 
         val reqs = drainRequests()
-        val authBody = reqs.first { it.path!!.endsWith("/client/auth") }.body.readUtf8()
-        assertTrue("user sign-in carries userSig", authBody.contains("userSig"))
-        assertTrue("no getMe on the self-sovereign path", reqs.none { it.path!!.endsWith("/auth/me") })
+        val profile = reqs.first { it.isTo("GET", "/client/profile") }
+        assertTrue("signed in as the user", profile.method == "GET")
+        assertTrue("no auth/me on the self-sovereign path", reqs.none { it.path.endsWith("/auth/me") })
+    }
+
+    @Test
+    fun `importing a key the Director does not know fails and stores nothing`() = runTest {
+        configStore.setBaseUrl(baseUrl())
+        val keyText = BosonCrypto.privateKey64ToBase58(BosonCrypto.privateKeyBytes64(BosonCrypto.generateKeyPair()))
+        director = { r -> if (r.isTo("GET", "/client/id")) nodeIdAnswer() else Answer(401) }
+
+        assertThrows(Exception::class.java) {
+            kotlinx.coroutines.runBlocking { repository.importUserKeyText(keyText) }
+        }
+
+        assertTrue(!keyManager.hasUserKey())
+        assertNull(sessionStore.session)
     }
 
     private fun idOfKey64(privateKey64: ByteArray): String =
@@ -431,137 +480,122 @@ class AuthRepositoryRegistrationTest {
 
     @Test
     fun `createAccountWithPow hands off to a fresh profile without touching a foreign active profile`() = runTest {
-        val node = realNodeId()
         configStore.setBaseUrl(baseUrl())
         val existingId = givenSignedInUser() // active profile already holds a DIFFERENT identity's key
-        val nonceB64 = randomNonceB64()
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse = when {
-                request.path!!.endsWith("/client/id") -> MockResponse().setBody("""{"id":"$node"}""")
-                request.path!!.endsWith("/client/users/challenge") ->
-                    MockResponse().setBody(challengeJson(nonceB64))
-                request.path!!.endsWith("/client/usersAndInitialDevice") ->
-                    MockResponse().setResponseCode(201).setBody("""{"token":"cwt-pow"}""")
-                else -> MockResponse().setResponseCode(404)
-            }
-        }
+        serveRegistration()
 
         val state = repository.createAccountWithPow("Bob", null, null) as SessionState.NewProfileForIdentity
 
-        // The seed carries the brand-new identity, its registered initial device, node and token.
+        // The seed carries the brand-new identity, its registered initial device and node.
         val seed = state.seed
         assertNotNull(seed)
         assertEquals(state.userId, seed!!.userId)
         assertEquals(state.userId, idOfKey64(seed.userPrivateKey64))
         assertNotNull(seed.devicePrivateKey64)
-        assertEquals(node, seed.registeredNodeId)
-        assertEquals("cwt-pow", seed.token)
+        assertEquals(nodeId, seed.registeredNodeId)
 
-        // The foreign active profile is untouched: its key, token and (absent) registration all stand.
+        // The foreign active profile is untouched: its key, session and (absent) registration all stand.
         assertEquals(existingId, keyManager.userId()?.toString())
         assertNull(keyManager.registeredNodeId())
-        assertEquals("cwt", repoTokenStore.token)
+        assertEquals(existingId, sessionStore.session)
     }
 
     @Test
     fun `importing a new identity into a foreign active profile hands off to a fresh profile`() = runTest {
         configStore.setBaseUrl(baseUrl())
         val existingId = givenSignedInUser() // active profile already holds a DIFFERENT identity's key
-        repoTokenStore.token = null // self-sovereign returning-device path
         val importedKp = BosonCrypto.generateKeyPair()
         val importedId = BosonCrypto.idOf(importedKp).toString()
         val keyText = BosonCrypto.privateKey64ToBase58(BosonCrypto.privateKeyBytes64(importedKp))
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse =
-                if (request.path!!.endsWith("/client/auth")) MockResponse().setBody("""{"token":"cwt-user"}""")
-                else MockResponse().setResponseCode(404)
-        }
+        serveDirector()
 
         val state = repository.importUserKeyText(keyText) as SessionState.NewProfileForIdentity
 
-        // The seed carries the imported key + token; the device registers itself on the target later.
+        // The seed carries the imported key; the device registers itself on the target later.
         val seed = state.seed
         assertNotNull(seed)
         assertEquals(importedId, state.userId)
         assertEquals(importedId, idOfKey64(seed!!.userPrivateKey64))
         assertNull(seed.devicePrivateKey64)
         assertNull(seed.registeredNodeId)
-        assertEquals("cwt-user", seed.token)
 
-        // The foreign active profile keeps its own identity and no session was written to it.
+        // The foreign active profile keeps its own identity and session.
         assertEquals(existingId, keyManager.userId()?.toString())
-        assertNull(repoTokenStore.token)
+        assertEquals(existingId, sessionStore.session)
     }
 
     @Test
     fun `importing an identity that already has a profile reuses it`() = runTest {
         configStore.setBaseUrl(baseUrl())
         givenSignedInUser() // active profile holds identity U
-        repoTokenStore.token = null // self-sovereign path
         val importedKp = BosonCrypto.generateKeyPair()
         val importedId = BosonCrypto.idOf(importedKp).toString()
         val keyText = BosonCrypto.privateKey64ToBase58(BosonCrypto.privateKeyBytes64(importedKp))
         // A different on-device profile already belongs to the imported identity.
         val other = profileManager.createProfile()
         profileManager.bindUserId(other, importedId, displayName = null, homeNodeId = null)
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse =
-                if (request.path!!.endsWith("/client/auth")) MockResponse().setBody("""{"token":"cwt-user"}""")
-                else MockResponse().setResponseCode(404)
-        }
+        serveDirector()
 
         val state = repository.importUserKeyText(keyText) as SessionState.ReuseProfile
 
         assertEquals(other, state.profileId)
         assertEquals(importedId, state.userId)
-        // The target already holds this identity's key, so only a fresh token is seeded (no device/node).
+        // The target already holds this identity's key, so no device/node is seeded.
         val seed = state.seed
         assertNotNull(seed)
         assertNull(seed!!.devicePrivateKey64)
         assertNull(seed.registeredNodeId)
-        assertEquals("cwt-user", seed.token)
     }
 
-    // --- OAuth create (bindIdentity): commit-at-end + persist ONLY a clientAuth session ---
+    // --- OAuth create (bindIdentity): commit-at-end; the OAuth token is never persisted ---
 
-    /** Answers the OAuth bind flow (nonce, bind, profile write) and the clientAuth finalize. */
+    /** Answers the OAuth session (unbound), the bind flow (nonce, bind) and the profile write. */
     private fun serveBind() {
-        val nonceB58 = realNodeId() // any valid base58 string works as the binding nonce
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse = when {
-                request.path!!.endsWith("/auth/user-identity/nonce") ->
-                    MockResponse().setBody("""{"nonce":"$nonceB58"}""")
-                request.path!!.endsWith("/auth/user-identity") ->
-                    MockResponse().setBody("""{"token":"bound-cwt","userId":"IGNORED"}""")
-                request.path!!.endsWith("/client/auth") -> MockResponse().setBody("""{"token":"cwt-user"}""")
-                request.path!!.endsWith("/client/profile") -> MockResponse().setResponseCode(200)
-                else -> MockResponse().setResponseCode(404)
+        val sessionId = Id.random()
+        val nonceB58 = Base58.encode(ByteArray(32).also { SecureRandom().nextBytes(it) })
+        director = { r ->
+            when {
+                r.isTo("GET", "/auth/me") -> Answer(200, """{"sessionId":"$sessionId"}""")
+                r.isTo("GET", "/auth/user-identity/nonce") -> Answer(200, """{"nonce":"$nonceB58"}""")
+                r.isTo("PUT", "/auth/user-identity") ->
+                    Answer(200, """{"token":"bound-cwt","userId":"${Id.random()}"}""")
+                r.isTo("GET", "/client/id") -> nodeIdAnswer()
+                r.isTo("PUT", "/client/profile") -> Answer(204)
+                else -> Answer(404)
             }
         }
     }
 
     @Test
-    fun `bindIdentity on a fresh profile stores the key and persists a clientAuth session`() = runTest {
+    fun `bindIdentity on a fresh profile stores the key and signs in`() = runTest {
         configStore.setBaseUrl(baseUrl())
-        repoTokenStore.setSessionOnly("oauth-token") // OAuth session held in memory only
         serveBind()
+        assertTrue(repository.onAuthToken("oauth-token") is SessionState.NeedsIdentity)
 
         val state = repository.bindIdentity("Alice", "hi") as SessionState.Authenticated
 
         assertTrue(keyManager.hasUserKey())
         assertEquals(state.userId, keyManager.userId()?.toString())
-        // The PERSISTED session is the clientAuth token, never the OAuth/bind token.
-        assertEquals("cwt-user", repoTokenStore.token)
-        assertTrue("finalize re-mints via client/auth", drainRequests().any { it.path!!.endsWith("/client/auth") })
+        // The PERSISTED session is the identity, never the OAuth/bind token.
+        assertEquals(state.userId, sessionStore.session)
+        val reqs = drainRequests()
+        val bind = reqs.first { it.isTo("PUT", "/auth/user-identity") }.body
+        assertTrue("the bind names the new key", bind.contains(BosonCrypto.publicKeyBase58(keyManager.userKeyPair()!!)))
+        val profile = reqs.first { it.isTo("PUT", "/client/profile") }.body
+        assertTrue("the chosen name is written as the new user", profile.contains("Alice") && profile.contains("hi"))
+        // The OAuth token is dropped once the identity exists: there is no OAuth session left to resolve.
+        assertThrows(AppError.Unauthorized::class.java) {
+            kotlinx.coroutines.runBlocking { repository.currentSession() }
+        }
     }
 
     @Test
     fun `bindIdentity into a foreign active profile seeds a fresh profile and leaves the active untouched`() = runTest {
         configStore.setBaseUrl(baseUrl())
         val existingId = givenSignedInUser() // active profile already holds identity U
-        repoTokenStore.token = null
-        repoTokenStore.setSessionOnly("oauth-token")
+        sessionStore.session = null
         serveBind()
+        repository.onAuthToken("oauth-token")
 
         val state = repository.bindIdentity("Bob", null) as SessionState.NewProfileForIdentity
 
@@ -569,11 +603,18 @@ class AuthRepositoryRegistrationTest {
         assertNotNull(seed)
         assertEquals(state.userId, idOfKey64(seed!!.userPrivateKey64))
         assertEquals("Bob", seed.displayName)
-        assertEquals("cwt-user", seed.token) // Boson-identity session, never the OAuth token
         assertNull(seed.devicePrivateKey64)
         assertNull(seed.registeredNodeId)
         // The foreign active profile is untouched: its key stands and nothing was persisted to its slot.
         assertEquals(existingId, keyManager.userId()?.toString())
-        assertNull(repoTokenStore.token)
+        assertNull(sessionStore.session)
+    }
+
+    @Test
+    fun `bindIdentity without an OAuth session is unauthorized`() = runTest {
+        configStore.setBaseUrl(baseUrl())
+        assertThrows(AppError.Unauthorized::class.java) {
+            kotlinx.coroutines.runBlocking { repository.bindIdentity("Alice", null) }
+        }
     }
 }

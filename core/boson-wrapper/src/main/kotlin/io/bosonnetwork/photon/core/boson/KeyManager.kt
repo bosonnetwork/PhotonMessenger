@@ -115,8 +115,8 @@ class KeyManager(
         /**
          * Durably writes identity material into an ARBITRARY profile's [secrets] store, for seeding a
          * target profile just before an app relaunch (multi-profile handoff of a self-sovereign identity
-         * whose key the target profile does not yet hold). Mirrors the token seeding in
-         * [io.bosonnetwork.photon.core.security.EncryptedAuthTokenStore.seedDurably]. [devicePrivateKey64]
+         * whose key the target profile does not yet hold). Mirrors the session seeding in
+         * [io.bosonnetwork.photon.core.security.EncryptedSessionStore.seedDurably]. [devicePrivateKey64]
          * and [registeredNodeId] are seeded only when non-null: a fresh device that must register itself
          * on the target passes null for both so no stale registration marker is carried over.
          */

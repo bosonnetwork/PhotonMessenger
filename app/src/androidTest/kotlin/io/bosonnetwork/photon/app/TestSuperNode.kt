@@ -30,8 +30,8 @@ import io.bosonnetwork.photon.core.network.DirectorConfig
  *
  * The node is reachable at its public DNS name and serves a real (Let's Encrypt) certificate, so
  * tests use default system-CA trust: [directorNodeId] is null (no identity pin). To run against a
- * self-signed node instead, set [directorNodeId] to the node's Boson id - the factory then pins the
- * certificate to that identity exactly as the app does when the operator enters a Server ID.
+ * self-signed node instead, set [directorNodeId] to the node's Boson id - the Director client then
+ * pins the certificate to that identity exactly as the app does when the operator enters a Server ID.
  */
 object TestSuperNode {
     const val directorUrl = "https://whisper.freeddns.org:9000"

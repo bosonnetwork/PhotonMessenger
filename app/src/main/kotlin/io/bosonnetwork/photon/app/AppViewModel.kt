@@ -32,9 +32,9 @@ import io.bosonnetwork.photon.app.session.SessionController
 import io.bosonnetwork.photon.app.session.SessionStatus
 import io.bosonnetwork.photon.core.boson.KeyManager
 import io.bosonnetwork.photon.core.boson.UnreadTracker
-import io.bosonnetwork.photon.core.model.AuthTokenStore
+import io.bosonnetwork.photon.core.model.SessionStore
 import io.bosonnetwork.photon.core.network.DirectorConfigStore
-import io.bosonnetwork.photon.core.security.EncryptedAuthTokenStore
+import io.bosonnetwork.photon.core.security.EncryptedSessionStore
 import io.bosonnetwork.photon.core.security.Profile
 import io.bosonnetwork.photon.core.security.ProfileManager
 import io.bosonnetwork.photon.core.security.SecretStore
@@ -73,14 +73,14 @@ class AppViewModel @Inject constructor(
     private val contactRepository: ContactRepository,
     private val profileManager: ProfileManager,
     private val keyManager: KeyManager,
-    private val tokenStore: AuthTokenStore,
+    private val sessionStore: SessionStore,
     private val configStore: DirectorConfigStore,
     private val authRepository: AuthRepository,
 ) : ViewModel() {
 
     /**
-     * Home only when this device is fully ready (token AND local user key); otherwise onboarding.
-     * A token without a key (returning user on a fresh device) must acquire its key first, so it goes
+     * Home only when this device is fully ready (signed in AND a local user key); otherwise onboarding.
+     * A session without a key (returning user on a fresh device) must acquire its key first, so it goes
      * to onboarding rather than Home where bring-up would fail with "user key missing" (O2).
      */
     val startDestination: String =
@@ -139,7 +139,7 @@ class AppViewModel @Inject constructor(
         val existing = profileManager.findByUserId(userId)
         if (existing != null && existing.id != active) {
             // This identity already has its own profile (a rare duplicate, e.g. re-imported into a
-            // freshly added account): hand off to it - re-minting a session from its own key.
+            // freshly added account): hand off to it - signing in with its own key.
             handOffToProfile(existing.id)
             return true
         }
@@ -170,9 +170,9 @@ class AppViewModel @Inject constructor(
      * session in memory only, so the previous user's data and disk session stay intact (no source clear).
      *
      * With a [seed] (a create/import completed in the current context) the target is seeded with the Boson
-     * identity + its clientAuth session so it comes up ready. Without a seed (reusing a profile that
-     * ALREADY holds this identity's key) a fresh clientAuth session is minted from that profile's own key.
-     * No OAuth token is ever relocated.
+     * identity and signed in to it so it comes up ready. Without a seed (reusing a profile that ALREADY
+     * holds this identity's key) the target is signed in with that profile's own key. No OAuth token is
+     * ever relocated.
      */
     fun handOffToProfile(existingProfileId: String?, seed: ProfileSeed? = null) {
         viewModelScope.launch {
@@ -180,15 +180,15 @@ class AppViewModel @Inject constructor(
             val targetId = existingProfileId ?: profileManager.createProfile()
             val secrets = SecretStore(appContext, profileManager.secretsFileNameFor(targetId))
             if (seed != null) {
-                EncryptedAuthTokenStore(secrets).seedDurably(seed.token)
+                EncryptedSessionStore(secrets).seedDurably(seed.userId)
                 KeyManager.seedInto(secrets, seed.userPrivateKey64, seed.devicePrivateKey64, seed.registeredNodeId)
                 profileManager.bindUserId(targetId, seed.userId, seed.displayName, seed.registeredNodeId)
             } else {
-                // Reuse: the target already holds its key + device; mint a fresh Boson-identity session
-                // from that key so it comes up ready (renewed later via client/auth, never OAuth).
+                // Reuse: the target already holds its key + device; sign in with that key so it comes up
+                // ready (never through OAuth).
                 KeyManager.readUserKey(secrets)?.let { key ->
-                    runCatching { authRepository.mintSessionFor(key) }
-                        .onSuccess { EncryptedAuthTokenStore(secrets).seedDurably(it) }
+                    runCatching { authRepository.signInWith(key) }
+                        .onSuccess { EncryptedSessionStore(secrets).seedDurably(it) }
                 }
             }
             seedDirectorConfig(targetId, cfg.baseUrl, cfg.nodeId)
@@ -216,19 +216,19 @@ class AppViewModel @Inject constructor(
     /**
      * Switches the active profile and relaunches so the whole graph rebinds to it. Selecting an existing
      * account is an explicit sign-in to that identity, not fresh onboarding: if the target has no persisted
-     * session (e.g. it was signed out of earlier - which clears the token but keeps the key/data - or its
-     * token was dropped), mint a fresh clientAuth session from the target's OWN stored user key so it comes
-     * up ready at Home rather than bouncing to onboarding. Its keys, Director config, and data are left
-     * untouched; a target that still holds a token switches immediately with no network round-trip.
+     * session (e.g. it was signed out of earlier - which ends the session but keeps the key/data), sign in
+     * with the target's OWN stored user key so it comes up ready at Home rather than bouncing to onboarding.
+     * Its keys, Director config, and data are left untouched; a target that is still signed in switches
+     * immediately with no network round-trip.
      */
     fun switchProfile(id: String) {
         if (id == profileManager.activeProfileId()) return
         viewModelScope.launch {
             val secrets = SecretStore(appContext, profileManager.secretsFileNameFor(id))
-            val store = EncryptedAuthTokenStore(secrets)
-            if (store.currentToken() == null) {
+            val store = EncryptedSessionStore(secrets)
+            if (store.currentSession() == null) {
                 KeyManager.readUserKey(secrets)?.let { key ->
-                    runCatching { authRepository.mintSessionFor(key) }
+                    runCatching { authRepository.signInWith(key) }
                         .onSuccess { store.seedDurably(it) }
                 }
             }
@@ -240,17 +240,17 @@ class AppViewModel @Inject constructor(
     /**
      * Signs into [id] from the onboarding account picker and relaunches so the graph rebinds to it.
      * Unlike [switchProfile] this also handles re-signing into the CURRENTLY active profile: sign-out
-     * clears the session token but keeps the profile's key and local data, so the just-signed-out
-     * account is a valid target. A profile that has no live token gets a fresh clientAuth session minted
-     * from its own stored user key; one that still holds a token is opened as-is.
+     * ends the session but keeps the profile's key and local data, so the just-signed-out account is a
+     * valid target. A profile that is signed out is signed in with its own stored user key; one that is
+     * still signed in is opened as-is.
      */
     fun signInToProfile(id: String) {
         viewModelScope.launch {
             val secrets = SecretStore(appContext, profileManager.secretsFileNameFor(id))
-            val store = EncryptedAuthTokenStore(secrets)
-            if (store.currentToken() == null) {
+            val store = EncryptedSessionStore(secrets)
+            if (store.currentSession() == null) {
                 KeyManager.readUserKey(secrets)?.let { key ->
-                    runCatching { authRepository.mintSessionFor(key) }
+                    runCatching { authRepository.signInWith(key) }
                         .onSuccess { store.seedDurably(it) }
                 }
             }

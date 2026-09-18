@@ -23,7 +23,6 @@
 package io.bosonnetwork.photon.app
 
 import android.content.Context
-import android.util.Base64
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.bosonnetwork.photon.app.LiveTestHarness.Companion.TIMEOUT
@@ -33,12 +32,6 @@ import io.bosonnetwork.photon.core.boson.DevicePairing
 import io.bosonnetwork.photon.core.boson.PairingPayload
 import io.bosonnetwork.photon.core.boson.awaitResult
 import io.bosonnetwork.photon.core.database.MessagingStoreFactory
-import io.bosonnetwork.photon.core.model.AuthTokenStore
-import io.bosonnetwork.photon.core.network.DirectorApi
-import io.bosonnetwork.photon.core.network.model.ClientAuthRequest
-import io.bosonnetwork.photon.core.network.model.FinishRegistrationRequest
-import io.bosonnetwork.photon.core.network.model.RegisterDeviceRequest
-import io.bosonnetwork.photon.core.network.model.ReplyRegistrationRequest
 import io.bosonnetwork.photon.feature.chat.model.AttachmentSource
 import io.bosonnetwork.photon.feature.chat.model.newAttachmentKey
 import io.bosonnetwork.photon.feature.chat.model.remoteAttachmentToMap
@@ -58,6 +51,7 @@ import java.io.File
 import java.security.SecureRandom
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.future.await
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -77,27 +71,11 @@ class LivePhase3IntegrationTest {
 
     private val context: Context get() = ApplicationProvider.getApplicationContext()
 
-    private object NoToken : AuthTokenStore {
-        override fun currentToken(): String? = null
-        override suspend fun setToken(token: String?) {}
-        override suspend fun clear() {}
-    }
-
-    // Pre-auth pairing calls use the same production identity-pinned Director client as the harness
-    // account APIs (pinned to the dev node id from the first request, see LiveDirectorTls).
-    private fun authlessApi(): DirectorApi =
-        LiveDirectorTls.pinnedApiFactory(NoToken).create(TestSuperNode.directorConfig)
-
-    private fun b64(bytes: ByteArray) =
-        Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
-
-    private fun b64Decode(text: String): ByteArray = Base64.decode(text, Base64.URL_SAFE)
-
     /**
      * M6-4: a new device registers its key, the existing (signed-in) device approves by sealing the
      * 64-byte user key to the new device's ephemeral Curve25519 key, the Director relays the opaque
-     * blob, and the new device opens it + signs in. Asserts the recovered key matches and is zero-
-     * knowledge to the server (only the sealed blob crosses the wire).
+     * blob, and the new device opens it and acts as one of the user's devices. Asserts the recovered key
+     * matches and is zero-knowledge to the server (only the sealed blob crosses the wire).
      */
     @Test
     fun multiDevicePairingRoundTrip() {
@@ -109,21 +87,11 @@ class LivePhase3IntegrationTest {
             // device on every run of this suite forever.
             val alice = harness.register("AlicePair")
 
-            // New device B: register its device key (auth-less, signed nonce).
+            // New device B: asks to join, signing with its device key (no account yet).
             val bDeviceKey = BosonCrypto.generateKeyPair()
-            val bDeviceId = BosonCrypto.idOf(bDeviceKey)
-            val newDeviceApi = authlessApi()
-            val regNonce = harness.newNonce()
+            val newDevice = harness.directorAuth()
             val registrationId = runBlocking {
-                newDeviceApi.registerDevice(
-                    RegisterDeviceRequest(
-                        deviceId = bDeviceId.toString(),
-                        deviceName = "New device B",
-                        appName = "PhotonMessenger-IT",
-                        nonce = b64(regNonce),
-                        sig = b64(BosonCrypto.sign(bDeviceKey, regNonce)),
-                    ),
-                ).registrationId
+                newDevice.requestDeviceRegistration(bDeviceKey, "New device B", LiveTestHarness.APP_NAME).await()
             }
 
             // B's ephemeral pairing key (the QR payload).
@@ -132,46 +100,23 @@ class LivePhase3IntegrationTest {
             // Round-trip the QR string the way the camera would.
             val scanned = PairingPayload.decode(payload.encode())!!
 
-            // Alice approves: seal her user key to B's ephemeral key, relay via PATCH.
+            // Alice approves: seal her user key to B's ephemeral key, relay it through the Director.
             val aliceUserKey64 = BosonCrypto.privateKeyBytes64(alice.userKey)
             val sealed = DevicePairing.sealUserKey(aliceUserKey64, scanned.ephemeralPublicKey)
             runBlocking {
-                alice.api.replyRegistration(
-                    registrationId,
-                    ReplyRegistrationRequest(approved = true, userPrivateKey = b64(sealed)),
-                )
+                harness.director(alice).approveDeviceRegistration(registrationId, sealed, null).await()
             }
 
             // B finishes: the Director returns the relayed blob; B opens it with its ephemeral key.
-            val finishNonce = harness.newNonce()
-            val finish = runBlocking {
-                newDeviceApi.finishRegistration(
-                    registrationId,
-                    FinishRegistrationRequest(
-                        deviceId = bDeviceId.toString(),
-                        nonce = b64(finishNonce),
-                        sig = b64(BosonCrypto.sign(bDeviceKey, finishNonce)),
-                    ),
-                )
-            }
-            assertEquals(alice.userId.toString(), finish.userId)
+            val approval = runBlocking { newDevice.finishDeviceRegistration(bDeviceKey, registrationId).await() }
+            assertEquals(alice.userId, approval.userId)
 
-            val recovered = DevicePairing.openUserKey(b64Decode(finish.userPrivateKey), ephemeral)
+            val recovered = DevicePairing.openUserKey(approval.userKey, ephemeral)
             assertArrayEquals("recovered user key must match the original", aliceUserKey64, recovered)
 
-            // B signs in with its own device key now that it holds the user identity.
-            val authNonce = harness.newNonce()
-            val token = runBlocking {
-                newDeviceApi.clientAuth(
-                    ClientAuthRequest(
-                        userId = finish.userId,
-                        deviceId = bDeviceId.toString(),
-                        nonce = b64(authNonce),
-                        deviceSig = b64(BosonCrypto.sign(bDeviceKey, authNonce)),
-                    ),
-                ).token
-            }
-            assertTrue("device sign-in must return a CWT", token.isNotBlank())
+            // B is now one of Alice's devices, and acts as one with its own device key.
+            val profile = runBlocking { harness.deviceDirector(approval.userId, bDeviceKey).profile.await() }
+            assertEquals(alice.userId, profile.id)
         } finally {
             harness.close()
             vertx.close()

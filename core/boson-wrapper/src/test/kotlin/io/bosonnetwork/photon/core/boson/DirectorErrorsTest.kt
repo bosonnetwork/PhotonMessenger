@@ -20,40 +20,46 @@
  * SOFTWARE.
  */
 
-package io.bosonnetwork.photon.core.network
+package io.bosonnetwork.photon.core.boson
 
+import io.bosonnetwork.director.client.exceptions.DirectorException
 import io.bosonnetwork.photon.core.model.AppError
 import java.io.IOException
 import java.net.SocketTimeoutException
-import okhttp3.ResponseBody.Companion.toResponseBody
+import java.util.concurrent.CompletionException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import retrofit2.HttpException
-import retrofit2.Response
 
 class DirectorErrorsTest {
 
-    private fun httpError(code: Int): HttpException =
-        HttpException(Response.error<Any>(code, "".toResponseBody(null)))
+    private fun refused(status: Int): DirectorException = DirectorException.fromResponse(status, "refused", null)
 
     @Test
     fun `maps each HTTP status to the matching AppError`() {
-        assertTrue(httpError(401).toDirectorError() is AppError.Unauthorized)
-        assertTrue(httpError(403).toDirectorError() is AppError.Forbidden)
-        assertTrue(httpError(404).toDirectorError() is AppError.NotFound)
-        assertTrue(httpError(408).toDirectorError() is AppError.Timeout)
-        assertTrue(httpError(409).toDirectorError() is AppError.Conflict)
-        assertTrue(httpError(412).toDirectorError() is AppError.Conflict)
-        assertTrue(httpError(428).toDirectorError() is AppError.PassphraseRequired)
+        assertTrue(refused(401).toDirectorError() is AppError.Unauthorized)
+        assertTrue(refused(403).toDirectorError() is AppError.Forbidden)
+        assertTrue(refused(404).toDirectorError() is AppError.NotFound)
+        assertTrue(refused(408).toDirectorError() is AppError.Timeout)
+        assertTrue(refused(409).toDirectorError() is AppError.Conflict)
+        assertTrue(refused(412).toDirectorError() is AppError.Conflict)
+        assertTrue(refused(428).toDirectorError() is AppError.PassphraseRequired)
+        assertTrue(refused(429).toDirectorError() is AppError.RateLimited)
     }
 
     @Test
     fun `unmapped HTTP status falls back to Unknown with the code in the message`() {
-        val error = httpError(500).toDirectorError()
+        val error = refused(500).toDirectorError()
         assertTrue(error is AppError.Unknown)
         assertTrue(error.message!!.contains("500"))
+    }
+
+    @Test
+    fun `a call that got no answer maps to Network`() {
+        val noAnswer = DirectorException("Director request failed: Connection refused", IOException("refused"))
+        assertEquals(DirectorException.NO_HTTP_STATUS, noAnswer.status)
+        assertTrue(noAnswer.toDirectorError() is AppError.Network)
     }
 
     @Test
@@ -61,6 +67,11 @@ class DirectorErrorsTest {
         assertTrue(IOException("boom").toDirectorError() is AppError.Network)
         // Subtypes of IOException (e.g. socket timeout) still classify as Network, not Timeout.
         assertTrue(SocketTimeoutException().toDirectorError() is AppError.Network)
+    }
+
+    @Test
+    fun `a failure wrapped by its future is mapped by its cause`() {
+        assertTrue(CompletionException(refused(409)).toDirectorError() is AppError.Conflict)
     }
 
     @Test
@@ -77,8 +88,8 @@ class DirectorErrorsTest {
     }
 
     @Test
-    fun `the HttpException is preserved as the cause`() {
-        val http = httpError(409)
-        assertSame(http, http.toDirectorError().cause)
+    fun `the Director failure is preserved as the cause`() {
+        val refusal = refused(409)
+        assertSame(refusal, refusal.toDirectorError().cause)
     }
 }

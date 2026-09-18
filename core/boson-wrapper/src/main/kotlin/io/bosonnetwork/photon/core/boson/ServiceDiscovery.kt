@@ -20,37 +20,36 @@
  * SOFTWARE.
  */
 
-package io.bosonnetwork.photon.core.network
+package io.bosonnetwork.photon.core.boson
 
+import io.bosonnetwork.director.client.NodeStatus
 import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.core.model.ServiceCoords
-import io.bosonnetwork.photon.core.network.model.NodeStatusDto
 
 /**
- * Maps the Director's NodeStatus into the coordinates the messaging/ion-store clients need
+ * Maps the Director's [NodeStatus] into the coordinates the messaging/ion-store clients need
  * (spec 1.7, M1-13). Service identifiers are the Boson service type strings.
  */
 object ServiceDiscovery {
-    const val MESSAGING_SERVICE_ID = "io.bosonnetwork.photonmessaging"
-    const val ION_STORE_SERVICE_ID = "io.bosonnetwork.ionstore"
-
     /**
      * Extracts messaging + ion-store coordinates from a NodeStatus.
      *
-     * @throws AppError.NotFound if either required service is absent from the node.
+     * @throws AppError.NotFound if either required service is absent from the node, or has no endpoint.
      */
-    fun toServiceCoords(status: NodeStatusDto): ServiceCoords {
-        val messaging = status.services.firstOrNull { it.serviceId == MESSAGING_SERVICE_ID }
+    fun toServiceCoords(status: NodeStatus): ServiceCoords {
+        val messaging = status.getService(NodeStatus.Service.PHOTON_MESSAGING).orElse(null)
             ?: throw AppError.NotFound("Director node exposes no messaging service")
-        val ionStore = status.services.firstOrNull { it.serviceId == ION_STORE_SERVICE_ID }
+        val ionStore = status.getService(NodeStatus.Service.ION_STORE).orElse(null)
             ?: throw AppError.NotFound("Director node exposes no ion-store service")
 
         return ServiceCoords(
-            directorNodeId = status.nodeId.orEmpty(),
-            messagingPeerId = messaging.peerId,
-            messagingEndpoint = messaging.endpoint,
-            ionStorePeerId = ionStore.peerId,
-            ionStoreUrl = ionStore.endpoint,
+            directorNodeId = status.nodeId.toString(),
+            messagingPeerId = messaging.peerId.toString(),
+            messagingEndpoint = messaging.endpoint.orElse(null)
+                ?: throw AppError.NotFound("The messaging service has no endpoint"),
+            ionStorePeerId = ionStore.peerId.toString(),
+            ionStoreUrl = ionStore.endpoint.orElse(null)
+                ?: throw AppError.NotFound("The ion-store service has no endpoint"),
         )
     }
 }

@@ -25,8 +25,8 @@ package io.bosonnetwork.photon.feature.onboarding
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import io.bosonnetwork.photon.core.network.model.ProviderDto
-import io.bosonnetwork.photon.core.network.toDirectorError
+import io.bosonnetwork.director.client.AuthProvider
+import io.bosonnetwork.photon.core.boson.toDirectorError
 import io.bosonnetwork.photon.feature.onboarding.data.AuthCallback
 import io.bosonnetwork.photon.feature.onboarding.data.AuthDeepLinkBus
 import io.bosonnetwork.photon.feature.onboarding.data.AuthRepository
@@ -54,7 +54,7 @@ enum class OnboardingStep {
 
 data class OnboardingUiState(
     val loading: Boolean = false,
-    val providers: List<ProviderDto> = emptyList(),
+    val providers: List<AuthProvider> = emptyList(),
     val step: OnboardingStep = OnboardingStep.Server,
     val serverUrl: String = "",
     /** Director node id used to identity-pin its self-signed cert; blank for a CA-fronted Director. */
@@ -253,7 +253,7 @@ class OnboardingViewModel @Inject constructor(
         }
     }
 
-    fun onProviderSelected(provider: ProviderDto) {
+    fun onProviderSelected(provider: AuthProvider) {
         viewModelScope.launch {
             runCatching { authRepository.authorizeUrl(provider.id) }
                 .onSuccess { url -> _launchAuthUrl.send(url) }
