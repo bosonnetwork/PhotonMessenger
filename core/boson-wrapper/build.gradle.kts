@@ -23,30 +23,6 @@ android {
         jvmTarget = "17"
     }
 
-    // The JVM dependencies ship overlapping META-INF metadata and multi-release / module-info
-    // artifacts that Android packaging and D8 cannot merge. Strip the non-runtime ones.
-    packaging {
-        resources {
-            excludes += setOf(
-                "META-INF/INDEX.LIST",
-                "META-INF/DEPENDENCIES",
-                "META-INF/*.kotlin_module",
-                "META-INF/LICENSE",
-                "META-INF/LICENSE.txt",
-                "META-INF/LICENSE.md",
-                "META-INF/NOTICE",
-                "META-INF/NOTICE.txt",
-                "META-INF/NOTICE.md",
-                "META-INF/*.SF",
-                "META-INF/*.DSA",
-                "META-INF/*.RSA",
-                "META-INF/versions/**",
-                "META-INF/io.netty.versions.properties",
-                "META-INF/native-image/**",
-                "**/module-info.class",
-            )
-        }
-    }
 }
 
 dependencies {

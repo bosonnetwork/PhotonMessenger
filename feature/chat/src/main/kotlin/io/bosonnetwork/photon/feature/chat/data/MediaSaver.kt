@@ -28,6 +28,7 @@ import android.os.Build
 import android.os.Environment
 import android.media.MediaScannerConnection
 import android.provider.MediaStore
+import androidx.annotation.RequiresApi
 import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.feature.chat.R
 import io.bosonnetwork.photon.feature.chat.model.AttachmentKind
@@ -75,6 +76,7 @@ class AndroidMediaSaver @Inject constructor(
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun saveViaMediaStore(name: String, mime: String, kind: AttachmentKind, open: () -> InputStream): String {
         val resolver = context.contentResolver
         val isImage = kind == AttachmentKind.IMAGE

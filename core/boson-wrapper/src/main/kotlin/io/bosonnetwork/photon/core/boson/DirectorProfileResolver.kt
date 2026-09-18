@@ -29,6 +29,7 @@ import io.bosonnetwork.photon.core.model.ResolvedProfile
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.future.await
 import kotlinx.coroutines.flow.Flow
@@ -90,11 +91,16 @@ class DirectorProfileResolver(
         if (userId.isBlank()) return
         val entry = entryFlow(userId).value
         if (entry != null && !entry.isStale()) return
-        inFlight.computeIfAbsent(userId) {
-            scope.launch { fetch(userId) }.also { job ->
-                job.invokeOnCompletion { inFlight.remove(userId) }
-            }
+        if (inFlight.containsKey(userId)) return
+        // Registered before it starts, so that its completion - which can come at once - never runs inside
+        // a map update, and never removes a later fetch's registration.
+        val job = scope.launch(start = CoroutineStart.LAZY) { fetch(userId) }
+        if (inFlight.putIfAbsent(userId, job) != null) {
+            job.cancel() // another prefetch got there first
+            return
         }
+        job.invokeOnCompletion { inFlight.remove(userId, job) }
+        job.start()
     }
 
     private fun entryFlow(userId: String): MutableStateFlow<Entry?> =

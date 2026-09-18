@@ -103,8 +103,9 @@ class PhotonApp : Application(), ImageLoaderFactory {
 
     /**
      * App-wide Coil loader: avatars load through the Director client (see [DirectorAvatarFetcher]), which
-     * authenticates and pins the request as it does every Director call. The disk cache is per-profile so
-     * a signed-out profile's cached images never surface under a different active profile.
+     * authenticates and pins the request as it does every Director call, and are kept in the disk cache,
+     * revalidated on each load. The disk cache is per-profile so a signed-out profile's cached images never
+     * surface under a different active profile.
      */
     override fun newImageLoader(): ImageLoader =
         ImageLoader.Builder(this)
