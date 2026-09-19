@@ -171,7 +171,10 @@
     <!-- data/DevicePairingRepository -->
     <string name="settings_pairing_error_no_active">当前没有正在进行的配对</string>
     <string name="settings_pairing_error_no_identity">此设备上没有用户身份</string>
-    <string name="settings_pairing_error_invalid_code">不是有效的 Photon 配对码</string>
+    <string name="settings_pairing_error_invalid_code">不是有效的配对码</string>
+    <string name="settings_pairing_error_denied">您的另一台设备拒绝了此请求</string>
+    <string name="settings_pairing_error_expired">请求在获得批准前已过期，请重试。</string>
+    <string name="settings_pairing_error_not_pending">此配对请求已失效</string>
     <string name="settings_default_device_name">新设备</string>
 
     <!-- data/SettingsRepository -->

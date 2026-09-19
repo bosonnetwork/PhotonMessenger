@@ -33,6 +33,7 @@ import coil.fetch.SourceResult
 import coil.request.Options
 import io.bosonnetwork.Id
 import io.bosonnetwork.director.client.Avatar
+import io.bosonnetwork.director.client.AvatarRefresh
 import io.bosonnetwork.photon.core.boson.DirectorAvatars
 import io.bosonnetwork.photon.core.boson.DirectorClients
 import io.bosonnetwork.photon.core.model.AppError
@@ -73,8 +74,17 @@ class DirectorAvatarFetcher(
             }
             if (snapshot != null && !options.networkCachePolicy.readEnabled) return fromDisk(cache!!, snapshot, key, cached!!)
 
-            val current = try {
-                clients.client().getUserAvatar(userId, cached).await()
+            // With a kept copy, ask whether it is still current; without one, download.
+            val current: Avatar? = try {
+                val director = clients.client()
+                if (cached == null) {
+                    director.getUserAvatar(userId).await().orElse(null)
+                } else {
+                    val refresh = director.refreshUserAvatar(userId, cached).await()
+                    if (refresh.status == AvatarRefresh.Status.UNCHANGED)
+                        return fromDisk(cache!!, snapshot!!, key, cached)
+                    refresh.avatar.orElse(null) // changed, or removed
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -82,25 +92,18 @@ class DirectorAvatarFetcher(
                 return fromDisk(cache!!, snapshot, key, cached!!) // unreachable: show the copy we have
             }
 
-            when {
-                current == null -> {
-                    snapshot?.close()
-                    snapshot = null
-                    cache?.remove(key)
-                    throw AppError.NotFound("No avatar for $userId")
-                }
-                current === cached -> return fromDisk(cache!!, snapshot!!, key, cached)
-                else -> {
-                    snapshot?.close()
-                    snapshot = null
-                    if (cache != null && options.diskCachePolicy.writeEnabled) store(cache, key, current)
-                    return SourceResult(
-                        source = ImageSource(Buffer().write(current.data), options.context),
-                        mimeType = current.contentType,
-                        dataSource = DataSource.NETWORK,
-                    )
-                }
+            snapshot?.close()
+            snapshot = null
+            if (current == null) {
+                cache?.remove(key)
+                throw AppError.NotFound("No avatar for $userId")
             }
+            if (cache != null && options.diskCachePolicy.writeEnabled) store(cache, key, current)
+            return SourceResult(
+                source = ImageSource(Buffer().write(current.data), options.context),
+                mimeType = current.contentType,
+                dataSource = DataSource.NETWORK,
+            )
         } catch (e: Throwable) {
             snapshot?.close()
             throw e

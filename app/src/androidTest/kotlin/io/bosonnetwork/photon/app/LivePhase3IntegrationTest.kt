@@ -26,10 +26,9 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.bosonnetwork.photon.app.LiveTestHarness.Companion.TIMEOUT
+import io.bosonnetwork.director.client.PairingCode
 import io.bosonnetwork.photon.core.boson.BosonClientFactory
 import io.bosonnetwork.photon.core.boson.BosonCrypto
-import io.bosonnetwork.photon.core.boson.DevicePairing
-import io.bosonnetwork.photon.core.boson.PairingPayload
 import io.bosonnetwork.photon.core.boson.awaitResult
 import io.bosonnetwork.photon.core.database.MessagingStoreFactory
 import io.bosonnetwork.photon.feature.chat.model.AttachmentSource
@@ -89,30 +88,24 @@ class LivePhase3IntegrationTest {
 
             // New device B: asks to join, signing with its device key (no account yet).
             val bDeviceKey = BosonCrypto.generateKeyPair()
-            val newDevice = harness.directorAuth()
-            val registrationId = runBlocking {
+            val newDevice = harness.directorGuest()
+            val registration = runBlocking {
                 newDevice.requestDeviceRegistration(bDeviceKey, "New device B", LiveTestHarness.APP_NAME).await()
             }
 
-            // B's ephemeral pairing key (the QR payload).
-            val ephemeral = DevicePairing.generateEphemeralKeyPair()
-            val payload = PairingPayload(registrationId, DevicePairing.publicKeyBytes(ephemeral))
-            // Round-trip the QR string the way the camera would.
-            val scanned = PairingPayload.decode(payload.encode())!!
+            // Alice scans the code B shows, as text, and approves: her client seals her user key to the code
+            // and the Director relays it unread.
+            val scanned = PairingCode.parse(registration.pairingCode.toString())
+            runBlocking { harness.director(alice).approveDeviceRegistration(scanned).await() }
 
-            // Alice approves: seal her user key to B's ephemeral key, relay it through the Director.
-            val aliceUserKey64 = BosonCrypto.privateKeyBytes64(alice.userKey)
-            val sealed = DevicePairing.sealUserKey(aliceUserKey64, scanned.ephemeralPublicKey)
-            runBlocking {
-                harness.director(alice).approveDeviceRegistration(registrationId, sealed, null).await()
-            }
-
-            // B finishes: the Director returns the relayed blob; B opens it with its ephemeral key.
-            val approval = runBlocking { newDevice.finishDeviceRegistration(bDeviceKey, registrationId).await() }
+            // B finishes: it receives Alice's key, opened with the secret its registration kept.
+            val approval = runBlocking { newDevice.finishDeviceRegistration(registration).await() }
             assertEquals(alice.userId, approval.userId)
-
-            val recovered = DevicePairing.openUserKey(approval.userKey, ephemeral)
-            assertArrayEquals("recovered user key must match the original", aliceUserKey64, recovered)
+            assertArrayEquals(
+                "recovered user key must match the original",
+                BosonCrypto.privateKeyBytes64(alice.userKey),
+                BosonCrypto.privateKeyBytes64(approval.userKey),
+            )
 
             // B is now one of Alice's devices, and acts as one with its own device key.
             val profile = runBlocking { harness.deviceDirector(approval.userId, bDeviceKey).profile.await() }

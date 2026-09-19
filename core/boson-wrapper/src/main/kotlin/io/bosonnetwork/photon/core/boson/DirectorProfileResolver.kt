@@ -140,7 +140,7 @@ class DirectorProfileResolver(
                 directorChanges = clients.config,
                 lookup = { userId ->
                     // The user may belong to another node: the Director resolves it for its own users.
-                    clients.client().getUserProfile(Id.of(userId)).await()?.let { profile ->
+                    clients.client().getUserProfile(Id.of(userId)).await().orElse(null)?.let { profile ->
                         ResolvedProfile(
                             userId = profile.id.toString(),
                             name = profile.name.orElse(null)?.takeIf { it.isNotBlank() },

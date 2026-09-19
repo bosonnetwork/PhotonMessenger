@@ -173,7 +173,10 @@
     <!-- data/DevicePairingRepository -->
     <string name="settings_pairing_error_no_active">No pairing in progress</string>
     <string name="settings_pairing_error_no_identity">No user identity on this device</string>
-    <string name="settings_pairing_error_invalid_code">Not a Photon pairing code</string>
+    <string name="settings_pairing_error_invalid_code">Not a pairing code</string>
+    <string name="settings_pairing_error_denied">The request was declined on your other device</string>
+    <string name="settings_pairing_error_expired">The request expired before it was approved. Try again.</string>
+    <string name="settings_pairing_error_not_pending">This pairing request is no longer pending</string>
     <string name="settings_default_device_name">New device</string>
 
     <!-- data/SettingsRepository -->

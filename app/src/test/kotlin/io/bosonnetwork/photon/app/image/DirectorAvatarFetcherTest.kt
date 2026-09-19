@@ -30,6 +30,7 @@ import coil.request.CachePolicy
 import coil.request.Options
 import io.bosonnetwork.Id
 import io.bosonnetwork.director.client.Avatar
+import io.bosonnetwork.director.client.AvatarRefresh
 import io.bosonnetwork.director.client.DirectorClient
 import io.bosonnetwork.director.client.exceptions.DirectorException
 import io.bosonnetwork.photon.core.boson.DirectorAvatars
@@ -39,6 +40,7 @@ import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import java.io.IOException
+import java.util.Optional
 import java.util.concurrent.CompletableFuture
 import kotlinx.coroutines.test.runTest
 import okio.FileSystem
@@ -61,19 +63,36 @@ class DirectorAvatarFetcherTest {
     private val context: Context = mockk(relaxed = true)
     private lateinit var diskCache: DiskCache
 
-    /** The Director: answers a download of [userId]'s avatar given the caller's copy. */
+    /**
+     * The Director: answers with [userId]'s current avatar given the caller's copy - that very copy when it
+     * is unchanged, null when there is none.
+     */
     private var director: (Avatar?) -> CompletableFuture<Avatar?> = { CompletableFuture.completedFuture(null) }
     private val asked = mutableListOf<Avatar?>()
 
+    // The outcome of a refresh, as the Director client reports it: the held copy itself when unchanged.
+    private fun refreshOf(held: Avatar, current: Avatar?): AvatarRefresh = mockk {
+        every { status } returns when {
+            current == null -> AvatarRefresh.Status.REMOVED
+            current === held -> AvatarRefresh.Status.UNCHANGED
+            else -> AvatarRefresh.Status.CHANGED
+        }
+        every { avatar } returns Optional.ofNullable(current)
+    }
+
     private val clients: DirectorClients = mockk {
         val client = mockk<DirectorClient> {
-            every { getUserAvatar(any(), any()) } answers {
-                val copy = secondArg<Avatar?>()
-                asked += copy
-                director(copy)
+            every { getUserAvatar(any()) } answers {
+                asked += null
+                director(null).thenApply { Optional.ofNullable(it) }
+            }
+            every { refreshUserAvatar(any(), any()) } answers {
+                val held = secondArg<Avatar>()
+                asked += held
+                director(held).thenApply { refreshOf(held, it) }
             }
         }
-        coEvery { client() } returns client
+        coEvery { client(any()) } returns client
     }
 
     @Before
@@ -200,7 +219,7 @@ class DirectorAvatarFetcherTest {
         val bare = AvatarCacheEntry.decodeMetadata(
             AvatarCacheEntry.encodeMetadata(Avatar.of("image/png", byteArrayOf(), null, null)), byteArrayOf(),
         )!!
-        assertEquals(false, bare.isRevalidatable)
+        assertEquals(false, bare.hasValidators())
         assertNull(AvatarCacheEntry.decodeMetadata("something else", byteArrayOf()))
     }
 

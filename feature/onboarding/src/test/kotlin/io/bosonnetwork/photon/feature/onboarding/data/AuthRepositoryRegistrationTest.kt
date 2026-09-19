@@ -378,17 +378,42 @@ class AuthRepositoryRegistrationTest {
         """{"challenge":"Y2g","challengeSig":"c2ln","alg":"equihash","n":$n,"k":$k,""" +
             """"effort":$effort,"nonce":"$nonceB64","expiresAt":9999999999}"""
 
+    private fun registrationOptions(policy: String, pow: Boolean) =
+        Answer(200, """{"policy":"$policy","proofOfWork":$pow,"oauth":true}""")
+
     @Test
-    fun `powAvailable is false when the challenge endpoint 404s`() = runTest {
+    fun `powAvailable is false on an OAuth-only node`() = runTest {
         configStore.setBaseUrl(baseUrl())
-        director = { r -> if (r.isTo("GET", "/client/users/challenge")) Answer(404) else Answer(500) }
+        director = { r -> if (r.isTo("GET", "/client/registration")) registrationOptions("oauth", false) else Answer(500) }
         assertEquals(false, repository.powAvailable())
     }
 
     @Test
-    fun `powAvailable is true when the challenge endpoint answers`() = runTest {
+    fun `powAvailable is true when the node accepts proof-of-work`() = runTest {
         configStore.setBaseUrl(baseUrl())
-        director = { Answer(200, challengeJson(randomNonceB64())) }
+        director = { r -> if (r.isTo("GET", "/client/registration")) registrationOptions("either", true) else Answer(500) }
+        assertTrue(repository.powAvailable())
+        // Asked without touching the challenge endpoint, whose challenges raise the next one's effort.
+        assertTrue(received.none { it.path.endsWith("/client/users/challenge") })
+    }
+
+    @Test
+    fun `powAvailable is asked once per Director`() = runTest {
+        configStore.setBaseUrl(baseUrl())
+        director = { r -> if (r.isTo("GET", "/client/registration")) registrationOptions("pow", true) else Answer(500) }
+        repeat(3) { assertTrue(repository.powAvailable()) }
+        assertEquals(1, received.count { it.isTo("GET", "/client/registration") })
+
+        // Another Director is asked again.
+        configStore.setNodeId(Id.random().toString())
+        assertTrue(repository.powAvailable())
+        assertEquals(2, received.count { it.isTo("GET", "/client/registration") })
+    }
+
+    @Test
+    fun `powAvailable assumes proof-of-work on a Director too old to say`() = runTest {
+        configStore.setBaseUrl(baseUrl())
+        director = { Answer(404) }
         assertTrue(repository.powAvailable())
     }
 

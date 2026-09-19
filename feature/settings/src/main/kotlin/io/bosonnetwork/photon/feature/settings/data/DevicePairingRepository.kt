@@ -24,13 +24,14 @@ package io.bosonnetwork.photon.feature.settings.data
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
-import io.bosonnetwork.crypto.CryptoBox
-import io.bosonnetwork.crypto.Signature
+import io.bosonnetwork.director.client.DeviceRegistration
+import io.bosonnetwork.director.client.PairingCode
+import io.bosonnetwork.director.client.exceptions.NotFoundException
+import io.bosonnetwork.director.client.exceptions.RegistrationDeniedException
+import io.bosonnetwork.director.client.exceptions.RegistrationExpiredException
 import io.bosonnetwork.photon.core.boson.BosonCrypto
-import io.bosonnetwork.photon.core.boson.DevicePairing
 import io.bosonnetwork.photon.core.boson.DirectorClients
 import io.bosonnetwork.photon.core.boson.KeyManager
-import io.bosonnetwork.photon.core.boson.PairingPayload
 import io.bosonnetwork.photon.core.boson.toDirectorError
 import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.core.model.SessionStore
@@ -56,16 +57,17 @@ data class PairingRequestInfo(
 )
 
 /**
- * Multi-device pairing backend (spec 2.4, decision D-1, M6-4). Two roles share one repository:
+ * Multi-device pairing backend (spec 2.4, decision D-1, M6-4), over the Director client's pairing, which
+ * owns the protocol - the pairing code, and the user key sealed to it - so that any Boson app can pair
+ * with any other. Two roles share one repository:
  *
- *  - **New device:** [createInvite] registers this device's key and returns a QR carrying the
- *    registration id + an ephemeral Curve25519 public key; [awaitApproval] long-polls the Director
- *    until the existing device approves, then opens the sealed user key and signs this device in.
- *  - **Existing device:** [readRequest] fetches what a scanned QR is asking for; [approve] seals the
- *    64-byte user key to the new device's ephemeral key (zero-knowledge to the Director) and uploads
- *    it; [deny] rejects the request.
+ *  - **New device:** [createInvite] asks the Director to register this device's key and returns its
+ *    pairing code as the QR text; [awaitApproval] waits until the existing device answers, then stores
+ *    the user key it received and signs this device in.
+ *  - **Existing device:** [readRequest] reads what a scanned code is asking for; [approve] hands the
+ *    user key over, sealed to the code (zero-knowledge to the Director); [deny] rejects the request.
  *
- * The Director only relays the sealed blob opaquely - it never sees the user key.
+ * Photon keeps the QR rendering and scanning, and the messages it shows.
  */
 interface DevicePairingRepository {
     suspend fun createInvite(deviceName: String): Result<PairingInvite>
@@ -92,15 +94,9 @@ class DevicePairingRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
 ) : DevicePairingRepository {
 
-    /** State the new device must keep between showing its QR and finishing the pairing. */
-    private class ActivePairing(
-        val registrationId: String,
-        val deviceKey: Signature.KeyPair,
-        val ephemeral: CryptoBox.KeyPair,
-    )
-
+    /** The new device's pending request, kept between showing its code and finishing the pairing. */
     @Volatile
-    private var active: ActivePairing? = null
+    private var active: DeviceRegistration? = null
 
     override suspend fun createInvite(deviceName: String): Result<PairingInvite> = runCatching {
         withContext(Dispatchers.IO) {
@@ -108,79 +104,88 @@ class DevicePairingRepositoryImpl @Inject constructor(
             // is known, so a key ever registered under a previous identity must be rotated NOW - the
             // paired identity is guaranteed new-or-unknown (never reuse a device key across users).
             val deviceKey = keyManager.ensureDeviceKeyFor(null)
-            val registrationId = directorClients.auth().requestDeviceRegistration(
+            val registration = directorClients.guest().requestDeviceRegistration(
                 deviceKey,
                 deviceName.ifBlank { context.getString(R.string.settings_default_device_name) },
                 context.getString(R.string.settings_about_app_name),
             ).await()
-
-            val ephemeral = DevicePairing.generateEphemeralKeyPair()
-            active = ActivePairing(registrationId, deviceKey, ephemeral)
-            val qr = PairingPayload(registrationId, DevicePairing.publicKeyBytes(ephemeral)).encode()
-            PairingInvite(registrationId, qr)
+            active = registration
+            PairingInvite(registration.registrationId, registration.pairingCode.toString())
         }
-    }
+    }.mapPairingError()
 
     override suspend fun awaitApproval(): Result<String> = runCatching {
         withContext(Dispatchers.IO) {
-            val pairing = active
+            val registration = active
                 ?: throw AppError.InvalidInput(context.getString(R.string.settings_pairing_error_no_active))
 
             // The Director holds this call until the request is approved, denied or expired.
-            val approval = directorClients.auth()
-                .finishDeviceRegistration(pairing.deviceKey, pairing.registrationId).await()
+            val approval = directorClients.guest().finishDeviceRegistration(registration).await()
 
-            val userKey64 = DevicePairing.openUserKey(approval.userKey, pairing.ephemeral)
-            keyManager.storeUserKey(userKey64)
+            keyManager.storeUserKey(BosonCrypto.privateKeyBytes64(approval.userKey))
             val userId = approval.userId.toString()
             sessionStore.setSession(userId)
 
             // Pairing registered this device server-side: record the super node so the first bring-up
             // after pairing skips re-registration (its presence also marks the key as registered).
-            keyManager.setRegisteredNodeId(directorClients.client().nodeId.await().toString())
+            keyManager.setRegisteredNodeId(directorClients.probeNodeId().toString())
 
             active = null
             userId
         }
-    }
+    }.mapPairingError()
 
     override suspend fun readRequest(qrText: String): Result<PairingRequestInfo> = runCatching {
-        val payload = decodePayload(qrText)
-        val info = directorClients.client().getDeviceRegistration(payload.registrationId).await()
+        val code = decode(qrText)
+        val info = directorClients.client().getDeviceRegistration(code).await().orElse(null)
+            ?: throw AppError.NotFound(context.getString(R.string.settings_pairing_error_not_pending))
         PairingRequestInfo(
-            registrationId = payload.registrationId,
+            registrationId = code.registrationId,
             deviceId = info.deviceId.toString(),
             deviceName = info.deviceName.takeIf { it.isNotBlank() }
                 ?: context.getString(R.string.settings_default_device_name),
             appName = info.appName.takeIf { it.isNotBlank() }
                 ?: context.getString(R.string.settings_about_app_name),
         )
-    }
+    }.mapPairingError()
 
     override suspend fun approve(qrText: String, passphrase: String?): Result<Unit> = runCatching {
         withContext(Dispatchers.IO) {
-            val payload = decodePayload(qrText)
-            val userKey = keyManager.userKeyPair()
-                ?: throw AppError.InvalidInput(context.getString(R.string.settings_pairing_error_no_identity))
-            val userKey64 = BosonCrypto.privateKeyBytes64(userKey)
-            // Sealed to the new device's ephemeral key: the Director relays it without reading it.
-            val sealed = DevicePairing.sealUserKey(userKey64, payload.ephemeralPublicKey)
-            directorClients.client().approveDeviceRegistration(payload.registrationId, sealed, passphrase).await()
+            val code = decode(qrText)
+            if (keyManager.userKeyPair() == null)
+                throw AppError.InvalidInput(context.getString(R.string.settings_pairing_error_no_identity))
+            // The client seals this profile's user key to the code: the Director relays it unread.
+            directorClients.client().approveDeviceRegistration(code, passphrase).await()
             Unit
         }
-    }.mapDirectorError()
+    }.mapPairingError()
 
     override suspend fun deny(qrText: String): Result<Unit> = runCatching {
-        val payload = decodePayload(qrText)
-        directorClients.client().denyDeviceRegistration(payload.registrationId).await()
+        directorClients.client().denyDeviceRegistration(decode(qrText)).await()
         Unit
-    }
+    }.mapPairingError()
 
-    private fun decodePayload(qrText: String): PairingPayload =
-        PairingPayload.decode(qrText)
-            ?: throw AppError.InvalidInput(context.getString(R.string.settings_pairing_error_invalid_code))
+    private fun decode(qrText: String): PairingCode =
+        try {
+            PairingCode.parse(qrText)
+        } catch (e: IllegalArgumentException) {
+            throw AppError.InvalidInput(context.getString(R.string.settings_pairing_error_invalid_code), e)
+        }
 
-    /** Re-wraps a Director failure as an [AppError] so the UI can tell 428/403 apart (M6 passphrase). */
-    private fun <T> Result<T>.mapDirectorError(): Result<T> =
-        recoverCatching { throw it.toDirectorError() }
+    /**
+     * Turns a Director failure into an [AppError] the UI can show: the pairing outcomes the user has to
+     * act on get their own message; the rest map as every Director failure does (428/403 passphrase).
+     */
+    private fun <T> Result<T>.mapPairingError(): Result<T> =
+        recoverCatching { e ->
+            throw when (e) {
+                is RegistrationDeniedException ->
+                    AppError.Conflict(context.getString(R.string.settings_pairing_error_denied), e)
+                is RegistrationExpiredException ->
+                    AppError.Timeout(context.getString(R.string.settings_pairing_error_expired), e)
+                is NotFoundException ->
+                    AppError.NotFound(context.getString(R.string.settings_pairing_error_not_pending), e)
+                else -> e.toDirectorError()
+            }
+        }
 }

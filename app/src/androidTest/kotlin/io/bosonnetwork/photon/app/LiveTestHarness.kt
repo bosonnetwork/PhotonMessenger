@@ -23,7 +23,7 @@
 package io.bosonnetwork.photon.app
 
 import android.content.Context
-import io.bosonnetwork.director.client.DirectorAuth
+import io.bosonnetwork.director.client.DirectorGuest
 import io.bosonnetwork.director.client.DirectorClient
 import io.bosonnetwork.director.client.UserRegistration
 import io.bosonnetwork.photon.core.boson.BosonClientFactory
@@ -80,7 +80,7 @@ class LiveTestHarness(
     private val startedClients = mutableListOf<MessagingClient>()
     private val openStores = mutableListOf<IonStore>()
     private val openDirectors = mutableListOf<DirectorClient>()
-    private val openAuths = mutableListOf<DirectorAuth>()
+    private val openGuests = mutableListOf<DirectorGuest>()
 
     fun newNonce(): ByteArray = ByteArray(32).also { SecureRandom().nextBytes(it) }
 
@@ -92,8 +92,8 @@ class LiveTestHarness(
     fun deviceDirector(userId: Id, deviceKey: Signature.KeyPair): DirectorClient =
         LiveDirector.deviceClient(vertx, userId, deviceKey).also { openDirectors += it }
 
-    /** The Director client for sign-in and pairing, on this harness's Vert.x; closed by [close]. */
-    fun directorAuth(): DirectorAuth = LiveDirector.auth(vertx).also { openAuths += it }
+    /** The Director client that needs no identity, on this harness's Vert.x; closed by [close]. */
+    fun directorGuest(): DirectorGuest = LiveDirector.guest(vertx).also { openGuests += it }
 
     /**
      * An identity from the shared pool, registered on first use and reused by every later request for
@@ -214,8 +214,8 @@ class LiveTestHarness(
     fun close() {
         openDirectors.forEach { runCatching { it.close().get(10, TimeUnit.SECONDS) } }
         openDirectors.clear()
-        openAuths.forEach { runCatching { it.close().get(10, TimeUnit.SECONDS) } }
-        openAuths.clear()
+        openGuests.forEach { runCatching { it.close().get(10, TimeUnit.SECONDS) } }
+        openGuests.clear()
         startedClients.forEach { runCatching { it.stop().get(10, TimeUnit.SECONDS) } }
         startedClients.clear()
         openStores.forEach { runCatching { runBlocking { it.close().awaitResult() } } }

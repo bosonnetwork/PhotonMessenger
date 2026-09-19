@@ -29,8 +29,10 @@ import io.bosonnetwork.Id
 import io.bosonnetwork.crypto.Signature
 import io.bosonnetwork.director.client.AuthProvider
 import io.bosonnetwork.director.client.DirectorClient
+import io.bosonnetwork.director.client.DirectorOAuth
 import io.bosonnetwork.director.client.ProfileUpdate
 import io.bosonnetwork.director.client.UserRegistration
+import io.bosonnetwork.director.client.exceptions.ProofOfWorkException
 import io.bosonnetwork.photon.core.boson.BosonCrypto
 import io.bosonnetwork.photon.core.boson.DirectorClients
 import io.bosonnetwork.photon.core.boson.KeyManager
@@ -171,18 +173,35 @@ class AuthRepository @Inject constructor(
         keyManager.ensureDeviceKey()
     }
 
-    suspend fun providers(): List<AuthProvider> = directorClients.auth().providers.await()
+    suspend fun providers(): List<AuthProvider> = directorClients.guest().providers.await()
 
     suspend fun authorizeUrl(provider: String): String =
-        directorClients.auth().authorizeUrl(provider, REDIRECT_URI)
+        directorClients.guest().authorizeUrl(provider, REDIRECT_URI)
+
+    /** The registration options of a Director, remembered per config: they change only with it. */
+    @Volatile
+    private var registrationOptions: Pair<DirectorConfig, Boolean>? = null
 
     /**
-     * True if this node accepts permissionless proof-of-work registration (policy `pow`/`either`), i.e.
-     * the challenge endpoint answers. A 404 means the node is OAuth-only, so the "Create a new account"
-     * option is hidden. Other failures propagate so a genuine connectivity problem surfaces.
+     * True if this node accepts permissionless proof-of-work registration (policy `pow`/`either`); when it
+     * does not, the node is OAuth-only and the "Create a new account" option is hidden. Asked once per
+     * Director config, and without side effects on the node. A Director too old to report its options is
+     * taken to accept it: registering there then fails plainly if it does not. Other failures propagate so
+     * a genuine connectivity problem surfaces.
      */
     suspend fun powAvailable(): Boolean = withContext(Dispatchers.IO) {
-        directorClients.auth().isProofOfWorkRegistrationEnabled().await()
+        val cfg = config()
+        registrationOptions?.let { (cached, pow) -> if (cached == cfg) return@withContext pow }
+        val pow = try {
+            directorClients.guest().registrationOptions.await().isProofOfWorkEnabled
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (e.toDirectorError() !is AppError.NotFound) throw e
+            true
+        }
+        registrationOptions = cfg to pow
+        pow
     }
 
     /**
@@ -268,7 +287,7 @@ class AuthRepository @Inject constructor(
                 return
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: IllegalStateException) {
+            } catch (e: ProofOfWorkException) {
                 // No solution within the search budget: retryable (a fresh challenge/nonce may solve).
                 throw AppError.Timeout(context.getString(R.string.onb_error_pow_timeout), e)
             } catch (e: Exception) {
@@ -345,7 +364,7 @@ class AuthRepository @Inject constructor(
      */
     suspend fun currentSession(): SessionState {
         val token = oauthToken ?: throw AppError.Unauthorized("Session expired; please sign in again")
-        val session = directorClients.auth().getSession(token).await()
+        val session = withOAuth(token) { it.session.await() }
         val accountId = session.userId.orElse(null)?.toString() // identity bound to this OAuth account
         val localId = keyManager.userId()?.toString()             // identity of the active profile's key
         val activeId = profileManager.activeProfileId()
@@ -448,14 +467,15 @@ class AuthRepository @Inject constructor(
 
             // OAuth session present. Establish/confirm the account's identity, then commit-at-end (never
             // overwrite a foreign active profile).
-            val auth = directorClients.auth()
-            val boundId = auth.getSession(token).await().userId.orElse(null)?.toString()
-            if (boundId == null) {
-                // No identity bound to this account yet: bind the imported key as the account identity.
-                auth.bindUserIdentity(token, kp).await()
-            } else if (derivedId != boundId) {
-                // An identity is already bound: the imported key must match it, or we would fork identity.
-                throw AppError.InvalidInput(context.getString(R.string.onb_error_key_mismatch))
+            withOAuth(token) { oauth ->
+                val boundId = oauth.session.await().userId.orElse(null)?.toString()
+                if (boundId == null) {
+                    // No identity bound to this account yet: bind the imported key as the account identity.
+                    oauth.bindUserIdentity(kp).await()
+                } else if (derivedId != boundId) {
+                    // An identity is already bound: the imported key must match it, or we would fork identity.
+                    throw AppError.InvalidInput(context.getString(R.string.onb_error_key_mismatch))
+                }
             }
             oauthToken = null // the identity authenticates by its own key from here on
             commitIdentity(privateKey64, derivedId, displayName = null)
@@ -532,7 +552,7 @@ class AuthRepository @Inject constructor(
             // so binding on a foreign active profile never overwrites its key.
             val userKey = BosonCrypto.generateKeyPair()
             val userId = BosonCrypto.idOf(userKey).toString()
-            directorClients.auth().bindUserIdentity(token, userKey).await()
+            withOAuth(token) { it.bindUserIdentity(userKey).await() }
             oauthToken = null // the identity now exists and authenticates by its own key
 
             if (cleanName != null || cleanBio != null) {
@@ -549,8 +569,13 @@ class AuthRepository @Inject constructor(
      * passphrase-gated on the Director). Onboarding checks this after acquiring an identity to decide
      * whether the user must be prompted for the passphrase before this device can be registered.
      */
-    suspend fun isPassphraseProtected(): Boolean =
-        withContext(Dispatchers.IO) { directorClients.client().profile.await().isPassphraseProtected }
+    suspend fun isPassphraseProtected(): Boolean = isPassphraseProtected(null)
+
+    // As asked of the node [nodeId] names, when it is not the one this device is registered with yet.
+    private suspend fun isPassphraseProtected(nodeId: String?): Boolean =
+        withContext(Dispatchers.IO) {
+            directorClients.client(pinnedNodeId = nodeId?.let { Id.of(it) }).profile.await().isPassphraseProtected
+        }
 
     /**
      * The account's display name from the Director profile, used to name the on-device profile in the
@@ -582,7 +607,9 @@ class AuthRepository @Inject constructor(
             // Defense in depth: a device key registered under a different identity is rotated here
             // rather than re-registered across users.
             val deviceKey = keyManager.ensureDeviceKeyFor(userId)
-            val client = directorClients.client()
+            // Registering with a node the device is not registered with yet - a migration - binds the tokens
+            // to that node rather than to the old one.
+            val client = directorClients.client(pinnedNodeId = superNodeId?.let { Id.of(it) })
             try {
                 client.registerDevice(
                     deviceKey,
@@ -625,7 +652,7 @@ class AuthRepository @Inject constructor(
         keyManager.userId() ?: return // no identity yet; nothing to register
         val nodeId = probeNodeId() ?: return
         if (keyManager.registeredNodeId() == nodeId) return // already registered on this node
-        if (isPassphraseProtected()) return
+        if (isPassphraseProtected(nodeId)) return
         registerDevice(null, nodeId)
     }
 
@@ -644,7 +671,17 @@ class AuthRepository @Inject constructor(
 
     // The node id the configured Director reports now, or null when it cannot be asked.
     private suspend fun probeNodeId(): String? =
-        runCatching { directorClients.client().nodeId.await().toString() }.getOrNull()
+        runCatching { directorClients.probeNodeId().toString() }.getOrNull()
+
+    /** Runs [block] with a client for the OAuth session of [token], closing it afterwards. */
+    private suspend fun <T> withOAuth(token: String, block: suspend (DirectorOAuth) -> T): T {
+        val oauth = directorClients.oauth(token)
+        try {
+            return block(oauth)
+        } finally {
+            oauth.close()
+        }
+    }
 
     /** True if signed in, or signing in through OAuth (gates onboarding vs. home, and bind vs. create). */
     fun isSignedIn(): Boolean = oauthToken != null || sessionStore.currentSession() != null

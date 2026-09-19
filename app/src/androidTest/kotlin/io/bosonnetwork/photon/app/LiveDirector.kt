@@ -24,7 +24,7 @@ package io.bosonnetwork.photon.app
 
 import io.bosonnetwork.Id
 import io.bosonnetwork.crypto.Signature
-import io.bosonnetwork.director.client.DirectorAuth
+import io.bosonnetwork.director.client.DirectorGuest
 import io.bosonnetwork.director.client.DirectorClient
 import io.vertx.core.Vertx
 
@@ -50,9 +50,9 @@ object LiveDirector {
             deviceKey(deviceKey)
         }.build()
 
-    /** The client for what comes before a key: sign-in, and a new device joining an account. */
-    fun auth(vertx: Vertx): DirectorAuth =
-        DirectorAuth.builder().vertx(vertx).directorUrl(TestSuperNode.directorUrl).apply {
+    /** The client that needs no identity: node information, and a new device joining an account. */
+    fun guest(vertx: Vertx): DirectorGuest =
+        DirectorGuest.builder().vertx(vertx).directorUrl(TestSuperNode.directorUrl).apply {
             TestSuperNode.directorNodeId?.let { nodeId(Id.of(it)) }
         }.build()
 }
