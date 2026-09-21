@@ -18,6 +18,7 @@
     <string name="contacts_resend_request_description">Send your request to %1$s again. It replaces the one you sent before.</string>
     <string name="contacts_error_prefix_resend_request">Couldn\'t resend request</string>
     <string name="contacts_error_prefix_remove_request">Couldn\'t remove request</string>
+    <string name="contacts_error_prefix_block_user">Couldn\'t block user</string>
     <string name="contacts_action_copy">Copy</string>
     <string name="contacts_action_share">Share</string>
     <string name="contacts_action_done">Done</string>
@@ -114,6 +115,7 @@
     <!-- Block / remove contact confirmation dialogs -->
     <string name="contacts_block_contact_title">Block %1$s?</string>
     <string name="contacts_block_contact_message">You will no longer receive messages from this contact.</string>
+    <string name="contacts_block_request_message">You will no longer receive friend requests or messages from this user. Their request stays in the list until you remove it.</string>
     <string name="contacts_remove_contact_title">Remove contact?</string>
     <string name="contacts_remove_contact_message">%1$s will be removed from your contacts. You can add them again later with their ID.</string>
 

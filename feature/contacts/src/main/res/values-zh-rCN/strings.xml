@@ -18,6 +18,7 @@
     <string name="contacts_resend_request_description">再次向 %1$s 发送请求，将替换你之前发送的请求。</string>
     <string name="contacts_error_prefix_resend_request">重新发送请求失败</string>
     <string name="contacts_error_prefix_remove_request">删除请求失败</string>
+    <string name="contacts_error_prefix_block_user">屏蔽用户失败</string>
     <string name="contacts_action_copy">复制</string>
     <string name="contacts_action_share">分享</string>
     <string name="contacts_action_done">完成</string>
@@ -114,6 +115,7 @@
     <!-- Block / remove contact confirmation dialogs -->
     <string name="contacts_block_contact_title">屏蔽 %1$s？</string>
     <string name="contacts_block_contact_message">你将不再收到该联系人的消息。</string>
+    <string name="contacts_block_request_message">你将不再收到此用户的好友请求和消息。其请求会保留在列表中，直到你将其删除。</string>
     <string name="contacts_remove_contact_title">移除联系人？</string>
     <string name="contacts_remove_contact_message">%1$s 将从你的联系人中移除。之后你可以使用对方的 ID 重新添加。</string>
 

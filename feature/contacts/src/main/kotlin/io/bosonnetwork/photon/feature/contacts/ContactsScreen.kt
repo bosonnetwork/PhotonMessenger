@@ -44,6 +44,7 @@ import androidx.compose.material.icons.automirrored.filled.CallReceived
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.AddLink
+import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.GroupAdd
 import androidx.compose.material.icons.outlined.PersonAdd
@@ -136,6 +137,7 @@ fun ContactsScreen(
     var blockTarget by remember { mutableStateOf<UiContact?>(null) }
     var removeTarget by remember { mutableStateOf<UiContact?>(null) }
     var resendTarget by remember { mutableStateOf<UiFriendRequest?>(null) }
+    var blockRequestTarget by remember { mutableStateOf<UiFriendRequest?>(null) }
 
     LaunchedEffect(Unit) {
         viewModel.messages.collect { snackbar.showSnackbar(it) }
@@ -257,8 +259,27 @@ fun ContactsScreen(
                 viewModel.closeRequest()
                 resendTarget = request
             },
+            onBlock = {
+                viewModel.closeRequest()
+                blockRequestTarget = request
+            },
             onRemove = { viewModel.removeRequest(request.userId) },
             onDismiss = viewModel::closeRequest,
+        )
+    }
+
+    // Blocking is hard to take back from here (a blocked stranger is not listed as a contact), so it
+    // is confirmed first, like blocking a contact.
+    blockRequestTarget?.let { request ->
+        ConfirmDialog(
+            title = stringResource(R.string.contacts_block_contact_title, request.name ?: shortId(request.userId)),
+            text = stringResource(R.string.contacts_block_request_message),
+            confirmLabel = stringResource(R.string.contacts_action_block),
+            onConfirm = {
+                viewModel.block(request.userId)
+                blockRequestTarget = null
+            },
+            onDismiss = { blockRequestTarget = null },
         )
     }
 
@@ -513,7 +534,7 @@ private fun RequestList(
                 modifier = Modifier
                     .animateItem()
                     .clickable { onOpen(request.userId) }
-                    .alpha(if (request.status == FriendRequestStatus.EXPIRED) 0.6f else 1f),
+                    .alpha(if (request.status == FriendRequestStatus.EXPIRED || request.blocked) 0.6f else 1f),
                 colors = if (request.awaitingAnswer) {
                     ListItemDefaults.colors(
                         containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
@@ -569,9 +590,21 @@ private fun RequestList(
     }
 }
 
-/** Direction and state of a request as an icon + line, colored by state. */
+/** Direction and state of a request as an icon + line, colored by state; a blocked sender overrides both. */
 @Composable
 private fun FriendRequestStatusLabel(request: UiFriendRequest) {
+    if (request.blocked) {
+        val color = MaterialTheme.colorScheme.error
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Icon(Icons.Outlined.Block, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
+            Text(
+                stringResource(R.string.contacts_status_blocked),
+                style = MaterialTheme.typography.labelMedium,
+                color = color,
+            )
+        }
+        return
+    }
     val (icon, color) = when (request.status) {
         FriendRequestStatus.PENDING ->
             if (request.outgoing) {
@@ -603,9 +636,9 @@ private fun FriendRequestStatusLabel(request: UiFriendRequest) {
 
 /**
  * The details of a friend request with exactly the actions its state allows ([UiFriendRequest.actions]):
- * Accept / Ignore / Remove for an incoming request waiting for an answer, Resend / Remove for an
- * outgoing pending or expired one, and only Remove for an accepted one or an incoming expired one.
- * Ignore closes the dialog and nothing else.
+ * Accept / Ignore / Block / Remove for an incoming request waiting for an answer, Resend / Remove for an
+ * outgoing pending or expired one, and only Remove for an accepted one, an incoming expired one or one
+ * from a blocked user. Ignore closes the dialog and nothing else.
  */
 @Composable
 private fun FriendRequestDialog(
@@ -613,6 +646,7 @@ private fun FriendRequestDialog(
     onAccept: () -> Unit,
     onIgnore: () -> Unit,
     onResend: () -> Unit,
+    onBlock: () -> Unit,
     onRemove: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -656,6 +690,11 @@ private fun FriendRequestDialog(
         },
         dismissButton = {
             Row {
+                if (FriendRequestAction.BLOCK in actions) {
+                    TextButton(onClick = onBlock) {
+                        Text(stringResource(R.string.contacts_action_block), color = MaterialTheme.colorScheme.error)
+                    }
+                }
                 if (FriendRequestAction.REMOVE in actions) {
                     TextButton(onClick = onRemove) {
                         Text(stringResource(R.string.contacts_action_remove), color = MaterialTheme.colorScheme.error)

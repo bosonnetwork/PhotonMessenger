@@ -27,6 +27,7 @@ import app.cash.turbine.test
 import io.bosonnetwork.Id
 import io.bosonnetwork.photon.core.boson.BosonSessionManager
 import io.bosonnetwork.photon.feature.contacts.data.ContactRepositoryImpl
+import io.bosonnetwork.photon.feature.contacts.model.FriendRequestAction
 import io.bosonnetwork.photon.feature.contacts.model.FriendRequestStatus
 import io.bosonnetwork.photonmessaging.Contact
 import io.bosonnetwork.photonmessaging.FriendRequest
@@ -58,8 +59,23 @@ class ContactRepositoryFriendRequestsTest {
     /** The client's stored records, by the other user's id. */
     private val records = linkedMapOf<Id, FriendRequest>()
 
+    /** The client's contacts; blocking a user adds a blocked one, as the library does for a stranger. */
+    private val storedContacts = mutableListOf<Contact>()
+
+    private fun blockedContact(id: Id): Contact = mockk(relaxed = true) {
+        every { this@mockk.id } returns id
+        every { type } returns Contact.Type.AUTO
+        every { isBlocked } returns true
+    }
+
     private val client = mockk<MessagingClient>(relaxed = true) {
         every { getFriendRequests() } answers { CompletableFuture.completedFuture(records.values.toList()) }
+        every { getContacts() } answers { CompletableFuture.completedFuture(storedContacts.toList()) }
+        every { blockUser(any()) } answers {
+            val contact = blockedContact(firstArg())
+            storedContacts += contact
+            CompletableFuture.completedFuture(contact)
+        }
         every { acceptFriendRequest(any()) } answers {
             val id = firstArg<Id>()
             val fr = records.getValue(id)
@@ -194,5 +210,27 @@ class ContactRepositoryFriendRequestsTest {
             assertEquals(listOf(alice.toString()), awaitItem().map { it.id })
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `blocking keeps the request, shown as blocked with only remove left`() = runTest {
+        records[alice] = TestFriendRequest(alice, alice)
+
+        repository.friendRequests().test {
+            val before = awaitItem().single()
+            assertTrue(FriendRequestAction.BLOCK in before.actions)
+            assertTrue(before.awaitingAnswer)
+
+            assertTrue(repository.blockUser(alice.toString()).isSuccess)
+            val after = awaitItem().single()
+            assertEquals(alice.toString(), after.userId)
+            assertTrue(after.blocked)
+            assertEquals(FriendRequestStatus.PENDING, after.status)
+            assertEquals(listOf(FriendRequestAction.REMOVE), after.actions)
+            assertEquals(false, after.awaitingAnswer)
+            cancelAndIgnoreRemainingEvents()
+        }
+        verify(exactly = 1) { client.blockUser(alice) }
+        verify(exactly = 0) { client.removeFriendRequest(any()) }
     }
 }

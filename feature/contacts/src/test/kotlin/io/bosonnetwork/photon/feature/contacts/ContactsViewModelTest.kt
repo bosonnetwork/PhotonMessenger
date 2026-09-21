@@ -71,6 +71,8 @@ class ContactsViewModelTest {
             Result.success(Unit).also { requestCalls += "accept:$userIdText" }
         override suspend fun removeFriendRequest(userIdText: String) =
             Result.success(Unit).also { requestCalls += "remove:$userIdText" }
+        override suspend fun blockUser(userIdText: String) =
+            Result.success(Unit).also { requestCalls += "block:$userIdText" }
         override suspend fun setMuted(contactId: String, muted: Boolean) = Result.success(Unit)
         override suspend fun setBlocked(contactId: String, blocked: Boolean) = Result.success(Unit)
         var remarkArgs: Pair<String, String?>? = null
@@ -315,6 +317,24 @@ class ContactsViewModelTest {
             vm.accept("IN")
             assertNull(awaitItem().openedRequest)
             assertEquals(listOf("accept:IN"), repo.requestCalls)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `block blocks the sender and keeps the request`() = runTest {
+        requestsFlow.value = listOf(incoming)
+        val repo = FakeRepo(contactsFlow, requestsFlow)
+        val vm = ContactsViewModel(repo, FakeChannelRepo(), FakeProfileResolver(), fakeContext())
+
+        vm.uiState.test {
+            loaded()
+            vm.openRequest("IN")
+            awaitItem()
+            vm.block("IN")
+            assertNull(awaitItem().openedRequest)
+            // Blocking is its own call; nothing asks for the request to be removed.
+            assertEquals(listOf("block:IN"), repo.requestCalls)
             cancelAndIgnoreRemainingEvents()
         }
     }

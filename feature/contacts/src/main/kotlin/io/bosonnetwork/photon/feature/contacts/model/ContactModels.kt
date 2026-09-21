@@ -52,6 +52,12 @@ enum class FriendRequestAction {
     /** Leave an incoming request as it is: nothing is sent and the record is not touched. */
     IGNORE,
 
+    /**
+     * Block the sender (MessagingClient.blockUser): their requests and direct messages are dropped from
+     * now on. The request record stays until removed, but can no longer be accepted.
+     */
+    BLOCK,
+
     /** Send an outgoing request again (pending or expired), possibly with a new hello; it replaces the old one. */
     RESEND,
 
@@ -60,20 +66,29 @@ enum class FriendRequestAction {
 }
 
 /**
- * The actions a friend request offers, derived from its direction and status alone:
- * an incoming pending one can be accepted or ignored; an outgoing one that is pending or expired can be
- * resent (a new request replaces it); an accepted one, and an incoming expired one, can only be viewed.
- * Every request can be removed.
+ * The actions a friend request offers, derived from its direction and status (and whether the other
+ * user is blocked): an incoming pending one can be accepted, ignored or its sender blocked; an outgoing
+ * one that is pending or expired can be resent (a new request replaces it); an accepted one, an incoming
+ * expired one and any request of a blocked user can only be viewed. Every request can be removed.
  */
-fun friendRequestActions(outgoing: Boolean, status: FriendRequestStatus): List<FriendRequestAction> =
-    when (status) {
+fun friendRequestActions(
+    outgoing: Boolean,
+    status: FriendRequestStatus,
+    blocked: Boolean = false,
+): List<FriendRequestAction> =
+    if (blocked) listOf(FriendRequestAction.REMOVE) else when (status) {
         FriendRequestStatus.ACCEPTED -> listOf(FriendRequestAction.REMOVE)
         FriendRequestStatus.EXPIRED ->
             if (outgoing) listOf(FriendRequestAction.RESEND, FriendRequestAction.REMOVE)
             else listOf(FriendRequestAction.REMOVE)
         FriendRequestStatus.PENDING ->
             if (outgoing) listOf(FriendRequestAction.RESEND, FriendRequestAction.REMOVE)
-            else listOf(FriendRequestAction.ACCEPT, FriendRequestAction.IGNORE, FriendRequestAction.REMOVE)
+            else listOf(
+                FriendRequestAction.ACCEPT,
+                FriendRequestAction.IGNORE,
+                FriendRequestAction.BLOCK,
+                FriendRequestAction.REMOVE,
+            )
     }
 
 /**
@@ -85,17 +100,19 @@ data class UiFriendRequest(
     val hello: String,
     val outgoing: Boolean = false,
     val status: FriendRequestStatus = FriendRequestStatus.PENDING,
-    /** Last change (sent, replaced or accepted), in epoch millis; the list is ordered by it. */
+    /** Last change on this device (sent, received or accepted), in epoch millis; the list is ordered by it. */
     val updatedAt: Long = 0,
+    /** The other user is blocked: nothing more can be done with the request but remove it. */
+    val blocked: Boolean = false,
     val name: String? = null,
     val avatarUrl: String? = null,
 ) {
     /** An incoming request still waiting for this user's answer: the only kind that needs attention. */
     val awaitingAnswer: Boolean
-        get() = !outgoing && status == FriendRequestStatus.PENDING
+        get() = !outgoing && status == FriendRequestStatus.PENDING && !blocked
 
     val actions: List<FriendRequestAction>
-        get() = friendRequestActions(outgoing, status)
+        get() = friendRequestActions(outgoing, status, blocked)
 }
 
 fun Contact.toUi(avatarUrl: String? = null): UiContact {
@@ -115,7 +132,8 @@ fun Contact.toUi(avatarUrl: String? = null): UiContact {
     )
 }
 
-fun FriendRequest.toUi(): UiFriendRequest =
+/** [blocked]: whether the other user is a blocked contact (the request itself does not know). */
+fun FriendRequest.toUi(blocked: Boolean = false): UiFriendRequest =
     UiFriendRequest(
         userId = userId.toString(),
         hello = hello ?: "",
@@ -126,4 +144,5 @@ fun FriendRequest.toUi(): UiFriendRequest =
             else -> FriendRequestStatus.PENDING
         },
         updatedAt = updatedAt,
+        blocked = blocked,
     )

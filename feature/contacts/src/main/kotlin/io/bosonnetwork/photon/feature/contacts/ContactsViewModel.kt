@@ -184,6 +184,15 @@ class ContactsViewModel @Inject constructor(
             repository.sendFriendRequest(userId, hello)
         }
 
+    /**
+     * Blocks the sender of a request: their requests and direct messages are dropped from now on. The
+     * request itself stays listed, shown as blocked, until removed.
+     */
+    fun block(userId: String) =
+        run(R.string.contacts_error_prefix_block_user, onSuccess = ::closeRequest) {
+            repository.blockUser(userId)
+        }
+
     /** Deletes the request record: the only way a request leaves the list. */
     fun removeRequest(userId: String) =
         run(R.string.contacts_error_prefix_remove_request, onSuccess = ::closeRequest) {

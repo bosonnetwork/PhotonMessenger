@@ -24,6 +24,7 @@ package io.bosonnetwork.photon.feature.contacts
 
 import io.bosonnetwork.Id
 import io.bosonnetwork.photon.feature.contacts.model.FriendRequestAction.ACCEPT
+import io.bosonnetwork.photon.feature.contacts.model.FriendRequestAction.BLOCK
 import io.bosonnetwork.photon.feature.contacts.model.FriendRequestAction.IGNORE
 import io.bosonnetwork.photon.feature.contacts.model.FriendRequestAction.REMOVE
 import io.bosonnetwork.photon.feature.contacts.model.FriendRequestAction.RESEND
@@ -59,7 +60,7 @@ class FriendRequestModelsTest {
 
     @Test
     fun `actions follow direction and state`() {
-        assertEquals(listOf(ACCEPT, IGNORE, REMOVE), friendRequestActions(outgoing = false, FriendRequestStatus.PENDING))
+        assertEquals(listOf(ACCEPT, IGNORE, BLOCK, REMOVE), friendRequestActions(outgoing = false, FriendRequestStatus.PENDING))
         assertEquals(listOf(RESEND, REMOVE), friendRequestActions(outgoing = true, FriendRequestStatus.PENDING))
         // Accepted is final whichever side sent it: view and remove only.
         for (outgoing in listOf(true, false)) {
@@ -68,6 +69,25 @@ class FriendRequestModelsTest {
         // Expired cannot be accepted; the sender can still try again with a new request.
         assertEquals(listOf(REMOVE), friendRequestActions(outgoing = false, FriendRequestStatus.EXPIRED))
         assertEquals(listOf(RESEND, REMOVE), friendRequestActions(outgoing = true, FriendRequestStatus.EXPIRED))
+    }
+
+    @Test
+    fun `a blocked user's request can only be removed`() {
+        for (outgoing in listOf(true, false)) {
+            for (status in FriendRequestStatus.entries) {
+                assertEquals(listOf(REMOVE), friendRequestActions(outgoing, status, blocked = true))
+            }
+        }
+    }
+
+    @Test
+    fun `only an unconfirmed incoming request offers block`() {
+        for (outgoing in listOf(true, false)) {
+            for (status in FriendRequestStatus.entries) {
+                val offersBlock = BLOCK in friendRequestActions(outgoing, status)
+                assertEquals(!outgoing && status == FriendRequestStatus.PENDING, offersBlock)
+            }
+        }
     }
 
     @Test
@@ -109,6 +129,10 @@ class FriendRequestModelsTest {
         assertFalse(TestFriendRequest(other, self).toUi().awaitingAnswer)
         assertFalse(TestFriendRequest(other, other, accepted = true).toUi().awaitingAnswer)
         assertFalse(TestFriendRequest(other, other, expired = true).toUi().awaitingAnswer)
+        // Blocked: no longer waiting for anything.
+        val blocked = TestFriendRequest(other, other).toUi(blocked = true)
+        assertTrue(blocked.blocked)
+        assertFalse(blocked.awaitingAnswer)
     }
 
     @Test

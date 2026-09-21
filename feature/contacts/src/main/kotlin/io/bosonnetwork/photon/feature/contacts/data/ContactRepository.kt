@@ -73,6 +73,13 @@ interface ContactRepository {
 
     /** Deletes the request record. Ignoring a request has no counterpart here: it changes nothing. */
     suspend fun removeFriendRequest(userIdText: String): Result<Unit>
+
+    /**
+     * Blocks a user (MessagingClient.blockUser), whether or not they are a contact: their friend requests
+     * and direct messages are dropped from then on, on all of this user's devices. Their request records
+     * stay listed (as blocked) until removed.
+     */
+    suspend fun blockUser(userIdText: String): Result<Unit>
     suspend fun setMuted(contactId: String, muted: Boolean): Result<Unit>
     suspend fun setBlocked(contactId: String, blocked: Boolean): Result<Unit>
 
@@ -161,8 +168,14 @@ class ContactRepositoryImpl @Inject constructor(
 
     private fun friendRequestsOf(client: MessagingClient): Flow<List<UiFriendRequest>> = callbackFlow {
         suspend fun refresh() {
+            // A request does not know whether its sender is blocked; the contacts do.
+            val blocked = client.getContacts().awaitResult().filter { it.isBlocked }.map { it.id }.toSet()
             // No filtering: accepted and expired requests stay listed until the user removes them.
-            trySend(client.getFriendRequests().awaitResult().map { it.toUi() }.sortedByDescending { it.updatedAt })
+            trySend(
+                client.getFriendRequests().awaitResult()
+                    .map { it.toUi(blocked = it.userId in blocked) }
+                    .sortedByDescending { it.updatedAt },
+            )
         }
         refresh()
 
@@ -177,10 +190,11 @@ class ContactRepositoryImpl @Inject constructor(
             }
         }
         // Records also change with no friend request callback: a request sent or accepted on another of
-        // this user's devices. Both come with a contact change (the new friend is synced), so follow those.
+        // this user's devices comes with a new contact (the synced friend), and a block or unblock made on
+        // another device is a contact update. Follow both.
         val contactListener = object : ContactListener {
             override fun onContactAdded(contact: Contact) { launch { refresh() } }
-            override fun onContactsUpdated(contacts: List<Contact>) = Unit
+            override fun onContactsUpdated(contacts: List<Contact>) { launch { refresh() } }
             override fun onContactsRemoved(contactIds: List<Id>) = Unit
             override fun onContactsCleared() = Unit
         }
@@ -212,6 +226,15 @@ class ContactRepositoryImpl @Inject constructor(
     override suspend fun removeFriendRequest(userIdText: String): Result<Unit> = runCatching {
         client().removeFriendRequest(parseId(userIdText)).awaitResult()
         requestsRefresh.tryEmit(Unit)
+        Unit
+    }
+
+    override suspend fun blockUser(userIdText: String): Result<Unit> = runCatching {
+        client().blockUser(parseId(userIdText)).awaitResult()
+        // A local block fires no contact callback on this device: refresh both lists (the request shows
+        // as blocked; a blocked friend's row shows it too).
+        requestsRefresh.tryEmit(Unit)
+        contactsRefresh.tryEmit(Unit)
         Unit
     }
 
