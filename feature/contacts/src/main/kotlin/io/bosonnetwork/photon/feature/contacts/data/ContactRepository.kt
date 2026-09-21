@@ -55,15 +55,24 @@ interface ContactRepository {
     /** Live friends + channels; seeded from getContacts() and kept current via ContactListener. */
     fun contacts(): Flow<List<UiContact>>
 
-    /** Live pending friend requests; seeded from getFriendRequests() and kept current via the listener. */
+    /**
+     * Live list of EVERY friend request record - incoming and outgoing, pending, accepted and expired -
+     * newest change first; seeded from getFriendRequests() and kept current via the listeners. A record
+     * only leaves the list through [removeFriendRequest].
+     */
     fun friendRequests(): Flow<List<UiFriendRequest>>
 
     /** Live view of a single contact (for the detail screen); emits null once the contact is removed. */
     fun contact(contactId: String): Flow<UiContact?>
 
+    /** Sends a friend request, or resends one: a new request replaces the record kept for that user. */
     suspend fun sendFriendRequest(idText: String, hello: String): Result<Unit>
+
+    /** Accepts an incoming request; the record is kept, now accepted, and the sender becomes a friend. */
     suspend fun acceptFriendRequest(userIdText: String): Result<Unit>
-    suspend fun declineFriendRequest(userIdText: String): Result<Unit>
+
+    /** Deletes the request record. Ignoring a request has no counterpart here: it changes nothing. */
+    suspend fun removeFriendRequest(userIdText: String): Result<Unit>
     suspend fun setMuted(contactId: String, muted: Boolean): Result<Unit>
     suspend fun setBlocked(contactId: String, blocked: Boolean): Result<Unit>
 
@@ -82,7 +91,7 @@ class ContactRepositoryImpl @Inject constructor(
         session.messagingClient
             ?: throw AppError.Network(context.getString(R.string.contacts_error_not_connected))
 
-    // Local mutations (accept/decline a request, edit/remove a contact) are initiated by THIS device,
+    // Local mutations (send/accept/remove a request, edit/remove a contact) are initiated by THIS device,
     // so the messaging client deliberately does not fire the corresponding listener callback here (it
     // fires on the user's OTHER devices instead). We therefore poke the live flows ourselves after a
     // successful local op so the lists refresh without waiting for a callback that will never come.
@@ -104,7 +113,9 @@ class ContactRepositoryImpl @Inject constructor(
 
     private fun contactsOf(client: MessagingClient): Flow<List<UiContact>> = callbackFlow {
         suspend fun refresh() {
-            trySend(client.getContacts().awaitResult().map { it.toUi() })
+            // AUTO contacts are users known only because they were blocked (MessagingClient.blockUser):
+            // not friends, so they stay out of the friend and channel lists.
+            trySend(client.getContacts().awaitResult().filter { it.type != Contact.Type.AUTO }.map { it.toUi() })
         }
         refresh()
 
@@ -150,10 +161,8 @@ class ContactRepositoryImpl @Inject constructor(
 
     private fun friendRequestsOf(client: MessagingClient): Flow<List<UiFriendRequest>> = callbackFlow {
         suspend fun refresh() {
-            val pending = client.getFriendRequests().awaitResult()
-                .filter { !it.isAccepted }
-                .map { UiFriendRequest(it.userId.toString(), it.hello ?: "") }
-            trySend(pending)
+            // No filtering: accepted and expired requests stay listed until the user removes them.
+            trySend(client.getFriendRequests().awaitResult().map { it.toUi() }.sortedByDescending { it.updatedAt })
         }
         refresh()
 
@@ -167,25 +176,40 @@ class ContactRepositoryImpl @Inject constructor(
                 contactsRefresh.tryEmit(Unit)
             }
         }
+        // Records also change with no friend request callback: a request sent or accepted on another of
+        // this user's devices. Both come with a contact change (the new friend is synced), so follow those.
+        val contactListener = object : ContactListener {
+            override fun onContactAdded(contact: Contact) { launch { refresh() } }
+            override fun onContactsUpdated(contacts: List<Contact>) = Unit
+            override fun onContactsRemoved(contactIds: List<Id>) = Unit
+            override fun onContactsCleared() = Unit
+        }
         client.addFriendRequestListener(listener)
+        client.addContactListener(contactListener)
         val refreshJob = launch { requestsRefresh.collect { refresh() } }
-        awaitClose { client.removeFriendRequestListener(listener); refreshJob.cancel() }
+        awaitClose {
+            client.removeFriendRequestListener(listener)
+            client.removeContactListener(contactListener)
+            refreshJob.cancel()
+        }
     }
 
     override suspend fun sendFriendRequest(idText: String, hello: String): Result<Unit> = runCatching {
         client().friendRequest(parseId(idText), hello).awaitResult()
+        // The outgoing record is new (or replaced), and sending fires no callback on this device.
+        requestsRefresh.tryEmit(Unit)
         Unit
     }
 
     override suspend fun acceptFriendRequest(userIdText: String): Result<Unit> = runCatching {
         client().acceptFriendRequest(parseId(userIdText)).awaitResult()
-        // Accepting adds the sender as a contact AND clears the pending request on this device.
+        // Accepting adds the sender as a contact and marks the request accepted; the record stays.
         requestsRefresh.tryEmit(Unit)
         contactsRefresh.tryEmit(Unit)
         Unit
     }
 
-    override suspend fun declineFriendRequest(userIdText: String): Result<Unit> = runCatching {
+    override suspend fun removeFriendRequest(userIdText: String): Result<Unit> = runCatching {
         client().removeFriendRequest(parseId(userIdText)).awaitResult()
         requestsRefresh.tryEmit(Unit)
         Unit

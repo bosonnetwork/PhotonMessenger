@@ -6,7 +6,18 @@
     <string name="contacts_action_remove">移除</string>
     <string name="contacts_action_block">屏蔽</string>
     <string name="contacts_action_accept">接受</string>
-    <string name="contacts_action_decline">拒绝</string>
+    <string name="contacts_action_ignore">忽略</string>
+    <string name="contacts_action_resend">重新发送</string>
+    <string name="contacts_request_status_incoming_pending">想添加你为好友</string>
+    <string name="contacts_request_status_outgoing_pending">请求已发送，等待回复</string>
+    <string name="contacts_request_status_incoming_accepted">你已接受</string>
+    <string name="contacts_request_status_outgoing_accepted">已接受你的请求</string>
+    <string name="contacts_request_status_incoming_expired">请求已过期</string>
+    <string name="contacts_request_status_outgoing_expired">你的请求已过期</string>
+    <string name="contacts_resend_request_title">重新发送好友请求</string>
+    <string name="contacts_resend_request_description">再次向 %1$s 发送请求，将替换你之前发送的请求。</string>
+    <string name="contacts_error_prefix_resend_request">重新发送请求失败</string>
+    <string name="contacts_error_prefix_remove_request">删除请求失败</string>
     <string name="contacts_action_copy">复制</string>
     <string name="contacts_action_share">分享</string>
     <string name="contacts_action_done">完成</string>
@@ -69,7 +80,7 @@
     <!-- Empty / error states -->
     <string name="contacts_empty_friends">暂无好友。\n分享你的用户 ID(在设置中)或使用对方的 ID 添加好友。</string>
     <string name="contacts_empty_channels">暂无频道。\n点击群组图标创建一个,或使用邀请凭证加入。</string>
-    <string name="contacts_empty_requests">暂无待处理的请求。</string>
+    <string name="contacts_empty_requests">暂无好友请求。</string>
     <string name="contacts_contact_removed">该联系人已不在你的列表中</string>
     <string name="contacts_channel_not_found">未找到该频道</string>
     <string name="contacts_no_contacts_match">没有联系人匹配"%1$s"</string>
@@ -181,7 +192,6 @@
     <string name="contacts_error_unknown">未知错误</string>
     <string name="contacts_error_prefix_send_friend_request">好友请求发送失败</string>
     <string name="contacts_error_prefix_accept_request">接受请求失败</string>
-    <string name="contacts_error_prefix_decline_request">拒绝请求失败</string>
     <string name="contacts_error_prefix_update_contact">更新联系人失败</string>
     <string name="contacts_error_prefix_update_alias">更新备注失败</string>
     <string name="contacts_error_prefix_remove_contact">移除联系人失败</string>

@@ -6,7 +6,18 @@
     <string name="contacts_action_remove">Remove</string>
     <string name="contacts_action_block">Block</string>
     <string name="contacts_action_accept">Accept</string>
-    <string name="contacts_action_decline">Decline</string>
+    <string name="contacts_action_ignore">Ignore</string>
+    <string name="contacts_action_resend">Resend</string>
+    <string name="contacts_request_status_incoming_pending">Wants to be your friend</string>
+    <string name="contacts_request_status_outgoing_pending">Request sent, waiting for a reply</string>
+    <string name="contacts_request_status_incoming_accepted">You accepted</string>
+    <string name="contacts_request_status_outgoing_accepted">Accepted your request</string>
+    <string name="contacts_request_status_incoming_expired">Request expired</string>
+    <string name="contacts_request_status_outgoing_expired">Your request expired</string>
+    <string name="contacts_resend_request_title">Resend friend request</string>
+    <string name="contacts_resend_request_description">Send your request to %1$s again. It replaces the one you sent before.</string>
+    <string name="contacts_error_prefix_resend_request">Couldn\'t resend request</string>
+    <string name="contacts_error_prefix_remove_request">Couldn\'t remove request</string>
     <string name="contacts_action_copy">Copy</string>
     <string name="contacts_action_share">Share</string>
     <string name="contacts_action_done">Done</string>
@@ -69,7 +80,7 @@
     <!-- Empty / error states -->
     <string name="contacts_empty_friends">No friends yet.\nShare your user ID (Settings) or add a friend with theirs.</string>
     <string name="contacts_empty_channels">No channels yet.\nCreate one with the group icon, or join with an invite ticket.</string>
-    <string name="contacts_empty_requests">No pending requests.</string>
+    <string name="contacts_empty_requests">No friend requests.</string>
     <string name="contacts_contact_removed">This contact is no longer in your list</string>
     <string name="contacts_channel_not_found">Channel not found</string>
     <string name="contacts_no_contacts_match">No contacts match \"%1$s\"</string>
@@ -182,7 +193,6 @@
     <string name="contacts_error_unknown">unknown error</string>
     <string name="contacts_error_prefix_send_friend_request">Couldn\'t send friend request</string>
     <string name="contacts_error_prefix_accept_request">Couldn\'t accept request</string>
-    <string name="contacts_error_prefix_decline_request">Couldn\'t decline request</string>
     <string name="contacts_error_prefix_update_contact">Couldn\'t update contact</string>
     <string name="contacts_error_prefix_update_alias">Couldn\'t update alias</string>
     <string name="contacts_error_prefix_remove_contact">Couldn\'t remove contact</string>

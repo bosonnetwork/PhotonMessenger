@@ -41,13 +41,62 @@ data class UiContact(
     val avatarUrl: String? = null,
 )
 
-/** UI projection of an incoming friend request. [name]/[avatarUrl] are Director-resolved. */
+/** Where a friend request stands. Accepted and expired are final. */
+enum class FriendRequestStatus { PENDING, ACCEPTED, EXPIRED }
+
+/** What the user can do with a friend request. */
+enum class FriendRequestAction {
+    /** Accept an incoming request (it is kept, marked accepted). */
+    ACCEPT,
+
+    /** Leave an incoming request as it is: nothing is sent and the record is not touched. */
+    IGNORE,
+
+    /** Send an outgoing request again (pending or expired), possibly with a new hello; it replaces the old one. */
+    RESEND,
+
+    /** Delete the request record; the only way a request leaves the list. */
+    REMOVE,
+}
+
+/**
+ * The actions a friend request offers, derived from its direction and status alone:
+ * an incoming pending one can be accepted or ignored; an outgoing one that is pending or expired can be
+ * resent (a new request replaces it); an accepted one, and an incoming expired one, can only be viewed.
+ * Every request can be removed.
+ */
+fun friendRequestActions(outgoing: Boolean, status: FriendRequestStatus): List<FriendRequestAction> =
+    when (status) {
+        FriendRequestStatus.ACCEPTED -> listOf(FriendRequestAction.REMOVE)
+        FriendRequestStatus.EXPIRED ->
+            if (outgoing) listOf(FriendRequestAction.RESEND, FriendRequestAction.REMOVE)
+            else listOf(FriendRequestAction.REMOVE)
+        FriendRequestStatus.PENDING ->
+            if (outgoing) listOf(FriendRequestAction.RESEND, FriendRequestAction.REMOVE)
+            else listOf(FriendRequestAction.ACCEPT, FriendRequestAction.IGNORE, FriendRequestAction.REMOVE)
+    }
+
+/**
+ * UI projection of a friend request record, incoming or outgoing, in any state. [userId] is always the
+ * other user; [outgoing] says who sent it. [name]/[avatarUrl] are Director-resolved.
+ */
 data class UiFriendRequest(
     val userId: String,
     val hello: String,
+    val outgoing: Boolean = false,
+    val status: FriendRequestStatus = FriendRequestStatus.PENDING,
+    /** Last change (sent, replaced or accepted), in epoch millis; the list is ordered by it. */
+    val updatedAt: Long = 0,
     val name: String? = null,
     val avatarUrl: String? = null,
-)
+) {
+    /** An incoming request still waiting for this user's answer: the only kind that needs attention. */
+    val awaitingAnswer: Boolean
+        get() = !outgoing && status == FriendRequestStatus.PENDING
+
+    val actions: List<FriendRequestAction>
+        get() = friendRequestActions(outgoing, status)
+}
 
 fun Contact.toUi(avatarUrl: String? = null): UiContact {
     val id = getId().toString()
@@ -67,4 +116,14 @@ fun Contact.toUi(avatarUrl: String? = null): UiContact {
 }
 
 fun FriendRequest.toUi(): UiFriendRequest =
-    UiFriendRequest(userId = getUserId().toString(), hello = getHello() ?: "")
+    UiFriendRequest(
+        userId = userId.toString(),
+        hello = hello ?: "",
+        outgoing = isOutgoing,
+        status = when {
+            isAccepted -> FriendRequestStatus.ACCEPTED
+            isExpired -> FriendRequestStatus.EXPIRED
+            else -> FriendRequestStatus.PENDING
+        },
+        updatedAt = updatedAt,
+    )

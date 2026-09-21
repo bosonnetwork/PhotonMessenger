@@ -72,7 +72,8 @@ interface MessagingDao {
     @Query("SELECT * FROM friend_requests WHERE id = :id")
     fun getFriendRequest(id: ByteArray): FriendRequestEntity?
 
-    @Query("SELECT * FROM friend_requests ORDER BY createdAt ASC")
+    // Newest first, as the library's own SQL stores return them.
+    @Query("SELECT * FROM friend_requests ORDER BY createdAt DESC")
     fun getFriendRequests(): List<FriendRequestEntity>
 
     @Query("DELETE FROM friend_requests WHERE id = :id")

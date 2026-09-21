@@ -33,6 +33,10 @@ boson = "3.1.0"
 # Boson clients/director). It brings boson-api of the same snapshot, which Gradle resolves in place of
 # the 3.1.0 one the other Boson clients ask for.
 bosonDirectorClient = "3.1.2-SNAPSHOT"
+# The messaging client's friend request rules (one record per user replaced by a new request, both
+# sides expiring together, accepted/expired final) are not released yet either: the locally installed
+# snapshot (mvn clean install in Boson clients/messaging).
+bosonMessagingClient = "3.1.2-SNAPSHOT"
 vertx = "5.0.11"
 # Testing
 junit = "4.13.2"
@@ -96,7 +100,7 @@ zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" 
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugarJdkLibs" }
 # Boson stack (mavenLocal)
-boson-messaging-client = { group = "io.bosonnetwork", name = "boson-messaging-client", version.ref = "boson" }
+boson-messaging-client = { group = "io.bosonnetwork", name = "boson-messaging-client", version.ref = "bosonMessagingClient" }
 boson-ion-store-client = { group = "io.bosonnetwork", name = "boson-ion-store-client", version.ref = "boson" }
 boson-director-client = { group = "io.bosonnetwork", name = "boson-director-client", version.ref = "bosonDirectorClient" }
 vertx-lang-kotlin-coroutines = { group = "io.vertx", name = "vertx-lang-kotlin-coroutines", version.ref = "vertx" }

@@ -39,6 +39,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -54,9 +55,16 @@ data class ContactsUiState(
     val loading: Boolean = true,
     val friends: List<UiContact> = emptyList(),
     val channels: List<UiContact> = emptyList(),
+    /** Every friend request record, whatever its direction or state. */
     val requests: List<UiFriendRequest> = emptyList(),
+    /** The request whose details and actions are open, if any. */
+    val openedRequest: UiFriendRequest? = null,
     val error: String? = null,
-)
+) {
+    /** Incoming requests still waiting for an answer: what the Requests tab badge counts. */
+    val requestsAwaitingAnswer: Int
+        get() = requests.count { it.awaitingAnswer }
+}
 
 @HiltViewModel
 class ContactsViewModel @Inject constructor(
@@ -66,13 +74,19 @@ class ContactsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
+    /** The user id of the request opened for its details and actions. */
+    private val openedRequestId = MutableStateFlow<String?>(null)
+
     val uiState: StateFlow<ContactsUiState> =
-        combine(resolvedContacts(), resolvedFriendRequests()) { contacts, requests ->
+        combine(resolvedContacts(), resolvedFriendRequests(), openedRequestId) { contacts, requests, openedId ->
             ContactsUiState(
                 loading = false,
                 friends = contacts.filter { !it.isChannel },
                 channels = contacts.filter { it.isChannel },
                 requests = requests,
+                // Looked up in the live list, so the opened request shows its current state (and
+                // closes by itself once removed).
+                openedRequest = openedId?.let { id -> requests.find { it.userId == id } },
             )
         }.catch { e ->
             emit(ContactsUiState(loading = false, error = e.message))
@@ -143,11 +157,38 @@ class ContactsViewModel @Inject constructor(
         repository.sendFriendRequest(idText, hello)
     }
 
-    fun accept(userId: String) =
-        run(R.string.contacts_error_prefix_accept_request) { repository.acceptFriendRequest(userId) }
+    /** Opens a friend request to show its details and the actions its state allows. */
+    fun openRequest(userId: String) {
+        openedRequestId.value = userId
+    }
 
-    fun decline(userId: String) =
-        run(R.string.contacts_error_prefix_decline_request) { repository.declineFriendRequest(userId) }
+    fun closeRequest() {
+        openedRequestId.value = null
+    }
+
+    /** Accepts an incoming request. The record stays, marked accepted. */
+    fun accept(userId: String) =
+        run(R.string.contacts_error_prefix_accept_request, onSuccess = ::closeRequest) {
+            repository.acceptFriendRequest(userId)
+        }
+
+    /**
+     * Ignores an incoming request: leaves it exactly as it is (nothing sent, nothing stored), so it can
+     * still be accepted later while it has not expired. Only the opened request is closed.
+     */
+    fun ignore() = closeRequest()
+
+    /** Sends an outgoing request again, with [hello] replacing the old greeting. */
+    fun resend(userId: String, hello: String) =
+        run(R.string.contacts_error_prefix_resend_request, onSuccess = ::closeRequest) {
+            repository.sendFriendRequest(userId, hello)
+        }
+
+    /** Deletes the request record: the only way a request leaves the list. */
+    fun removeRequest(userId: String) =
+        run(R.string.contacts_error_prefix_remove_request, onSuccess = ::closeRequest) {
+            repository.removeFriendRequest(userId)
+        }
 
     fun setMuted(contactId: String, muted: Boolean) = run(R.string.contacts_error_prefix_update_contact) {
         repository.setMuted(contactId, muted)
@@ -173,11 +214,15 @@ class ContactsViewModel @Inject constructor(
         }
     }
 
-    private fun run(@StringRes failurePrefixRes: Int, action: suspend () -> Result<Unit>) {
+    private fun run(
+        @StringRes failurePrefixRes: Int,
+        onSuccess: () -> Unit = {},
+        action: suspend () -> Result<Unit>,
+    ) {
         viewModelScope.launch {
-            action().onFailure { e ->
-                _messages.tryEmit(errorMessage(failurePrefixRes, e))
-            }
+            action()
+                .onSuccess { onSuccess() }
+                .onFailure { e -> _messages.tryEmit(errorMessage(failurePrefixRes, e)) }
         }
     }
 

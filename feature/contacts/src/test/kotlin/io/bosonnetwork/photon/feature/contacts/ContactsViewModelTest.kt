@@ -31,6 +31,8 @@ import io.bosonnetwork.photon.feature.contacts.model.UiChannel
 import io.bosonnetwork.photon.feature.contacts.model.UiChannelDetail
 import io.bosonnetwork.photon.feature.contacts.model.UiChannelPermission
 import io.bosonnetwork.photon.feature.contacts.model.UiChannelRole
+import io.bosonnetwork.photon.feature.contacts.model.FriendRequestAction
+import io.bosonnetwork.photon.feature.contacts.model.FriendRequestStatus
 import io.bosonnetwork.photon.feature.contacts.model.UiContact
 import io.bosonnetwork.photon.feature.contacts.model.UiFriendRequest
 import io.bosonnetwork.photonmessaging.exceptions.rpc.ChannelMemberLimitExceededException
@@ -44,6 +46,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 
@@ -60,9 +63,14 @@ class ContactsViewModelTest {
         override fun contacts() = contacts
         override fun friendRequests() = requests
         override fun contact(contactId: String): Flow<UiContact?> = MutableStateFlow(null)
-        override suspend fun sendFriendRequest(idText: String, hello: String) = sendResult
-        override suspend fun acceptFriendRequest(userIdText: String) = Result.success(Unit)
-        override suspend fun declineFriendRequest(userIdText: String) = Result.success(Unit)
+        /** Every friend request mutation asked of the repository, in order. */
+        val requestCalls = mutableListOf<String>()
+        override suspend fun sendFriendRequest(idText: String, hello: String) =
+            sendResult.also { requestCalls += "send:$idText:$hello" }
+        override suspend fun acceptFriendRequest(userIdText: String) =
+            Result.success(Unit).also { requestCalls += "accept:$userIdText" }
+        override suspend fun removeFriendRequest(userIdText: String) =
+            Result.success(Unit).also { requestCalls += "remove:$userIdText" }
         override suspend fun setMuted(contactId: String, muted: Boolean) = Result.success(Unit)
         override suspend fun setBlocked(contactId: String, blocked: Boolean) = Result.success(Unit)
         var remarkArgs: Pair<String, String?>? = null
@@ -262,6 +270,112 @@ class ContactsViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
         assertEquals(listOf("CHAN1" to "a"), channelRepo.invitedContacts)
+    }
+
+    private suspend fun app.cash.turbine.ReceiveTurbine<ContactsUiState>.loaded(): ContactsUiState {
+        var state = awaitItem()
+        while (state.loading) state = awaitItem()
+        return state
+    }
+
+    private val incoming = UiFriendRequest("IN", "hi", outgoing = false, status = FriendRequestStatus.PENDING)
+
+    @Test
+    fun `ignore leaves the request untouched and only closes it`() = runTest {
+        requestsFlow.value = listOf(incoming)
+        val repo = FakeRepo(contactsFlow, requestsFlow)
+        val vm = ContactsViewModel(repo, FakeChannelRepo(), FakeProfileResolver(), fakeContext())
+
+        vm.uiState.test {
+            loaded()
+            vm.openRequest("IN")
+            assertEquals("IN", awaitItem().openedRequest?.userId)
+
+            vm.ignore()
+            val state = awaitItem()
+            assertNull(state.openedRequest)
+            // Nothing asked of the repository, and the request is still listed, still waiting.
+            assertEquals(emptyList<String>(), repo.requestCalls)
+            assertEquals(listOf(incoming), state.requests)
+            assertEquals(1, state.requestsAwaitingAnswer)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `accept only accepts, it never removes the request`() = runTest {
+        requestsFlow.value = listOf(incoming)
+        val repo = FakeRepo(contactsFlow, requestsFlow)
+        val vm = ContactsViewModel(repo, FakeChannelRepo(), FakeProfileResolver(), fakeContext())
+
+        vm.uiState.test {
+            loaded()
+            vm.openRequest("IN")
+            awaitItem()
+            vm.accept("IN")
+            assertNull(awaitItem().openedRequest)
+            assertEquals(listOf("accept:IN"), repo.requestCalls)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `remove deletes the request record`() = runTest {
+        val repo = FakeRepo(contactsFlow, requestsFlow)
+        val vm = ContactsViewModel(repo, FakeChannelRepo(), FakeProfileResolver(), fakeContext())
+
+        vm.removeRequest("IN")
+        assertEquals(listOf("remove:IN"), repo.requestCalls)
+    }
+
+    @Test
+    fun `resend sends the request again with the new hello`() = runTest {
+        val repo = FakeRepo(contactsFlow, requestsFlow)
+        val vm = ContactsViewModel(repo, FakeChannelRepo(), FakeProfileResolver(), fakeContext())
+
+        vm.resend("OUT", "hi again")
+        assertEquals(listOf("send:OUT:hi again"), repo.requestCalls)
+    }
+
+    @Test
+    fun `every request is listed, only incoming pending ones await an answer`() = runTest {
+        requestsFlow.value = listOf(
+            incoming,
+            UiFriendRequest("OUT", "hi", outgoing = true, status = FriendRequestStatus.PENDING),
+            UiFriendRequest("ACC", "hi", outgoing = false, status = FriendRequestStatus.ACCEPTED),
+            UiFriendRequest("EXP", "hi", outgoing = false, status = FriendRequestStatus.EXPIRED),
+        )
+        val vm = ContactsViewModel(FakeRepo(contactsFlow, requestsFlow), FakeChannelRepo(), FakeProfileResolver(), fakeContext())
+
+        vm.uiState.test {
+            val state = loaded()
+            assertEquals(listOf("IN", "OUT", "ACC", "EXP"), state.requests.map { it.userId })
+            assertEquals(1, state.requestsAwaitingAnswer)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `the opened request follows its live state`() = runTest {
+        requestsFlow.value = listOf(incoming)
+        val vm = ContactsViewModel(FakeRepo(contactsFlow, requestsFlow), FakeChannelRepo(), FakeProfileResolver(), fakeContext())
+
+        vm.uiState.test {
+            loaded()
+            vm.openRequest("IN")
+            assertEquals(FriendRequestStatus.PENDING, awaitItem().openedRequest?.status)
+
+            // Accepted on another device: the open request shows it, and offers only Remove now.
+            requestsFlow.value = listOf(incoming.copy(status = FriendRequestStatus.ACCEPTED))
+            val accepted = awaitItem().openedRequest
+            assertEquals(FriendRequestStatus.ACCEPTED, accepted?.status)
+            assertEquals(listOf(FriendRequestAction.REMOVE), accepted?.actions)
+
+            // Removed: nothing left to show.
+            requestsFlow.value = emptyList()
+            assertNull(awaitItem().openedRequest)
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     private companion object {

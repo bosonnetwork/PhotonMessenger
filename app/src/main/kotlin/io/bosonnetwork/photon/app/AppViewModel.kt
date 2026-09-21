@@ -95,8 +95,9 @@ class AppViewModel @Inject constructor(
     fun dismissMigration() = sessionController.dismissMigration()
 
     // friendRequests() re-subscribes itself when the session's client appears, so this just follows it.
+    // The list holds every request record; only incoming ones still waiting for an answer need attention.
     private val pendingRequestCount: Flow<Int> =
-        contactRepository.friendRequests().map { it.size }.catch { emit(0) }
+        contactRepository.friendRequests().map { list -> list.count { it.awaitingAnswer } }.catch { emit(0) }
 
     /** Bottom-tab badges: total unread messages (Chats) and pending friend requests (Contacts). */
     val badges: StateFlow<TabBadges> =

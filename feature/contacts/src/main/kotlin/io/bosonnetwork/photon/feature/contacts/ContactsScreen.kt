@@ -35,15 +35,20 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.CallMade
+import androidx.compose.material.icons.automirrored.filled.CallReceived
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.AddLink
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.GroupAdd
 import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -52,6 +57,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -72,6 +78,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -95,6 +102,8 @@ import io.bosonnetwork.photon.core.designsystem.component.PhotonAvatar
 import io.bosonnetwork.photon.core.designsystem.component.ResponsiveContent
 import io.bosonnetwork.photon.core.model.shortId
 import io.bosonnetwork.photon.core.qr.QrScanner
+import io.bosonnetwork.photon.feature.contacts.model.FriendRequestAction
+import io.bosonnetwork.photon.feature.contacts.model.FriendRequestStatus
 import io.bosonnetwork.photon.feature.contacts.model.UiContact
 import io.bosonnetwork.photon.feature.contacts.model.UiFriendRequest
 
@@ -126,6 +135,7 @@ fun ContactsScreen(
     var editAliasContact by remember { mutableStateOf<UiContact?>(null) }
     var blockTarget by remember { mutableStateOf<UiContact?>(null) }
     var removeTarget by remember { mutableStateOf<UiContact?>(null) }
+    var resendTarget by remember { mutableStateOf<UiFriendRequest?>(null) }
 
     LaunchedEffect(Unit) {
         viewModel.messages.collect { snackbar.showSnackbar(it) }
@@ -180,15 +190,16 @@ fun ContactsScreen(
                             onClick = { selectedTab = index },
                             text = {
                                 val label = tab.label()
-                                // Pending requests are actionable notifications, so they get a badge;
-                                // friend/channel totals stay as a plain "(count)" suffix.
-                                if (tab == ContactsTab.REQUESTS && count > 0) {
+                                // Requests waiting for an answer are actionable notifications, so they get
+                                // a badge; otherwise (and for friends/channels) the total is a plain
+                                // "(count)" suffix.
+                                if (tab == ContactsTab.REQUESTS && state.requestsAwaitingAnswer > 0) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     ) {
                                         Text(label)
-                                        CountBadge(count)
+                                        CountBadge(state.requestsAwaitingAnswer)
                                     }
                                 } else {
                                     Text(
@@ -222,8 +233,8 @@ fun ContactsScreen(
                         )
                         ContactsTab.REQUESTS -> RequestList(
                             requests = state.requests,
+                            onOpen = viewModel::openRequest,
                             onAccept = viewModel::accept,
-                            onDecline = viewModel::decline,
                         )
                         ContactsTab.CHANNELS -> ChannelList(
                             channels = state.channels,
@@ -235,6 +246,31 @@ fun ContactsScreen(
                 }
             }
         }
+    }
+
+    state.openedRequest?.let { request ->
+        FriendRequestDialog(
+            request = request,
+            onAccept = { viewModel.accept(request.userId) },
+            onIgnore = viewModel::ignore,
+            onResend = {
+                viewModel.closeRequest()
+                resendTarget = request
+            },
+            onRemove = { viewModel.removeRequest(request.userId) },
+            onDismiss = viewModel::closeRequest,
+        )
+    }
+
+    resendTarget?.let { request ->
+        ResendRequestDialog(
+            request = request,
+            onDismiss = { resendTarget = null },
+            onSubmit = { hello ->
+                viewModel.resend(request.userId, hello)
+                resendTarget = null
+            },
+        )
     }
 
     if (showAddDialog) {
@@ -461,8 +497,8 @@ private fun ChannelList(
 @Composable
 private fun RequestList(
     requests: List<UiFriendRequest>,
+    onOpen: (String) -> Unit,
     onAccept: (String) -> Unit,
-    onDecline: (String) -> Unit,
 ) {
     if (requests.isEmpty()) {
         EmptyState(stringResource(R.string.contacts_empty_requests), icon = Icons.Outlined.PersonAdd)
@@ -470,8 +506,21 @@ private fun RequestList(
     }
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         items(requests, key = { it.userId }) { request ->
+            // Every record is listed; its look follows its state. A request waiting for an answer is
+            // highlighted and offers Accept right in the row; an expired one is faded. Tapping any row
+            // opens the actions its state allows.
             ListItem(
-                modifier = Modifier.animateItem(),
+                modifier = Modifier
+                    .animateItem()
+                    .clickable { onOpen(request.userId) }
+                    .alpha(if (request.status == FriendRequestStatus.EXPIRED) 0.6f else 1f),
+                colors = if (request.awaitingAnswer) {
+                    ListItemDefaults.colors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                    )
+                } else {
+                    ListItemDefaults.colors()
+                },
                 leadingContent = {
                     PhotonAvatar(
                         model = request.avatarUrl,
@@ -503,19 +552,162 @@ private fun RequestList(
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilledTonalButton(onClick = { onAccept(request.userId) }) {
-                                Text(stringResource(R.string.contacts_action_accept))
-                            }
-                            TextButton(onClick = { onDecline(request.userId) }) {
-                                Text(stringResource(R.string.contacts_action_decline))
-                            }
+                        FriendRequestStatusLabel(request)
+                    }
+                },
+                trailingContent = if (FriendRequestAction.ACCEPT in request.actions) {
+                    {
+                        FilledTonalButton(onClick = { onAccept(request.userId) }) {
+                            Text(stringResource(R.string.contacts_action_accept))
                         }
                     }
+                } else {
+                    null
                 },
             )
         }
     }
+}
+
+/** Direction and state of a request as an icon + line, colored by state. */
+@Composable
+private fun FriendRequestStatusLabel(request: UiFriendRequest) {
+    val (icon, color) = when (request.status) {
+        FriendRequestStatus.PENDING ->
+            if (request.outgoing) {
+                Icons.AutoMirrored.Filled.CallMade to MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                Icons.AutoMirrored.Filled.CallReceived to MaterialTheme.colorScheme.primary
+            }
+        FriendRequestStatus.ACCEPTED -> Icons.Filled.CheckCircle to MaterialTheme.colorScheme.tertiary
+        FriendRequestStatus.EXPIRED -> Icons.Outlined.Schedule to MaterialTheme.colorScheme.outline
+    }
+    val text = stringResource(
+        when (request.status) {
+            FriendRequestStatus.PENDING ->
+                if (request.outgoing) R.string.contacts_request_status_outgoing_pending
+                else R.string.contacts_request_status_incoming_pending
+            FriendRequestStatus.ACCEPTED ->
+                if (request.outgoing) R.string.contacts_request_status_outgoing_accepted
+                else R.string.contacts_request_status_incoming_accepted
+            FriendRequestStatus.EXPIRED ->
+                if (request.outgoing) R.string.contacts_request_status_outgoing_expired
+                else R.string.contacts_request_status_incoming_expired
+        },
+    )
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
+        Text(text, style = MaterialTheme.typography.labelMedium, color = color)
+    }
+}
+
+/**
+ * The details of a friend request with exactly the actions its state allows ([UiFriendRequest.actions]):
+ * Accept / Ignore / Remove for an incoming request waiting for an answer, Resend / Remove for an
+ * outgoing pending or expired one, and only Remove for an accepted one or an incoming expired one.
+ * Ignore closes the dialog and nothing else.
+ */
+@Composable
+private fun FriendRequestDialog(
+    request: UiFriendRequest,
+    onAccept: () -> Unit,
+    onIgnore: () -> Unit,
+    onResend: () -> Unit,
+    onRemove: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val actions = request.actions
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            PhotonAvatar(
+                model = request.avatarUrl,
+                name = request.name,
+                colorKey = request.userId,
+                size = 56.dp,
+            )
+        },
+        title = {
+            Text(request.name ?: shortId(request.userId), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    request.userId,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FriendRequestStatusLabel(request)
+                if (request.hello.isNotBlank()) {
+                    Text(stringResource(R.string.contacts_request_hello_format, request.hello))
+                }
+            }
+        },
+        confirmButton = {
+            when {
+                FriendRequestAction.ACCEPT in actions -> FilledTonalButton(onClick = onAccept) {
+                    Text(stringResource(R.string.contacts_action_accept))
+                }
+                FriendRequestAction.RESEND in actions -> FilledTonalButton(onClick = onResend) {
+                    Text(stringResource(R.string.contacts_action_resend))
+                }
+                else -> TextButton(onClick = onDismiss) { Text(stringResource(R.string.contacts_action_done)) }
+            }
+        },
+        dismissButton = {
+            Row {
+                if (FriendRequestAction.REMOVE in actions) {
+                    TextButton(onClick = onRemove) {
+                        Text(stringResource(R.string.contacts_action_remove), color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                when {
+                    FriendRequestAction.IGNORE in actions -> TextButton(onClick = onIgnore) {
+                        Text(stringResource(R.string.contacts_action_ignore))
+                    }
+                    FriendRequestAction.RESEND in actions -> TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.contacts_action_cancel))
+                    }
+                }
+            }
+        },
+    )
+}
+
+/** Resends an outgoing request; the hello starts as the previous one and can be changed. */
+@Composable
+private fun ResendRequestDialog(
+    request: UiFriendRequest,
+    onDismiss: () -> Unit,
+    onSubmit: (String) -> Unit,
+) {
+    var hello by remember(request.userId) { mutableStateOf(request.hello) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.contacts_resend_request_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    stringResource(
+                        R.string.contacts_resend_request_description,
+                        request.name ?: shortId(request.userId),
+                    ),
+                )
+                OutlinedTextField(
+                    value = hello,
+                    onValueChange = { hello = it },
+                    label = { Text(stringResource(R.string.contacts_label_say_hello)) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSubmit(hello) }) { Text(stringResource(R.string.contacts_action_send)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.contacts_action_cancel)) }
+        },
+    )
 }
 
 @Composable
