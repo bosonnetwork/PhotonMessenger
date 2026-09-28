@@ -44,7 +44,8 @@ What a super node does is route ciphertext and hold it briefly for offline deliv
 **not** do is read it. See [Security](#security).
 
 **Project status:** version 0.5.1, feature-complete for the core messaging experience and in active
-development. APIs, wire formats, and storage schemas may still change between releases.
+development. APIs, wire formats, and storage schemas may still change between releases. See
+[CHANGELOG.md](CHANGELOG.md) for what each release contains.
 
 ---
 
