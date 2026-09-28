@@ -24,12 +24,6 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # The Boson messaging-client / ion-store-client are resolved from the local Maven repo.
-      # CI must publish them to ~/.m2 first (clone + `mvn install` of the Boson client modules),
-      # or restore a cached ~/.m2/repository/io/bosonnetwork snapshot. Wire this in M0/X-O1.
-      - name: Restore Boson artifacts (mavenLocal)
-        run: echo "TODO: install boson-messaging-client / boson-ion-store-client into ~/.m2"
-
       - name: Assemble debug
         run: ./gradlew assembleDebug --no-daemon
 

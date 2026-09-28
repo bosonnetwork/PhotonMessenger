@@ -42,8 +42,8 @@ import kotlinx.coroutines.launch
  * Built lazily once keys + discovered coordinates exist; created with node == null (no embedded DHT).
  * Exposes connection state and a simple reconnect-with-backoff loop (M1-19).
  *
- * NOTE: runtime depends on the persistence backend (D-5); against the current `jdbc:sqlite:` config
- * `start()` will fail on-device until that is resolved. The construction/lifecycle wiring is complete.
+ * Persistence is the injected [MessagingStore] (the Room-backed store from :core:database), so no
+ * JDBC/SQL backend is involved on-device.
  */
 class BosonSessionManager(
     private val factory: BosonClientFactory,

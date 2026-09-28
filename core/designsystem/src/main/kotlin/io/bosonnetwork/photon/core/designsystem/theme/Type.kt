@@ -24,6 +24,6 @@ package io.bosonnetwork.photon.core.designsystem.theme
 
 import androidx.compose.material3.Typography
 
-// Default Material 3 type scale. Custom font families (Outfit / Inter / JetBrains Mono per design
-// spec section 5.2) are wired in M6 polish once the font resources are added.
+// Default Material 3 type scale, which the app ships with: the custom font families the design spec
+// sketched (section 5.2) were not adopted, so there are no font resources to wire in.
 val PhotonTypography = Typography()

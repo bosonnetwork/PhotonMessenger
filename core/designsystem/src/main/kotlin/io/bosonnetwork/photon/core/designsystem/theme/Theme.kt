@@ -99,7 +99,7 @@ private val DarkColors = darkColorScheme(
 )
 
 /**
- * PhotonMessenger Material 3 theme. Supports light/dark and Android 12+ dynamic color
+ * Photon Material 3 theme. Supports light/dark and Android 12+ dynamic color
  * (design spec section 5.1).
  */
 @Composable

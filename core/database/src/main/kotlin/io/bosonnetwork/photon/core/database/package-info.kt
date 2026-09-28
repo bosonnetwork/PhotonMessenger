@@ -22,5 +22,6 @@
 
 package io.bosonnetwork.photon.core.database
 
-// Optional Room cache for fast cold-start render (design spec M3-9). Entities and DAOs are added
-// in M3; this module is kept separate from the MessagingClient's own SQLite store.
+// Room storage for the app. Holds two things: the messaging client's own persistence, through the
+// MessagingStore seam it exposes (RoomMessagingStore, Option A - the client runs no SQL backend of
+// its own on Android), and app-owned state such as the cold-start render cache and channel invites.

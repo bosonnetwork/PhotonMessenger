@@ -17,7 +17,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        // Boson messaging-client / ion-store-client are installed to the local Maven repo.
+        // The Boson client libraries are released on Maven Central; mavenLocal stays in the list
+        // so an unreleased snapshot can be tested by installing it with `mvn clean install`.
         mavenLocal()
     }
 }

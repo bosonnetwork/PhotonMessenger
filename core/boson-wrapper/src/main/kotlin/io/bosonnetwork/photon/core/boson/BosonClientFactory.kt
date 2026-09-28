@@ -37,10 +37,6 @@ import java.nio.file.Path
  * created with node == null and a fixed mqtts endpoint carried by the Configuration.
  *
  * Private keys are passed in the libsodium-style 64-byte form (seed || publicKey).
- *
- * NOTE: this M0 factory exists to prove the Boson types resolve and the construction contract
- * compiles against the local Maven artifacts. Key loading, lifecycle ownership, and listener
- * registration are wired in M1 (M1-13..M1-16).
  */
 class BosonClientFactory(
     private val vertx: Vertx,

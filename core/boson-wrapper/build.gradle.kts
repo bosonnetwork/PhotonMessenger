@@ -30,10 +30,11 @@ dependencies {
     implementation(project(":core:security"))
     implementation(project(":core:network"))
 
-    // Boson stack from mavenLocal. Brings Vert.x 5, Netty, Jackson, sqlite-jdbc, slf4j,
-    // boson-api and boson-dht transitively. NOTE (Android runtime risk - see M0 build report):
-    // xerial sqlite-jdbc is a desktop-JVM artifact; the persistence backend is replaced per D-5
-    // (SQLDroid-backed Android Database) before the client can run on-device.
+    // Boson stack. Brings Vert.x 5, Netty, Jackson, sqlite-jdbc, slf4j and boson-api transitively,
+    // but not boson-dht: the clients only need it for their own tests, and the phone runs no node.
+    // Persistence goes through the MessagingStore seam instead - :core:database's Room-backed store
+    // (Option A) - so the transitive desktop-JVM xerial sqlite-jdbc is never loaded on-device
+    // (consumer-rules.pro only silences the leftover references).
     //
     // Logging (D-6): exclude the desktop logback-classic binding (uses JMX / java.lang.management,
     // absent on Android) and bind slf4j to an Android-friendly provider below. slf4j is just the
@@ -48,8 +49,8 @@ dependencies {
     api(libs.boson.director.client) {
         exclude(group = "ch.qos.logback")
     }
-    // slf4j 2.x binding for Android (System.err -> logcat). A logcat-native binding
-    // (slf4j-handroid / logback-android) is a M6 polish upgrade.
+    // slf4j 2.x binding for Android (writes to System.err, which logcat picks up). A logcat-native
+    // binding (slf4j-handroid / logback-android) would give tags and levels, and stays an option.
     runtimeOnly(libs.slf4j.simple)
 
     // Async bridges (design spec section 4.5)

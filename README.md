@@ -1,7 +1,7 @@
 # Photon
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Android%2013%2B-green.svg)](https://developer.android.com/)
+[![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B-green.svg)](https://developer.android.com/)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.1-purple.svg)](https://kotlinlang.org/)
 [![Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-blue.svg)](https://developer.android.com/jetpack/compose)
 
@@ -101,7 +101,9 @@ remains possible for self-hosted deployments; it is simply out of scope for the 
   demote members, kick and ban, and rotate the channel session key.
 - **Channel invitations** in two forms: a named invite delivered as an in-chat card with
   Join / Ignore actions, and a shareable bearer link.
-- **Friend requests and contacts** - request, accept, remark, and remove.
+- **Friend requests and contacts** - send a request, then accept, ignore, resend, or remove it;
+  every request shows its direction and state. Senders can be blocked, contacts remarked and
+  removed.
 - **Message actions** - copy, forward to a contact or channel, save, delete, and retry a failed
   send.
 - **Local history** - conversations and messages are stored on the device in an embedded SQLite
@@ -290,57 +292,24 @@ send. Create a channel from Contacts to start a group.
 
 ### Prerequisites
 
-| Requirement | Version                                            |
-|---|----------------------------------------------------|
-| JDK | 17 (Eclipse Temurin recommended)                   |
-| Android SDK | Platform `android-36`, build-tools 36.x            |
+| Requirement | Version |
+|---|---|
+| JDK | 17 (Eclipse Temurin recommended) |
+| Android SDK | Platform `android-36`, build-tools 36.x |
 | Android Studio | Ladybug or later (optional, but the supported IDE) |
-| Boson client artifacts | `3.1.0` in the local Maven repository (see below)  |
-| Boson Director client | `3.1.2-SNAPSHOT` in the local Maven repository (see below) |
+| Gradle | 8.13, through the bundled wrapper - nothing to install |
 
-Photon supports **Android 13 (API 33) and later**, compiles against API 36, and enables Java 8+
-API desugaring because it dexes the JVM Boson stack (Vert.x 5, Netty, Jackson).
+Photon runs on **Android 8.0 (API 26) and later**, compiles against API 36, and enables Java 8+
+API desugaring because it dexes the JVM Boson stack (Vert.x 5, Netty, Jackson). A few capabilities
+need a newer platform and are simply absent below it: voice messages and saving media to the
+gallery need Android 10 (API 29), dynamic color needs Android 12 (API 31), and notifications ask
+for a runtime permission from Android 13 (API 33).
 
-### 1. Install the Boson client libraries
+The Boson client libraries - `boson-messaging-client`, `boson-ion-store-client` and
+`boson-director-client`, all at `3.1.2` - are released on Maven Central, so there is nothing to
+clone or install by hand.
 
-Photon resolves `io.bosonnetwork:boson-messaging-client`,
-`io.bosonnetwork:boson-ion-store-client` and `io.bosonnetwork:boson-director-client` from
-`mavenLocal()`. Build them from their own repositories, in this order - each one installs artifacts
-the next depends on:
-
-```bash
-# 1. Parent POM and dependency BOM
-git clone https://github.com/bosonnetwork/Boson.Parent.git
-(cd Boson.Parent && ./mvnw clean install)
-
-git clone https://github.com/bosonnetwork/Boson.Dependencies.git
-(cd Boson.Dependencies && ./mvnw clean install)
-
-# 2. Core (DHT, crypto, shared API)
-git clone https://github.com/bosonnetwork/Boson.Core.git
-(cd Boson.Core && ./mvnw clean install -DskipTests)
-
-# 3. The two client libraries Photon links against
-git clone https://github.com/bosonnetwork/Boson.Messaging.Client.git
-(cd Boson.Messaging.Client && ./mvnw clean install -DskipTests)
-
-git clone https://github.com/bosonnetwork/Boson.IonStore.Client.git
-(cd Boson.IonStore.Client && ./mvnw clean install -DskipTests)
-
-# 4. The Director client, which all Director communication goes through
-git clone https://github.com/bosonnetwork/Boson.Director.Client.git
-(cd Boson.Director.Client && ./mvnw clean install -DskipTests)
-```
-
-The Director client is not released yet: Photon uses its `3.1.2-SNAPSHOT`, which needs the parent
-POM, dependency BOM and core at that same snapshot version in the local repository. It also brings
-`boson-api` of that version, which Gradle then resolves in place of the `3.1.0` one.
-
-> **Always include `clean`.** A bare incremental `install` can package whatever already sits in
-> `target/classes` - including classes built by the IDE's compiler, which may embed errors that
-> surface only at runtime inside the app. Use `clean install` when publishing to `~/.m2`.
-
-### 2. Build the app
+### Build the app
 
 ```bash
 git clone https://github.com/bosonnetwork/PhotonMessenger.git
@@ -352,7 +321,7 @@ cd PhotonMessenger
 The Android SDK location comes from `local.properties` (`sdk.dir=...`) or the `ANDROID_HOME`
 environment variable. Android Studio writes `local.properties` for you on first open.
 
-### 3. Release builds
+### Release builds
 
 ```bash
 ./gradlew assembleRelease
@@ -380,6 +349,11 @@ testable.
   through `BosonClientFactory.newVertx()`, which disables it.
 - Boson client wire DTOs consumed by the app must be plain classes, not Java records: Jackson's
   record support fails on Android, and only in release builds.
+- The build still resolves from `mavenLocal()`, so an unreleased Boson snapshot can be tested by
+  running `./mvnw clean install` in the Boson repository and pointing `boson` in
+  `gradle/libs.versions.toml` at that version. **Always include `clean`:** a bare incremental
+  `install` can package whatever already sits in `target/classes`, including IDE-compiled classes
+  that carry errors surfacing only at runtime inside the app.
 
 ---
 
@@ -391,8 +365,11 @@ testable.
 ./gradlew connectedDebugAndroidTest      # instrumented tests (device or emulator required)
 ```
 
-Unit tests are hermetic and use `mockk` and `turbine`. The instrumented suite exercises the real
-Boson stack against a live super node, so it needs a reachable node and network access.
+Unit tests are hermetic and use `mockk` and `turbine`. The instrumented tests come in two kinds:
+the `:core` ones (Room storage, Compose components) need only a device or emulator, while the
+`:app` `Live*` tests drive the real Boson stack against a running super node - point them at your
+own by editing `TestSuperNode` in `app/src/androidTest`. `docs/d1-run-checklist.md` collects the
+manual on-device checks that cannot be automated.
 
 ---
 
@@ -402,6 +379,7 @@ Boson stack against a live super node, so it needs a reachable node and network 
 |---|---|
 | [`docs/photon_messenger_design_spec.md`](docs/photon_messenger_design_spec.md) | The implementation blueprint: Boson API analysis, auth and identity flows, screen specs, architecture, roadmap |
 | [`docs/impl-plan.md`](docs/impl-plan.md) | Milestone task tracker |
+| [`docs/d1-run-checklist.md`](docs/d1-run-checklist.md) | Manual device-gated verification checklist |
 | [`docs/security-review.md`](docs/security-review.md) | Security review notes |
 | [`docs/persistence-option-a.md`](docs/persistence-option-a.md) | Local persistence design |
 | [`docs/m0-build-report.md`](docs/m0-build-report.md) | Integration risk notes on running the JVM Boson stack on Android |
@@ -417,9 +395,12 @@ Boson stack against a live super node, so it needs a reachable node and network 
   federated end-to-end encrypted messaging client library Photon is built on.
 - [**Boson.IonStore.Client**](https://github.com/bosonnetwork/Boson.IonStore.Client) - the
   content-addressed object store client library used for attachments.
+- [**Boson.Director.Client**](https://github.com/bosonnetwork/Boson.Director.Client) - the client
+  library for the super node's REST API, which all Director traffic goes through.
 - [**Boson.Releases**](https://github.com/bosonnetwork/Boson.Releases) - pre-built super node
   distributions for macOS, Linux, and Windows.
-- [**Boson Network**](https://github.com/bosonnetwork) - all Boson Network repositories.
+- [**Boson Network**](https://github.com/bosonnetwork) - all Boson Network repositories, and
+  [bosonnetwork.io](https://bosonnetwork.io) for the project site.
 
 ---
 

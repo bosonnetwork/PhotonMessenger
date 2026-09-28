@@ -25,18 +25,8 @@ mlkitBarcode = "17.3.0"
 zxing = "3.5.3"
 # Security
 securityCrypto = "1.1.0-alpha06"
-# Boson stack (installed in mavenLocal). Vert.x/Jackson/Netty match boson-dependencies BOM.
-# 3.0.2 carries the MessagingStore persistence seam (Option A).
-# 3.1.0 carries the typed channel/member limit refusals the plan-limit messages need.
-boson = "3.1.0"
-# The Director client is not released yet: the locally installed snapshot (mvn clean install in
-# Boson clients/director). It brings boson-api of the same snapshot, which Gradle resolves in place of
-# the 3.1.0 one the other Boson clients ask for.
-bosonDirectorClient = "3.1.2-SNAPSHOT"
-# The messaging client's friend request rules (one record per user replaced by a new request, both
-# sides expiring together, accepted/expired final) are not released yet either: the locally installed
-# snapshot (mvn clean install in Boson clients/messaging).
-bosonMessagingClient = "3.1.2-SNAPSHOT"
+# Boson stack (Maven Central). Vert.x/Jackson/Netty match boson-dependencies BOM.
+boson = "3.1.2"
 vertx = "5.0.11"
 # Testing
 junit = "4.13.2"
@@ -99,10 +89,10 @@ zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" 
 # Security
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugarJdkLibs" }
-# Boson stack (mavenLocal)
-boson-messaging-client = { group = "io.bosonnetwork", name = "boson-messaging-client", version.ref = "bosonMessagingClient" }
+# Boson stack
+boson-messaging-client = { group = "io.bosonnetwork", name = "boson-messaging-client", version.ref = "boson" }
 boson-ion-store-client = { group = "io.bosonnetwork", name = "boson-ion-store-client", version.ref = "boson" }
-boson-director-client = { group = "io.bosonnetwork", name = "boson-director-client", version.ref = "bosonDirectorClient" }
+boson-director-client = { group = "io.bosonnetwork", name = "boson-director-client", version.ref = "boson" }
 vertx-lang-kotlin-coroutines = { group = "io.vertx", name = "vertx-lang-kotlin-coroutines", version.ref = "vertx" }
 slf4j-simple = { group = "org.slf4j", name = "slf4j-simple", version.ref = "slf4j" }
 # Testing
