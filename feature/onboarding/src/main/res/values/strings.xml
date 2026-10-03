@@ -38,6 +38,8 @@
     <string name="onb_passphrase_title">Enter your account passphrase</string>
     <string name="onb_passphrase_desc">Your account is protected by a passphrase. Enter it to register this device.</string>
     <string name="onb_passphrase_label">Passphrase</string>
+    <string name="onb_passphrase_link_desc">This identity is protected by a passphrase. Enter it to link the identity to your sign-in and register this device.</string>
+    <string name="onb_error_wrong_passphrase">Wrong passphrase</string>
     <string name="onb_register_device">Register this device</string>
 
     <string name="onb_solving_title">Creating your account</string>

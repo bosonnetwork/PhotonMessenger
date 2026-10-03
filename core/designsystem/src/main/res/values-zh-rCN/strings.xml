@@ -12,4 +12,29 @@
     <!-- TimeFormat: chat day-header labels -->
     <string name="ds_time_today">今天</string>
     <string name="ds_time_yesterday">昨天</string>
+
+    <!-- Passphrase: the strength rule a new passphrase must meet (the Director's own) -->
+    <string name="ds_passphrase_too_short">至少 8 个字符</string>
+    <string name="ds_passphrase_too_plain">请使用更多不同的字符</string>
+
+    <!-- Passphrase: a passphrase-gated action refused after too many wrong passphrases -->
+    <string name="ds_passphrase_locked">口令错误次数过多，请在 %1$s后重试。</string>
+    <plurals name="ds_wait_seconds">
+        <item quantity="other">%d 秒</item>
+    </plurals>
+    <plurals name="ds_wait_minutes">
+        <item quantity="other">%d 分钟</item>
+    </plurals>
+    <plurals name="ds_wait_hours">
+        <item quantity="other">%d 小时</item>
+    </plurals>
+
+    <!-- RecoveryCodesDialog: new passphrase recovery codes, shown once -->
+    <string name="ds_recovery_codes_title">你的恢复码</string>
+    <string name="ds_recovery_codes_body">忘记口令时，可用其中任意一个恢复码重置口令，每个只能使用一次。恢复码只在此刻显示：请将其妥善保存，并与私钥分开存放。</string>
+    <string name="ds_recovery_codes_saved">我已将这些恢复码妥善保存</string>
+    <string name="ds_recovery_codes_text">Boson 口令恢复码\n\n用户：%1$s\n\n%2$s\n\n每个恢复码可重置一次遗忘的口令。请与私钥分开存放。\n</string>
+    <string name="ds_action_copy">复制</string>
+    <string name="ds_action_share">分享</string>
+    <string name="ds_action_done">完成</string>
 </resources>

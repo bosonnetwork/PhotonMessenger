@@ -26,6 +26,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.bosonnetwork.photon.core.designsystem.component.passphraseLockedMessage
 import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.feature.settings.R
 import io.bosonnetwork.photon.feature.settings.data.SettingsRepository
@@ -123,6 +124,18 @@ class SessionsViewModel @Inject constructor(
     }
 
     private fun handleRemoveFailure(deviceId: String, error: Throwable) {
+        // Too many wrong passphrases: keep the prompt, saying how long to wait.
+        if (error is AppError.RateLimited && error.retryAfterSeconds > 0) {
+            _uiState.update {
+                it.copy(
+                    passphrasePrompt = PassphrasePrompt(
+                        deviceId,
+                        context.resources.passphraseLockedMessage(error.retryAfterSeconds),
+                    ),
+                )
+            }
+            return
+        }
         when (error) {
             is AppError.PassphraseRequired ->
                 _uiState.update { it.copy(passphrasePrompt = PassphrasePrompt(deviceId)) }

@@ -23,6 +23,7 @@
 package io.bosonnetwork.photon.core.boson
 
 import io.bosonnetwork.director.client.exceptions.DirectorException
+import io.bosonnetwork.director.client.exceptions.RateLimitException
 import io.bosonnetwork.photon.core.model.AppError
 import java.io.IOException
 import java.util.concurrent.CompletionException
@@ -33,8 +34,9 @@ import java.util.concurrent.ExecutionException
  * call it got an answer to with a [DirectorException] carrying the HTTP status; the passphrase-gated
  * operations additionally use 428 (a passphrase is configured but was not supplied) and 403 (the supplied
  * passphrase is wrong), and device pairing 408 (expired) and 412 (denied). A call that got no answer
- * carries [DirectorException.NO_HTTP_STATUS]. Anything already an [AppError] (client-side validation)
- * passes through unchanged.
+ * carries [DirectorException.NO_HTTP_STATUS]. A 429 after too many wrong passphrases says how long to wait,
+ * carried as [AppError.RateLimited.retryAfterSeconds]. Anything already an [AppError] (client-side
+ * validation) passes through unchanged.
  */
 fun Throwable.toDirectorError(): AppError = when (val e = unwrapped()) {
     is AppError -> e
@@ -46,7 +48,11 @@ fun Throwable.toDirectorError(): AppError = when (val e = unwrapped()) {
         408 -> AppError.Timeout("The request timed out", e)
         409, 412 -> AppError.Conflict(e.message, e)
         428 -> AppError.PassphraseRequired("Passphrase required", e)
-        429 -> AppError.RateLimited("The server is busy; try again in a moment", e)
+        429 -> AppError.RateLimited(
+            "The server is busy; try again in a moment",
+            e,
+            (e as? RateLimitException)?.retryAfter ?: 0,
+        )
         else -> AppError.Unknown("Request failed (HTTP ${e.status})", e)
     }
     is IOException -> AppError.Network("Can't reach the server", e)

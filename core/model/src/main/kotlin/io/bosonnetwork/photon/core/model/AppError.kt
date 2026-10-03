@@ -67,9 +67,15 @@ sealed class AppError(message: String?, cause: Throwable? = null) : Exception(me
 
     /**
      * The server is rate-limiting the client (HTTP 429). Transient: the operation can be retried after
-     * a short back-off. Surfaced e.g. by the registration proof-of-work burst limiter.
+     * a short back-off. Surfaced e.g. by the registration proof-of-work burst limiter, and by the
+     * passphrase lockout after too many wrong passphrases, which says how long to wait in
+     * [retryAfterSeconds] (0 when the server did not say).
      */
-    class RateLimited(message: String? = null, cause: Throwable? = null) : AppError(message, cause)
+    class RateLimited(
+        message: String? = null,
+        cause: Throwable? = null,
+        val retryAfterSeconds: Long = 0,
+    ) : AppError(message, cause)
 
     /** State conflict, e.g. identity already bound (HTTP 409, 412). */
     class Conflict(message: String? = null, cause: Throwable? = null) : AppError(message, cause)

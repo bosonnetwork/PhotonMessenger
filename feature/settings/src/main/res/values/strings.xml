@@ -63,6 +63,32 @@
     <string name="settings_passphrase_remove_body">Enter your current passphrase to remove it. Sensitive changes will no longer be protected.</string>
     <string name="settings_passphrase_label">Passphrase</string>
 
+    <!-- SettingsScreen: passphrase recovery (recovery codes, forgot passphrase) -->
+    <string name="settings_passphrase_codes_next">Next you get recovery codes: each resets the passphrase once if you forget it.</string>
+    <string name="settings_recovery_codes_left">Recovery codes: %1$d left</string>
+    <string name="settings_recovery_none_warning">No way to reset a forgotten passphrase is set up. Make recovery codes now.</string>
+    <string name="settings_recovery_codes_new_action">New recovery codes</string>
+    <string name="settings_recovery_codes_new_title">New recovery codes</string>
+    <string name="settings_recovery_codes_new_body">New codes replace the earlier ones, which stop working. Enter your passphrase to make them.</string>
+    <string name="settings_recovery_codes_new_confirm">Make new codes</string>
+    <string name="settings_recovery_codes_error">Couldn\'t make recovery codes: %1$s</string>
+    <string name="settings_recovery_codes_after_set_error">Passphrase saved, but recovery codes couldn\'t be made: %1$s. Make them from Settings.</string>
+    <string name="settings_forgot_action">Forgot passphrase?</string>
+    <string name="settings_forgot_title">Forgot your passphrase?</string>
+    <string name="settings_forgot_choose_body">Reset it without the old one.</string>
+    <string name="settings_forgot_no_method">No recovery code, linked account or passkey is set up for this account, so the passphrase can\'t be reset.</string>
+    <string name="settings_forgot_use_code">Use a recovery code</string>
+    <string name="settings_forgot_use_portal">Use a linked account or passkey</string>
+    <string name="settings_forgot_portal_hint">Opens the web portal: sign in there, then choose Forgot passphrase.</string>
+    <string name="settings_forgot_code_body">Enter one of your recovery codes. It works only once.</string>
+    <string name="settings_forgot_code_label">Recovery code</string>
+    <string name="settings_forgot_code_invalid">That code is wrong or has been used</string>
+    <string name="settings_forgot_new_body">Choose a new passphrase.</string>
+    <string name="settings_forgot_reset_action">Reset passphrase</string>
+    <string name="settings_forgot_grant_expired">The reset took too long. Enter another recovery code.</string>
+    <string name="settings_forgot_reset_done">Passphrase reset</string>
+    <string name="settings_action_continue">Continue</string>
+
     <!-- SettingsScreen: profile header + edit-profile dialog -->
     <string name="settings_change_photo_content_description">Change profile photo</string>
     <string name="settings_no_name_set">No name set</string>

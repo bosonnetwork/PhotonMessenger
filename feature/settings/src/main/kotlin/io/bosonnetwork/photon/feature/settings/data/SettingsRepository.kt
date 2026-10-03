@@ -42,11 +42,14 @@ import io.bosonnetwork.photon.core.network.ThemePreferencesStore
 import io.bosonnetwork.photon.feature.settings.R
 import io.bosonnetwork.photon.feature.settings.model.UiDevice
 import io.bosonnetwork.photon.feature.settings.model.UiProfile
+import io.bosonnetwork.photon.feature.settings.model.UiRecoveryMethods
 import io.bosonnetwork.Id
 import io.bosonnetwork.photonmessaging.SessionInfo
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.future.await
 
 /**
@@ -73,6 +76,24 @@ interface SettingsRepository {
 
     /** Removes the account passphrase; [currentPassphrase] must match the configured one. */
     suspend fun clearPassphrase(currentPassphrase: String): Result<Unit>
+
+    /**
+     * Makes a new set of recovery codes, replacing any earlier ones; [passphrase] is the current one.
+     * Each code resets a forgotten passphrase once; they are returned only now.
+     */
+    suspend fun makeRecoveryCodes(passphrase: String): Result<List<String>>
+
+    /**
+     * Redeems a recovery code of the signed-in user for a short-lived reset grant; a wrong or used code
+     * fails with [AppError.Forbidden]. The code is spent.
+     */
+    suspend fun redeemRecoveryCode(code: String): Result<String>
+
+    /** Sets a new passphrase with a reset [grant]; an expired or used grant fails with [AppError.Unauthorized]. */
+    suspend fun resetPassphrase(grant: String, newPassphrase: String): Result<Unit>
+
+    /** The Director's web portal, where a linked account or a passkey can reset the passphrase. */
+    suspend fun portalUrl(): String
 
     /** Live messaging sessions (service-level); one row per connected device (screen 6). */
     suspend fun loadSessions(): Result<List<UiDevice>>
@@ -131,8 +152,20 @@ class SettingsRepositoryImpl @Inject constructor(
             avatarUrl = avatarUrl,
             plan = profile.planName,
             passphraseProtected = profile.isPassphraseProtected,
+            recovery = loadRecoveryMethods(),
         )
     }
+
+    // Optional: the security section still shows without it.
+    private suspend fun loadRecoveryMethods(): UiRecoveryMethods? =
+        try {
+            val methods = director().recoveryMethods.await()
+            UiRecoveryMethods(methods.oauth(), methods.passkeys(), methods.recoveryCodes())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
 
     override suspend fun updateProfile(
         name: String?,
@@ -161,6 +194,22 @@ class SettingsRepositoryImpl @Inject constructor(
         director().clearPassphrase(currentPassphrase).await()
         Unit
     }.mapDirectorError()
+
+    override suspend fun makeRecoveryCodes(passphrase: String): Result<List<String>> = runCatching {
+        director().makeRecoveryCodes(passphrase).await()
+    }.mapDirectorError()
+
+    override suspend fun redeemRecoveryCode(code: String): Result<String> = runCatching {
+        val userId = keyManager.userId() ?: throw AppError.Unauthorized("No identity on this device")
+        directorClients.guest().redeemRecoveryCode(userId, code.trim()).await()
+    }.mapDirectorError()
+
+    override suspend fun resetPassphrase(grant: String, newPassphrase: String): Result<Unit> = runCatching {
+        directorClients.guest().resetPassphrase(grant, newPassphrase).await()
+        Unit
+    }.mapDirectorError()
+
+    override suspend fun portalUrl(): String = directorClients.config.first().baseUrl + PORTAL_PATH
 
     override suspend fun updateAvatar(uriString: String): Result<Unit> = runCatching {
         val prepared = avatarPreparer.prepare(uriString)
@@ -269,4 +318,9 @@ class SettingsRepositoryImpl @Inject constructor(
     /** Re-wraps a Director HTTP failure as an [AppError] so the UI can tell 428/403 apart (M6 passphrase). */
     private fun <T> Result<T>.mapDirectorError(): Result<T> =
         recoverCatching { throw it.toDirectorError() }
+
+    private companion object {
+        // Where the Director serves the user portal by default (web.portalPath).
+        const val PORTAL_PATH = "/portal/"
+    }
 }

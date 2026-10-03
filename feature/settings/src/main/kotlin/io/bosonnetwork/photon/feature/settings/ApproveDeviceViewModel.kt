@@ -26,6 +26,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.bosonnetwork.photon.core.designsystem.component.passphraseLockedMessage
 import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.feature.settings.R
 import io.bosonnetwork.photon.feature.settings.data.DevicePairingRepository
@@ -139,6 +140,17 @@ class ApproveDeviceViewModel @Inject constructor(
                 needsPassphrase = true,
                 passphraseError = context.getString(R.string.settings_wrong_passphrase),
             )
+        // Too many wrong passphrases: keep the confirmation, saying how long to wait.
+        is AppError.RateLimited ->
+            if (retryAfterSeconds > 0) {
+                ApproveDeviceUiState.Confirm(
+                    info,
+                    needsPassphrase = true,
+                    passphraseError = context.resources.passphraseLockedMessage(retryAfterSeconds),
+                )
+            } else {
+                ApproveDeviceUiState.Failed(userMessage())
+            }
         else -> ApproveDeviceUiState.Failed(userMessage())
     }
 }

@@ -84,6 +84,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.bosonnetwork.photon.core.designsystem.component.RecoveryCodesDialog
+import io.bosonnetwork.photon.core.designsystem.component.passphraseProblem
 import io.bosonnetwork.photon.core.qr.QrScanner
 import io.bosonnetwork.photon.core.qr.rememberQrBitmap
 import io.bosonnetwork.photon.feature.onboarding.R
@@ -118,6 +120,10 @@ fun OnboardingScreen(
 
     LaunchedEffect(state.step) {
         if (state.step == OnboardingStep.Authenticated) onAuthenticated()
+    }
+
+    state.recoveryCodes?.let { codes ->
+        RecoveryCodesDialog(codes = codes.codes, userId = codes.userId, onDone = viewModel::dismissRecoveryCodes)
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -300,6 +306,9 @@ fun OnboardingScreen(
                         )
                         // Setting a passphrase only applies to permissionless account creation; the OAuth
                         // bind path manages account security differently, so hide it there.
+                        val createPassphraseProblem = state.createPassphrase
+                            .takeIf { state.creatingNewAccount && it.isNotEmpty() }
+                            ?.let(::passphraseProblem)
                         if (state.creatingNewAccount) {
                             var showAdvanced by remember { mutableStateOf(state.createPassphrase.isNotBlank()) }
                             Spacer(Modifier.height(8.dp))
@@ -309,8 +318,13 @@ fun OnboardingScreen(
                                     onValueChange = viewModel::onCreatePassphraseChange,
                                     label = { Text(stringResource(R.string.onb_passphrase_optional_label)) },
                                     supportingText = {
-                                        Text(stringResource(R.string.onb_passphrase_optional_supporting))
+                                        Text(
+                                            stringResource(
+                                                createPassphraseProblem ?: R.string.onb_passphrase_optional_supporting,
+                                            ),
+                                        )
                                     },
+                                    isError = createPassphraseProblem != null,
                                     singleLine = true,
                                     visualTransformation = PasswordVisualTransformation(),
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -323,7 +337,7 @@ fun OnboardingScreen(
                         Spacer(Modifier.height(16.dp))
                         Button(
                             onClick = viewModel::completeProfile,
-                            enabled = state.displayName.isNotBlank(),
+                            enabled = state.displayName.isNotBlank() && createPassphraseProblem == null,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text(
@@ -337,7 +351,10 @@ fun OnboardingScreen(
                         Text(stringResource(R.string.onb_passphrase_title), style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            stringResource(R.string.onb_passphrase_desc),
+                            stringResource(
+                                if (state.passphraseForLink) R.string.onb_passphrase_link_desc
+                                else R.string.onb_passphrase_desc,
+                            ),
                             style = MaterialTheme.typography.bodyMedium,
                             textAlign = TextAlign.Center,
                         )

@@ -78,7 +78,13 @@ class SettingsViewModelsTest {
         var actionResult: Result<Unit> = Result.success(Unit),
         var removeResult: Result<Unit> = Result.success(Unit),
         var passphraseResult: Result<Unit> = Result.success(Unit),
+        var codesResult: Result<List<String>> = Result.success(listOf("AAAA-BBBB-CCCC-DDDD")),
+        var redeemResult: Result<String> = Result.success("grant-1"),
+        var resetResult: Result<Unit> = Result.success(Unit),
     ) : SettingsRepository {
+        var codesPassphrase: String? = null
+        var redeemedCode: String? = null
+        var resetArgs: Pair<String, String>? = null
         var lastThemeMode: ThemeMode? = null
         var notificationsEnabled: Boolean? = null
         var signedOut = false
@@ -99,6 +105,12 @@ class SettingsViewModelsTest {
             passphraseResult.also { setPassphraseArgs = newPassphrase to currentPassphrase }
         override suspend fun clearPassphrase(currentPassphrase: String) =
             passphraseResult.also { clearedPassphrase = currentPassphrase }
+        override suspend fun makeRecoveryCodes(passphrase: String) =
+            codesResult.also { codesPassphrase = passphrase }
+        override suspend fun redeemRecoveryCode(code: String) = redeemResult.also { redeemedCode = code }
+        override suspend fun resetPassphrase(grant: String, newPassphrase: String) =
+            resetResult.also { resetArgs = grant to newPassphrase }
+        override suspend fun portalUrl() = "https://node.example/portal/"
         override suspend fun loadSessions() = sessions
         override suspend fun loadDevices() = devices
         override suspend fun revokeSession(deviceId: String) = actionResult.also { revoked = deviceId }
@@ -232,6 +244,63 @@ class SettingsViewModelsTest {
             assertTrue(awaitItem().contains("Wrong passphrase"))
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `a first passphrase comes with recovery codes`() = runTest {
+        val repo = FakeSettingsRepo(themeFlow)
+        val vm = SettingsViewModel(repo, fakeContext())
+        vm.setPassphrase("first passphrase", null)
+        assertEquals("first passphrase", repo.codesPassphrase)
+        assertEquals(listOf("AAAA-BBBB-CCCC-DDDD"), vm.recoveryCodes.value)
+        vm.dismissRecoveryCodes()
+        assertEquals(null, vm.recoveryCodes.value)
+    }
+
+    @Test
+    fun `changing the passphrase makes no recovery codes`() = runTest {
+        val repo = FakeSettingsRepo(themeFlow)
+        val vm = SettingsViewModel(repo, fakeContext())
+        vm.setPassphrase("second passphrase", "first passphrase")
+        assertEquals(null, repo.codesPassphrase)
+        assertEquals(null, vm.recoveryCodes.value)
+    }
+
+    @Test
+    fun `a forgotten passphrase is reset with a recovery code`() = runTest {
+        val repo = FakeSettingsRepo(themeFlow)
+        val vm = SettingsViewModel(repo, fakeContext())
+        vm.openForgotPassphrase()
+        vm.forgotWithRecoveryCode()
+        vm.redeemRecoveryCode("aaaa bbbb cccc dddd")
+        assertEquals("aaaa bbbb cccc dddd", repo.redeemedCode)
+        assertEquals(ForgotPassphraseStep.NewPassphrase, vm.forgot.value?.step)
+        vm.resetPassphrase("third passphrase")
+        assertEquals("grant-1" to "third passphrase", repo.resetArgs)
+        assertEquals(null, vm.forgot.value)
+    }
+
+    @Test
+    fun `a wrong recovery code keeps the code step with an error`() = runTest {
+        val repo = FakeSettingsRepo(themeFlow, redeemResult = Result.failure(AppError.Forbidden("Invalid recovery code")))
+        val vm = SettingsViewModel(repo, fakeContext())
+        vm.openForgotPassphrase()
+        vm.forgotWithRecoveryCode()
+        vm.redeemRecoveryCode("nope")
+        assertEquals(ForgotPassphraseStep.Code, vm.forgot.value?.step)
+        assertTrue(vm.forgot.value?.error != null)
+    }
+
+    @Test
+    fun `an expired reset grant goes back to the code step`() = runTest {
+        val repo = FakeSettingsRepo(themeFlow, resetResult = Result.failure(AppError.Unauthorized("expired")))
+        val vm = SettingsViewModel(repo, fakeContext())
+        vm.openForgotPassphrase()
+        vm.forgotWithRecoveryCode()
+        vm.redeemRecoveryCode("code")
+        vm.resetPassphrase("third passphrase")
+        assertEquals(ForgotPassphraseStep.Code, vm.forgot.value?.step)
+        assertEquals(null, vm.forgot.value?.grant)
     }
 
     @Test

@@ -62,6 +62,32 @@
     <string name="settings_passphrase_remove_body">输入当前口令以将其移除。移除后，敏感变更将不再受保护。</string>
     <string name="settings_passphrase_label">口令</string>
 
+    <!-- SettingsScreen: passphrase recovery (recovery codes, forgot passphrase) -->
+    <string name="settings_passphrase_codes_next">接下来你将获得恢复码：忘记口令时，每个恢复码可重置一次口令。</string>
+    <string name="settings_recovery_codes_left">恢复码：剩余 %1$d 个</string>
+    <string name="settings_recovery_none_warning">尚未设置任何重置遗忘口令的方式。请立即生成恢复码。</string>
+    <string name="settings_recovery_codes_new_action">生成新恢复码</string>
+    <string name="settings_recovery_codes_new_title">生成新恢复码</string>
+    <string name="settings_recovery_codes_new_body">新恢复码将替换之前的恢复码，旧恢复码随即失效。请输入口令以生成。</string>
+    <string name="settings_recovery_codes_new_confirm">生成</string>
+    <string name="settings_recovery_codes_error">无法生成恢复码：%1$s</string>
+    <string name="settings_recovery_codes_after_set_error">口令已保存，但无法生成恢复码：%1$s。请在设置中重新生成。</string>
+    <string name="settings_forgot_action">忘记口令？</string>
+    <string name="settings_forgot_title">忘记口令了？</string>
+    <string name="settings_forgot_choose_body">无需旧口令即可重置。</string>
+    <string name="settings_forgot_no_method">此账户未设置恢复码、关联账户或通行密钥，因此无法重置口令。</string>
+    <string name="settings_forgot_use_code">使用恢复码</string>
+    <string name="settings_forgot_use_portal">使用关联账户或通行密钥</string>
+    <string name="settings_forgot_portal_hint">将打开网页门户：在其中登录后，选择“忘记口令？”。</string>
+    <string name="settings_forgot_code_body">输入你的一个恢复码。每个恢复码只能使用一次。</string>
+    <string name="settings_forgot_code_label">恢复码</string>
+    <string name="settings_forgot_code_invalid">恢复码错误或已被使用</string>
+    <string name="settings_forgot_new_body">请设置新口令。</string>
+    <string name="settings_forgot_reset_action">重置口令</string>
+    <string name="settings_forgot_grant_expired">重置超时。请输入另一个恢复码。</string>
+    <string name="settings_forgot_reset_done">口令已重置</string>
+    <string name="settings_action_continue">继续</string>
+
     <!-- SettingsScreen: profile header + edit-profile dialog -->
     <string name="settings_change_photo_content_description">更改头像</string>
     <string name="settings_no_name_set">未设置名称</string>

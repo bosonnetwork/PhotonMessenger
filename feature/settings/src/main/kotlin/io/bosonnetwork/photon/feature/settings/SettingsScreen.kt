@@ -25,11 +25,13 @@ package io.bosonnetwork.photon.feature.settings
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -94,6 +96,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -101,6 +104,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.bosonnetwork.photon.core.designsystem.component.ConfirmDialog
 import io.bosonnetwork.photon.core.designsystem.component.LoadingState
 import io.bosonnetwork.photon.core.designsystem.component.PhotonAvatar
+import io.bosonnetwork.photon.core.designsystem.component.RecoveryCodesDialog
+import io.bosonnetwork.photon.core.designsystem.component.passphraseProblem
 import io.bosonnetwork.photon.core.designsystem.component.ResponsiveContent
 import io.bosonnetwork.photon.core.model.AppLanguage
 import io.bosonnetwork.photon.core.model.NotificationPreferences
@@ -108,6 +113,7 @@ import io.bosonnetwork.photon.core.model.ThemeMode
 import io.bosonnetwork.photon.core.qr.rememberQrBitmap
 import io.bosonnetwork.photon.feature.settings.R
 import io.bosonnetwork.photon.feature.settings.model.UiProfile
+import io.bosonnetwork.photon.feature.settings.model.UiRecoveryMethods
 import kotlinx.coroutines.launch
 
 /** Settings hub: profile, appearance, devices, account (design spec screen 6, 2.6, M6). */
@@ -134,6 +140,10 @@ fun SettingsScreen(
     var editing by rememberSaveable { mutableStateOf(false) }
     var showSetPassphrase by rememberSaveable { mutableStateOf(false) }
     var showRemovePassphrase by rememberSaveable { mutableStateOf(false) }
+    var showNewRecoveryCodes by rememberSaveable { mutableStateOf(false) }
+    val recoveryCodes by viewModel.recoveryCodes.collectAsStateWithLifecycle()
+    val forgot by viewModel.forgot.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     var showIdQr by rememberSaveable { mutableStateOf(false) }
     var confirmSignOut by rememberSaveable { mutableStateOf(false) }
 
@@ -141,7 +151,11 @@ fun SettingsScreen(
         viewModel.passphraseUpdated.collect {
             showSetPassphrase = false
             showRemovePassphrase = false
+            showNewRecoveryCodes = false
         }
+    }
+    LaunchedEffect(Unit) {
+        viewModel.openUrl.collect { CustomTabsIntent.Builder().build().launchUrl(context, Uri.parse(it)) }
     }
 
     val pickAvatar = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -214,8 +228,11 @@ fun SettingsScreen(
                     SectionTitle(stringResource(R.string.settings_section_security))
                     PassphraseSection(
                         protected = state.profile?.passphraseProtected == true,
+                        recovery = state.profile?.recovery,
                         onSet = { showSetPassphrase = true },
                         onRemove = { showRemovePassphrase = true },
+                        onNewRecoveryCodes = { showNewRecoveryCodes = true },
+                        onForgot = viewModel::openForgotPassphrase,
                     )
                     HorizontalDivider()
 
@@ -271,6 +288,33 @@ fun SettingsScreen(
         RemovePassphraseDialog(
             onDismiss = { showRemovePassphrase = false },
             onSubmit = { current -> viewModel.clearPassphrase(current) },
+        )
+    }
+
+    if (showNewRecoveryCodes) {
+        NewRecoveryCodesDialog(
+            onDismiss = { showNewRecoveryCodes = false },
+            onSubmit = { current -> viewModel.makeRecoveryCodes(current) },
+        )
+    }
+
+    recoveryCodes?.let { codes ->
+        RecoveryCodesDialog(
+            codes = codes,
+            userId = state.profile?.id.orEmpty(),
+            onDone = viewModel::dismissRecoveryCodes,
+        )
+    }
+
+    forgot?.let { flow ->
+        ForgotPassphraseDialog(
+            state = flow,
+            recovery = state.profile?.recovery,
+            onDismiss = viewModel::closeForgotPassphrase,
+            onUseCode = viewModel::forgotWithRecoveryCode,
+            onUsePortal = viewModel::forgotOnPortal,
+            onRedeem = viewModel::redeemRecoveryCode,
+            onReset = viewModel::resetPassphrase,
         )
     }
 
@@ -450,8 +494,11 @@ private fun AboutSection() {
 @Composable
 private fun PassphraseSection(
     protected: Boolean,
+    recovery: UiRecoveryMethods?,
     onSet: () -> Unit,
     onRemove: () -> Unit,
+    onNewRecoveryCodes: () -> Unit,
+    onForgot: () -> Unit,
 ) {
     val icon = if (protected) Icons.Filled.CheckCircle else Icons.Filled.Warning
     val tint = if (protected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
@@ -493,6 +540,32 @@ private fun PassphraseSection(
             TextButton(onClick = onRemove) { Text(stringResource(R.string.settings_action_remove)) }
         }
     }
+    if (protected) {
+        // How a forgotten passphrase can be reset; with no way at all, say so plainly.
+        if (recovery != null) {
+            Text(
+                if (recovery.any) {
+                    stringResource(R.string.settings_recovery_codes_left, recovery.recoveryCodes)
+                } else {
+                    stringResource(R.string.settings_recovery_none_warning)
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (recovery.any) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TextButton(onClick = onNewRecoveryCodes) { Text(stringResource(R.string.settings_recovery_codes_new_action)) }
+            TextButton(onClick = onForgot) { Text(stringResource(R.string.settings_forgot_action)) }
+        }
+    }
 }
 
 @Composable
@@ -506,6 +579,7 @@ private fun SetPassphraseDialog(
     var confirm by remember { mutableStateOf("") }
     val matches = new.isNotBlank() && new == confirm
     val currentOk = !protected || current.isNotBlank()
+    val problem = passphraseProblem(new)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -524,7 +598,20 @@ private fun SetPassphraseDialog(
                     PassphraseField(current, { current = it }, stringResource(R.string.settings_passphrase_current_label))
                 }
                 PassphraseField(new, { new = it }, stringResource(R.string.settings_passphrase_new_label))
+                if (new.isNotEmpty() && problem != null) {
+                    Text(
+                        stringResource(problem),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 PassphraseField(confirm, { confirm = it }, stringResource(R.string.settings_passphrase_confirm_label))
+                if (!protected) {
+                    Text(
+                        stringResource(R.string.settings_passphrase_codes_next),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 if (confirm.isNotBlank() && !matches) {
                     Text(
                         stringResource(R.string.settings_passphrase_mismatch),
@@ -537,7 +624,7 @@ private fun SetPassphraseDialog(
         confirmButton = {
             TextButton(
                 onClick = { onSubmit(current.takeIf { protected }, new) },
-                enabled = matches && currentOk,
+                enabled = matches && currentOk && problem == null,
             ) { Text(stringResource(R.string.settings_action_save)) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.settings_action_cancel)) } },
@@ -565,6 +652,138 @@ private fun RemovePassphraseDialog(
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.settings_action_cancel)) } },
+    )
+}
+
+@Composable
+private fun NewRecoveryCodesDialog(
+    onDismiss: () -> Unit,
+    onSubmit: (current: String) -> Unit,
+) {
+    var current by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_recovery_codes_new_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.settings_recovery_codes_new_body))
+                PassphraseField(current, { current = it }, stringResource(R.string.settings_passphrase_current_label))
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSubmit(current) }, enabled = current.isNotBlank()) {
+                Text(stringResource(R.string.settings_recovery_codes_new_confirm))
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.settings_action_cancel)) } },
+    )
+}
+
+/**
+ * Resetting a forgotten passphrase: with a recovery code, here; or with a linked account or a passkey, on
+ * the web portal, since the reset grant those win returns only to the Director's own site.
+ */
+@Composable
+private fun ForgotPassphraseDialog(
+    state: ForgotPassphraseState,
+    recovery: UiRecoveryMethods?,
+    onDismiss: () -> Unit,
+    onUseCode: () -> Unit,
+    onUsePortal: () -> Unit,
+    onRedeem: (code: String) -> Unit,
+    onReset: (passphrase: String) -> Unit,
+) {
+    var code by rememberSaveable { mutableStateOf("") }
+    var new by remember { mutableStateOf("") }
+    var confirm by remember { mutableStateOf("") }
+    val problem = passphraseProblem(new)
+    val matches = new.isNotEmpty() && new == confirm
+    // Unknown methods (an older Director): offer both and let the Director decide.
+    val codesAvailable = recovery == null || recovery.recoveryCodes > 0
+    val portalAvailable = recovery == null || recovery.viaPortal
+
+    // Once a code is spent, a stray tap or Back must not throw away its grant: only Cancel closes.
+    val holdGrant = state.step == ForgotPassphraseStep.NewPassphrase
+    AlertDialog(
+        onDismissRequest = { if (!state.busy) onDismiss() },
+        properties = DialogProperties(dismissOnBackPress = !holdGrant, dismissOnClickOutside = !holdGrant),
+        title = { Text(stringResource(R.string.settings_forgot_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                when (state.step) {
+                    ForgotPassphraseStep.Choose -> {
+                        if (!codesAvailable && !portalAvailable) {
+                            Text(stringResource(R.string.settings_forgot_no_method))
+                        } else {
+                            Text(stringResource(R.string.settings_forgot_choose_body))
+                        }
+                        if (codesAvailable) {
+                            OutlinedButton(onClick = onUseCode, modifier = Modifier.fillMaxWidth()) {
+                                Text(stringResource(R.string.settings_forgot_use_code))
+                            }
+                        }
+                        if (portalAvailable) {
+                            OutlinedButton(onClick = onUsePortal, modifier = Modifier.fillMaxWidth()) {
+                                Text(stringResource(R.string.settings_forgot_use_portal))
+                            }
+                            Text(
+                                stringResource(R.string.settings_forgot_portal_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                    ForgotPassphraseStep.Code -> {
+                        Text(stringResource(R.string.settings_forgot_code_body))
+                        OutlinedTextField(
+                            value = code,
+                            onValueChange = { code = it },
+                            label = { Text(stringResource(R.string.settings_forgot_code_label)) },
+                            singleLine = true,
+                            enabled = !state.busy,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    ForgotPassphraseStep.NewPassphrase -> {
+                        Text(stringResource(R.string.settings_forgot_new_body))
+                        PassphraseField(new, { new = it }, stringResource(R.string.settings_passphrase_new_label))
+                        if (new.isNotEmpty() && problem != null) {
+                            Text(
+                                stringResource(problem),
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        PassphraseField(confirm, { confirm = it }, stringResource(R.string.settings_passphrase_confirm_label))
+                        if (confirm.isNotEmpty() && !matches) {
+                            Text(
+                                stringResource(R.string.settings_passphrase_mismatch),
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+                state.error?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            when (state.step) {
+                ForgotPassphraseStep.Choose -> {}
+                ForgotPassphraseStep.Code ->
+                    TextButton(onClick = { onRedeem(code) }, enabled = code.isNotBlank() && !state.busy) {
+                        Text(stringResource(R.string.settings_action_continue))
+                    }
+                ForgotPassphraseStep.NewPassphrase ->
+                    TextButton(onClick = { onReset(new) }, enabled = matches && problem == null && !state.busy) {
+                        Text(stringResource(R.string.settings_forgot_reset_action))
+                    }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !state.busy) { Text(stringResource(R.string.settings_action_cancel)) }
+        },
     )
 }
 

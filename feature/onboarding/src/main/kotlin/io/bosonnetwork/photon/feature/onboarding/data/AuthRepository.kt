@@ -242,9 +242,14 @@ class AuthRepository @Inject constructor(
                 .passphrase(passphrase?.takeIf { it.isNotBlank() })
                 .initialDevice(Build.MODEL?.takeIf { it.isNotBlank() } ?: DEFAULT_DEVICE_NAME, APP_NAME)
 
+            val cleanPassphrase = passphrase?.takeIf { it.isNotBlank() }
             val nodeIdBase58 = directorClients.withClient(userKey, deviceKey) { client ->
                 val nodeId = config().nodeId?.takeIf { it.isNotBlank() } ?: client.nodeId.await().toString()
                 register(client, registration)
+                // A passphrase comes with recovery codes, so that forgetting it is not the end of the
+                // account. The account exists either way: failing to make them only means making them
+                // later, from Settings.
+                pendingRecoveryCodes = cleanPassphrase?.let { makeRecoveryCodes(client, userIdBase58, it) }
                 nodeId
             }
 
@@ -276,6 +281,22 @@ class AuthRepository @Inject constructor(
                     }
                 }
             }
+        }
+
+    /** Recovery codes made with a new account, waiting to be shown once; see [takeRecoveryCodes]. */
+    @Volatile
+    private var pendingRecoveryCodes: RecoveryCodes? = null
+
+    /** The recovery codes made with the account just created, if any; returned once. */
+    fun takeRecoveryCodes(): RecoveryCodes? = pendingRecoveryCodes.also { pendingRecoveryCodes = null }
+
+    private suspend fun makeRecoveryCodes(client: DirectorClient, userId: String, passphrase: String): RecoveryCodes? =
+        try {
+            RecoveryCodes(userId, client.makeRecoveryCodes(passphrase).await())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
         }
 
     /** Registers the user of [client] with proof-of-work, recovering what can be recovered. */
@@ -446,13 +467,16 @@ class AuthRepository @Inject constructor(
      * PoW create) and may hand off to another profile. With an OAuth session, if no identity is bound to
      * the account the imported key is bound; if one is, the imported key must derive to the same user id.
      * The 64-byte key is stored only after it is accepted, and never into a foreign active profile.
+     *
+     * Linking the account to an identity that has a passphrase takes the passphrase: without [passphrase]
+     * that fails with [AppError.PassphraseRequired] (428), a wrong one with [AppError.Forbidden] (403).
      */
-    suspend fun importUserKeyText(text: String): SessionState {
+    suspend fun importUserKeyText(text: String, passphrase: String? = null): SessionState {
         val privateKey64 = BosonCrypto.decodePrivateKey64(text) // throws IllegalArgumentException on bad input
-        return importUserKey(privateKey64)
+        return importUserKey(privateKey64, passphrase)
     }
 
-    private suspend fun importUserKey(privateKey64: ByteArray): SessionState =
+    private suspend fun importUserKey(privateKey64: ByteArray, passphrase: String?): SessionState =
         withContext(Dispatchers.IO) {
             val kp = BosonCrypto.keyPairFromPrivate64(privateKey64)
             val derivedId = BosonCrypto.idOf(kp).toString()
@@ -471,7 +495,8 @@ class AuthRepository @Inject constructor(
                 val boundId = oauth.session.await().userId.orElse(null)?.toString()
                 if (boundId == null) {
                     // No identity bound to this account yet: bind the imported key as the account identity.
-                    oauth.bindUserIdentity(kp).await()
+                    // An existing identity with a passphrase takes it to gain this sign-in.
+                    oauth.bindUserIdentity(kp, passphrase?.takeIf { it.isNotBlank() }).await()
                 } else if (derivedId != boundId) {
                     // An identity is already bound: the imported key must match it, or we would fork identity.
                     throw AppError.InvalidInput(context.getString(R.string.onb_error_key_mismatch))
@@ -704,3 +729,6 @@ class AuthRepository @Inject constructor(
         private const val DEFAULT_DEVICE_NAME = "Android device"
     }
 }
+
+/** New passphrase recovery codes of [userId], shown to the user once. */
+data class RecoveryCodes(val userId: String, val codes: List<String>)

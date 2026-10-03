@@ -32,7 +32,25 @@ data class UiProfile(
     val plan: String?,
     /** Whether the account is protected by a passphrase (second factor); drives the security UI (M6). */
     val passphraseProtected: Boolean = false,
+    /** The ways a forgotten passphrase can be reset; null when the Director did not say. */
+    val recovery: UiRecoveryMethods? = null,
 )
+
+/**
+ * The ways the user can reset a forgotten passphrase without the user key: [linkedAccounts] (OAuth),
+ * [passkeys] and unused [recoveryCodes]. The first two work through the web portal, the codes here.
+ */
+data class UiRecoveryMethods(
+    val linkedAccounts: Int,
+    val passkeys: Int,
+    val recoveryCodes: Int,
+) {
+    /** Whether any way exists; with none, a forgotten passphrase cannot be reset. */
+    val any: Boolean get() = linkedAccounts > 0 || passkeys > 0 || recoveryCodes > 0
+
+    /** Whether the web portal can reset it: with a linked account or a passkey. */
+    val viaPortal: Boolean get() = linkedAccounts > 0 || passkeys > 0
+}
 
 /**
  * A live messaging session, optionally enriched with its device registration (spec screen 6, M6-2).

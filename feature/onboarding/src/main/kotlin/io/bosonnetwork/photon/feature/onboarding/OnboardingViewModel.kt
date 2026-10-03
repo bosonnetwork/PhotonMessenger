@@ -27,10 +27,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.bosonnetwork.director.client.AuthProvider
 import io.bosonnetwork.photon.core.boson.toDirectorError
+import io.bosonnetwork.photon.core.designsystem.component.passphraseLockedMessage
+import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.feature.onboarding.data.AuthCallback
 import io.bosonnetwork.photon.feature.onboarding.data.AuthDeepLinkBus
 import io.bosonnetwork.photon.feature.onboarding.data.AuthRepository
 import io.bosonnetwork.photon.feature.onboarding.data.ProfileSeed
+import io.bosonnetwork.photon.feature.onboarding.data.RecoveryCodes
 import io.bosonnetwork.photon.feature.onboarding.data.SessionState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -74,6 +77,13 @@ data class OnboardingUiState(
     /** Optional account passphrase collected during permissionless (PoW) account creation. */
     val createPassphrase: String = "",
     val passphraseInput: String = "",
+    /**
+     * True when the [OnboardingStep.Passphrase] step asks for the passphrase of an imported identity, to
+     * link it to the OAuth sign-in; false when it asks for the passphrase to register this device.
+     */
+    val passphraseForLink: Boolean = false,
+    /** Recovery codes made with a new account, shown once over the flow; null when none are waiting. */
+    val recoveryCodes: RecoveryCodes? = null,
     /** base58 of a freshly created identity key, shown on the [OnboardingStep.BackupKey] screen. */
     val backupKeyBase58: String? = null,
     val error: String? = null,
@@ -326,6 +336,9 @@ class OnboardingViewModel @Inject constructor(
         importKey(text)
     }
 
+    /** The key of an identity waiting for its passphrase, to be linked to the OAuth sign-in. */
+    private var keyAwaitingPassphrase: String? = null
+
     private fun importKey(text: String) {
         if (text.isBlank()) return
         viewModelScope.launch {
@@ -339,7 +352,22 @@ class OnboardingViewModel @Inject constructor(
                         else -> applySession(state)
                     }
                 }
-                .onFailure { e -> _uiState.update { it.copy(loading = false, error = e.message ?: context.getString(R.string.onb_error_invalid_key)) } }
+                .onFailure { e ->
+                    if (e.toDirectorError() is AppError.PassphraseRequired) {
+                        // The identity has a passphrase, and linking a sign-in to it takes the passphrase.
+                        keyAwaitingPassphrase = text
+                        _uiState.update {
+                            it.copy(
+                                loading = false,
+                                step = OnboardingStep.Passphrase,
+                                passphraseInput = "",
+                                passphraseForLink = true,
+                            )
+                        }
+                    } else {
+                        _uiState.update { it.copy(loading = false, error = e.message ?: context.getString(R.string.onb_error_invalid_key)) }
+                    }
+                }
         }
     }
 
@@ -357,7 +385,12 @@ class OnboardingViewModel @Inject constructor(
                 .onSuccess { protected ->
                     _uiState.update {
                         if (protected) {
-                            it.copy(loading = false, step = OnboardingStep.Passphrase, passphraseInput = "")
+                            it.copy(
+                                loading = false,
+                                step = OnboardingStep.Passphrase,
+                                passphraseInput = "",
+                                passphraseForLink = false,
+                            )
                         } else {
                             it.copy(loading = false, step = OnboardingStep.Authenticated)
                         }
@@ -381,19 +414,36 @@ class OnboardingViewModel @Inject constructor(
     fun submitPassphrase() {
         val passphrase = _uiState.value.passphraseInput
         if (passphrase.isBlank()) return
+        val keyToLink = keyAwaitingPassphrase.takeIf { _uiState.value.passphraseForLink }
         viewModelScope.launch {
             _uiState.update { it.copy(loading = true, error = null) }
-            runCatching { authRepository.registerDevice(passphrase) }
-                .onSuccess { _uiState.update { it.copy(loading = false, step = OnboardingStep.Authenticated) } }
-                .onFailure { e ->
-                    _uiState.update {
-                        it.copy(
-                            loading = false,
-                            error = e.toDirectorError().message ?: context.getString(R.string.onb_error_register_device_failed),
-                        )
+            try {
+                if (keyToLink != null) {
+                    // Link the imported identity with its passphrase; the same passphrase then registers
+                    // this device, so it is asked for only once.
+                    val state = authRepository.importUserKeyText(keyToLink, passphrase)
+                    keyAwaitingPassphrase = null
+                    if (state !is SessionState.Authenticated) {
+                        applySession(state)
+                        return@launch
                     }
                 }
+                authRepository.registerDevice(passphrase)
+                _uiState.update { it.copy(loading = false, step = OnboardingStep.Authenticated) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(loading = false, error = passphraseError(e)) }
+            }
         }
+    }
+
+    private fun passphraseError(e: Throwable): String = when (val error = e.toDirectorError()) {
+        is AppError.Forbidden -> context.getString(R.string.onb_error_wrong_passphrase)
+        is AppError.RateLimited ->
+            if (error.retryAfterSeconds > 0) context.resources.passphraseLockedMessage(error.retryAfterSeconds)
+            else error.message ?: context.getString(R.string.onb_error_register_device_failed)
+        else -> error.message ?: context.getString(R.string.onb_error_register_device_failed)
     }
 
     fun onDisplayNameChange(value: String) = _uiState.update { it.copy(displayName = value) }
@@ -449,12 +499,29 @@ class OnboardingViewModel @Inject constructor(
         }
     }
 
-    /** Continues past the backup screen: clears the shown key and runs the deferred completion. */
+    /** Recovery codes made with the account just created, shown after its key. */
+    private var codesAfterBackup: RecoveryCodes? = null
+
+    /**
+     * Continues past the backup screen: shows the recovery codes made with the account, if any, then
+     * clears the shown key and runs the deferred completion.
+     */
     fun continueFromBackup() {
+        codesAfterBackup?.let { codes ->
+            codesAfterBackup = null
+            _uiState.update { it.copy(recoveryCodes = codes) }
+            return
+        }
         val proceed = afterBackup ?: return
         afterBackup = null
         _uiState.update { it.copy(backupKeyBase58 = null) }
         proceed()
+    }
+
+    /** The user saved the recovery codes shown; carries on as [continueFromBackup] does. */
+    fun dismissRecoveryCodes() {
+        _uiState.update { it.copy(recoveryCodes = null) }
+        continueFromBackup()
     }
 
     /** The running PoW solve, kept so [cancelSolving] can abort a long/expensive search. */
@@ -476,6 +543,7 @@ class OnboardingViewModel @Inject constructor(
                 val state = authRepository.createAccountWithPow(
                     current.displayName, current.bio, current.createPassphrase,
                 )
+                codesAfterBackup = authRepository.takeRecoveryCodes()
                 // A brand-new key was generated: prompt the user to back it up before finishing. The device
                 // is already registered (usersAndInitialDevice), so hosted-here goes straight to Home.
                 promptBackupThen(state) {

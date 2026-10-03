@@ -38,6 +38,8 @@
     <string name="onb_passphrase_title">输入您的账户口令</string>
     <string name="onb_passphrase_desc">您的账户受口令保护。请输入口令以注册此设备。</string>
     <string name="onb_passphrase_label">口令</string>
+    <string name="onb_passphrase_link_desc">此身份已通过口令保护。请输入口令，以将该身份关联到你的登录方式并注册此设备。</string>
+    <string name="onb_error_wrong_passphrase">口令错误</string>
     <string name="onb_register_device">注册此设备</string>
 
     <string name="onb_solving_title">正在创建您的账户</string>

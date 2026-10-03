@@ -49,6 +49,13 @@ class DirectorErrorsTest {
     }
 
     @Test
+    fun `a 429 carries how long to wait`() {
+        val locked = DirectorException.fromResponse(429, "Too many wrong passphrases", "120").toDirectorError()
+        assertEquals(120L, (locked as AppError.RateLimited).retryAfterSeconds)
+        assertEquals(0L, (refused(429).toDirectorError() as AppError.RateLimited).retryAfterSeconds)
+    }
+
+    @Test
     fun `unmapped HTTP status falls back to Unknown with the code in the message`() {
         val error = refused(500).toDirectorError()
         assertTrue(error is AppError.Unknown)

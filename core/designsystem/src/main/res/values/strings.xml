@@ -12,4 +12,32 @@
     <!-- TimeFormat: chat day-header labels -->
     <string name="ds_time_today">Today</string>
     <string name="ds_time_yesterday">Yesterday</string>
+
+    <!-- Passphrase: the strength rule a new passphrase must meet (the Director's own) -->
+    <string name="ds_passphrase_too_short">At least 8 characters</string>
+    <string name="ds_passphrase_too_plain">Use more varied characters</string>
+
+    <!-- Passphrase: a passphrase-gated action refused after too many wrong passphrases -->
+    <string name="ds_passphrase_locked">Too many wrong passphrases. Try again in %1$s.</string>
+    <plurals name="ds_wait_seconds">
+        <item quantity="one">%d second</item>
+        <item quantity="other">%d seconds</item>
+    </plurals>
+    <plurals name="ds_wait_minutes">
+        <item quantity="one">%d minute</item>
+        <item quantity="other">%d minutes</item>
+    </plurals>
+    <plurals name="ds_wait_hours">
+        <item quantity="one">%d hour</item>
+        <item quantity="other">%d hours</item>
+    </plurals>
+
+    <!-- RecoveryCodesDialog: new passphrase recovery codes, shown once -->
+    <string name="ds_recovery_codes_title">Your recovery codes</string>
+    <string name="ds_recovery_codes_body">If you forget your passphrase, one of these resets it. Each works once. They are shown only now: save them somewhere safe, apart from your private key.</string>
+    <string name="ds_recovery_codes_saved">I saved these codes somewhere safe</string>
+    <string name="ds_recovery_codes_text">Boson passphrase recovery codes\n\nuser: %1$s\n\n%2$s\n\nEach code resets a forgotten passphrase once. Keep them apart from your private key.\n</string>
+    <string name="ds_action_copy">Copy</string>
+    <string name="ds_action_share">Share</string>
+    <string name="ds_action_done">Done</string>
 </resources>

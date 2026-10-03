@@ -44,6 +44,8 @@ dependencies {
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
+    // Opens the web portal in a Custom Tab, to reset a forgotten passphrase with a linked account or passkey.
+    implementation(libs.androidx.browser)
     implementation(libs.androidx.compose.material3)
     implementation(libs.coil.compose)
     implementation(libs.androidx.compose.ui.tooling.preview)
