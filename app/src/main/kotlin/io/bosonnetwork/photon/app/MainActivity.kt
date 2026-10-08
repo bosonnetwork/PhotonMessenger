@@ -41,7 +41,7 @@ import io.bosonnetwork.photon.core.designsystem.theme.PhotonTheme
 import io.bosonnetwork.photon.core.model.ThemeMode
 import io.bosonnetwork.photon.core.model.ThemePreferences
 import io.bosonnetwork.photon.core.network.ThemePreferencesStore
-import io.bosonnetwork.photon.feature.onboarding.data.AuthCallback
+import io.bosonnetwork.photon.feature.onboarding.data.authCallbackOf
 import io.bosonnetwork.photon.feature.onboarding.data.AuthDeepLinkBus
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -103,15 +103,12 @@ class MainActivity : ComponentActivity() {
         if (!granted) requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
-    /** Captures io.bosonnetwork.photon://auth?token=... (or ?error=...) from the OAuth Custom Tab (M1-8). */
+    /**
+     * Captures the OAuth Custom Tab's return: the App Link https://bosonnetwork.io/photon/auth#token=...,
+     * or io.bosonnetwork.photon://auth?token=... from nodes before 3.2 (M1-8).
+     */
     private fun handleAuthDeepLink(intent: Intent?) {
         val data = intent?.data ?: return
-        if (data.scheme != "io.bosonnetwork.photon" || data.host != "auth") return
-        val token = data.getQueryParameter("token")
-        val error = data.getQueryParameter("error")
-        when {
-            !token.isNullOrEmpty() -> deepLinkBus.post(AuthCallback.Token(token))
-            !error.isNullOrEmpty() -> deepLinkBus.post(AuthCallback.Error(error))
-        }
+        authCallbackOf(data.toString())?.let(deepLinkBus::post)
     }
 }

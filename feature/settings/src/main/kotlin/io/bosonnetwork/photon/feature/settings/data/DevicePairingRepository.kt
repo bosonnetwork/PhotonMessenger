@@ -104,10 +104,13 @@ class DevicePairingRepositoryImpl @Inject constructor(
             // is known, so a key ever registered under a previous identity must be rotated NOW - the
             // paired identity is guaranteed new-or-unknown (never reuse a device key across users).
             val deviceKey = keyManager.ensureDeviceKeyFor(null)
+            // Photon acts as the user itself (messaging signs with the user key), so it asks for the
+            // user key: approving hands it over, sealed to this pairing code.
             val registration = directorClients.guest().requestDeviceRegistration(
                 deviceKey,
                 deviceName.ifBlank { context.getString(R.string.settings_default_device_name) },
                 context.getString(R.string.settings_about_app_name),
+                true,
             ).await()
             active = registration
             PairingInvite(registration.registrationId, registration.pairingCode.toString())
@@ -122,7 +125,8 @@ class DevicePairingRepositoryImpl @Inject constructor(
             // The Director holds this call until the request is approved, denied or expired.
             val approval = directorClients.guest().finishDeviceRegistration(registration).await()
 
-            keyManager.storeUserKey(BosonCrypto.privateKeyBytes64(approval.userKey))
+            // The library refuses an approval without the key Photon asked for, so it is there.
+            keyManager.storeUserKey(BosonCrypto.privateKeyBytes64(approval.userKey.orElseThrow()))
             val userId = approval.userId.toString()
             sessionStore.setSession(userId)
 

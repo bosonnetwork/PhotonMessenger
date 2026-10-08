@@ -26,6 +26,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.bosonnetwork.director.client.AuthProvider
+import io.bosonnetwork.director.client.SuperNodeCode
 import io.bosonnetwork.photon.core.boson.toDirectorError
 import io.bosonnetwork.photon.core.designsystem.component.passphraseLockedMessage
 import io.bosonnetwork.photon.core.model.AppError
@@ -49,7 +50,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 
 enum class OnboardingStep {
     Server, ScanServer, ChooseMethod, ChooseIdentity, CreateProfile, ScanKey, PasteKey, Passphrase, Solving, BackupKey, Authenticated
@@ -166,21 +166,21 @@ class OnboardingViewModel @Inject constructor(
     private var lastScannedServerValue: String? = null
 
     /**
-     * Handles a super node QR payload: a small JSON object `{"url": "...", "id": "..."}` where "url" is
-     * the super node address and the optional "id" is the Boson node id used to pin a self-signed cert.
-     * On success the server fields are filled and the flow returns to the (editable) server step; an
-     * unrecognized payload leaves the scanner open with an error.
+     * Handles a super node QR code: the Boson string `boson:supernode:1:<nodeId>:<url>` the portal shows,
+     * or the JSON `{"url": "...", "id": "..."}` it showed before, whose id is optional. The id pins the
+     * node's self-signed certificate. On success the server fields are filled and the flow returns to the
+     * (editable) server step; an unrecognized payload leaves the scanner open with an error.
      */
     fun onServerQrScanned(text: String) {
         if (text == lastScannedServerValue) return
         lastScannedServerValue = text
-        val parsed = runCatching { JSONObject(text) }.getOrNull()
-        val url = parsed?.optString("url").orEmpty().trim()
-        if (url.isEmpty()) {
+        val code = SuperNodeCode.parse(text).orElse(null)
+        if (code == null) {
             _uiState.update { it.copy(error = context.getString(R.string.onb_error_invalid_super_node_qr)) }
             return
         }
-        val nodeId = parsed?.optString("id").orEmpty().trim()
+        val url = code.url
+        val nodeId = code.nodeId.map { it.toBase58String() }.orElse("")
         _uiState.update {
             it.copy(
                 step = OnboardingStep.Server,

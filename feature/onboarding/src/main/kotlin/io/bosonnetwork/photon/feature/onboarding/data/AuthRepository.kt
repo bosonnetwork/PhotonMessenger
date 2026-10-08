@@ -176,7 +176,19 @@ class AuthRepository @Inject constructor(
     suspend fun providers(): List<AuthProvider> = directorClients.guest().providers.await()
 
     suspend fun authorizeUrl(provider: String): String =
-        directorClients.guest().authorizeUrl(provider, REDIRECT_URI)
+        directorClients.guest().authorizeUrl(provider, redirectUri())
+
+    /**
+     * Where this node should send the sign-in back: the App Link, which no other app can claim, on nodes
+     * from 3.2, which put the result in its fragment; the app's own scheme on older ones, which put it in
+     * the query of any address (on an https address, a token in the query would reach the site whenever
+     * the link opens in the browser instead of the app). A node whose version can't be read is taken to be
+     * an older one.
+     */
+    private suspend fun redirectUri(): String {
+        val version = runCatching { directorClients.guest().nodeStatus.await().version.orElse(null) }.getOrNull()
+        return if (returnsInFragment(version)) APP_LINK_REDIRECT_URI else REDIRECT_URI
+    }
 
     /** The registration options of a Director, remembered per config: they change only with it. */
     @Volatile
@@ -720,10 +732,24 @@ class AuthRepository @Inject constructor(
 
     companion object {
         /**
-         * Where the Director sends the OAuth sign-in back to: the `?token=...` (or `?error=...`) deep link
-         * the app captures (spec 2.1, M1-7/M1-8). Client-side only - the Director accepts any redirect URI.
+         * Where nodes before 3.2 send the OAuth sign-in back to: the app's own scheme, `?token=...` (or
+         * `?error=...`). Any app could claim the scheme, which is why newer nodes get [APP_LINK_REDIRECT_URI].
          */
         const val REDIRECT_URI = "io.bosonnetwork.photon://auth"
+
+        /**
+         * Where nodes from 3.2 send the OAuth sign-in back to: the App Link `#token=...` (or `#error=...`),
+         * which Android hands only to Photon (bosonnetwork.io's assetlinks.json names it).
+         */
+        const val APP_LINK_REDIRECT_URI = "https://bosonnetwork.io/photon/auth"
+
+        /** Whether a node of [version] (its software version, "3.2.0" or "3.2.0-SNAPSHOT") returns https results in the fragment. */
+        fun returnsInFragment(version: String?): Boolean {
+            val parts = version?.trim()?.split('.', '-')?.take(2)?.map { it.toIntOrNull() } ?: return false
+            val major = parts.getOrNull(0) ?: return false
+            val minor = parts.getOrNull(1) ?: return false
+            return major > 3 || (major == 3 && minor >= 2)
+        }
 
         private const val APP_NAME = "Photon"
         private const val DEFAULT_DEVICE_NAME = "Android device"

@@ -101,6 +101,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.bosonnetwork.Id
 import io.bosonnetwork.photon.core.designsystem.component.ConfirmDialog
 import io.bosonnetwork.photon.core.designsystem.component.LoadingState
 import io.bosonnetwork.photon.core.designsystem.component.PhotonAvatar
@@ -441,7 +442,8 @@ private fun UserIdQrDialog(userId: String, name: String, onDismiss: () -> Unit) 
                         name.ifBlank { stringResource(R.string.settings_my_id_fallback_name) },
                     ),
                 )
-                rememberQrBitmap(userId)?.let { qr ->
+                // The id as a W3C DID: what Boson apps read, and what any DID tool recognizes.
+                rememberQrBitmap(remember(userId) { Id.of(userId).toDIDString() })?.let { qr ->
                     Image(
                         bitmap = qr,
                         contentDescription = stringResource(R.string.settings_my_id_qr_content_description),

@@ -90,7 +90,7 @@ class LivePhase3IntegrationTest {
             val bDeviceKey = BosonCrypto.generateKeyPair()
             val newDevice = harness.directorGuest()
             val registration = runBlocking {
-                newDevice.requestDeviceRegistration(bDeviceKey, "New device B", LiveTestHarness.APP_NAME).await()
+                newDevice.requestDeviceRegistration(bDeviceKey, "New device B", LiveTestHarness.APP_NAME, true).await()
             }
 
             // Alice scans the code B shows, as text, and approves: her client seals her user key to the code
@@ -104,7 +104,7 @@ class LivePhase3IntegrationTest {
             assertArrayEquals(
                 "recovered user key must match the original",
                 BosonCrypto.privateKeyBytes64(alice.userKey),
-                BosonCrypto.privateKeyBytes64(approval.userKey),
+                BosonCrypto.privateKeyBytes64(approval.userKey.orElseThrow()),
             )
 
             // B is now one of Alice's devices, and acts as one with its own device key.

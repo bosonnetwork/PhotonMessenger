@@ -22,16 +22,45 @@
 
 package io.bosonnetwork.photon.feature.onboarding.data
 
+import java.net.URLDecoder
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 
-/** Result delivered from the OAuth Custom Tab back to the app via the `io.bosonnetwork.photon://auth` deep link. */
+/**
+ * Result delivered from the OAuth Custom Tab back to the app: through the App Link
+ * `https://bosonnetwork.io/photon/auth#token=...`, or, from nodes before 3.2, the app's own scheme
+ * `io.bosonnetwork.photon://auth?token=...`.
+ */
 sealed interface AuthCallback {
     data class Token(val token: String) : AuthCallback
     data class Error(val message: String) : AuthCallback
+}
+
+/**
+ * Reads a sign-in's return address: a token or an error, or null when [uri] is not one of the app's
+ * return addresses or carries neither. The App Link carries the result in its fragment, which the browser
+ * never sends to the site; the app's own scheme in its query.
+ */
+fun authCallbackOf(uri: String): AuthCallback? {
+    val parameters = when {
+        uri.startsWith(AuthRepository.APP_LINK_REDIRECT_URI + "#") -> uri.substringAfter('#')
+        uri.startsWith(AuthRepository.REDIRECT_URI + "?") -> uri.substringAfter('?').substringBefore('#')
+        else -> return null
+    }
+    val values = parameters.split('&').mapNotNull { pair ->
+        val name = pair.substringBefore('=', "")
+        if (name.isEmpty()) null else name to URLDecoder.decode(pair.substringAfter('='), Charsets.UTF_8.name())
+    }.toMap()
+    val token = values["token"]
+    val error = values["error"]
+    return when {
+        !token.isNullOrEmpty() -> AuthCallback.Token(token)
+        !error.isNullOrEmpty() -> AuthCallback.Error(error)
+        else -> null
+    }
 }
 
 /**

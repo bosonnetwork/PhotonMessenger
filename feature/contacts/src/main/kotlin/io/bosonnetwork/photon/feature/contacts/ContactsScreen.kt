@@ -768,7 +768,8 @@ private fun AddFriendDialog(
     if (scanning) {
         AddFriendScanDialog(
             onScanned = { scanned ->
-                id = fieldFromStart(scanned.trim())
+                // A user's code is their id as a DID (did:boson:<id>); the field shows the plain id.
+                id = fieldFromStart(scanned.trim().removePrefix("did:boson:"))
                 scanning = false
             },
             onCancel = { scanning = false },
