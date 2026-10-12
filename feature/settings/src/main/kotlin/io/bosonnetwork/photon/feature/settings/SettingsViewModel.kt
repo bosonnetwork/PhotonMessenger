@@ -81,6 +81,15 @@ class SettingsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
+    /** True while the identity's backup waits for its check: Settings reminds the user. */
+    private val _backupPending = MutableStateFlow(repository.isBackupPending())
+    val backupPending: StateFlow<Boolean> = _backupPending.asStateFlow()
+
+    /** Reads the backup reminder again, as the user may just have checked the backup. */
+    fun refreshBackupState() {
+        _backupPending.value = repository.isBackupPending()
+    }
+
     val theme: StateFlow<ThemePreferences> = repository.themePreferences.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),

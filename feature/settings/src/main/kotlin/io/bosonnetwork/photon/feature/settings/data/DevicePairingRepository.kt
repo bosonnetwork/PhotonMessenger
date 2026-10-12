@@ -29,24 +29,18 @@ import io.bosonnetwork.director.client.PairingCode
 import io.bosonnetwork.director.client.exceptions.NotFoundException
 import io.bosonnetwork.director.client.exceptions.RegistrationDeniedException
 import io.bosonnetwork.director.client.exceptions.RegistrationExpiredException
-import io.bosonnetwork.photon.core.boson.BosonCrypto
 import io.bosonnetwork.photon.core.boson.DirectorClients
 import io.bosonnetwork.photon.core.boson.KeyManager
+import io.bosonnetwork.photon.core.boson.ScannedCode
+import io.bosonnetwork.photon.core.boson.misplacedMessage
 import io.bosonnetwork.photon.core.boson.toDirectorError
 import io.bosonnetwork.photon.core.model.AppError
-import io.bosonnetwork.photon.core.model.SessionStore
 import io.bosonnetwork.photon.feature.settings.R
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.future.await
 import kotlinx.coroutines.withContext
-
-/** What a new device shows in its pairing QR plus the handle used to wait for approval (spec 2.4). */
-data class PairingInvite(
-    val registrationId: String,
-    val qrText: String,
-)
 
 /** What the approving (existing) device reads about a scanned pairing request before confirming. */
 data class PairingRequestInfo(
@@ -57,24 +51,15 @@ data class PairingRequestInfo(
 )
 
 /**
- * Multi-device pairing backend (spec 2.4, decision D-1, M6-4), over the Director client's pairing, which
- * owns the protocol - the pairing code, and the user key sealed to it - so that any Boson app can pair
- * with any other. Two roles share one repository:
+ * Approving a new device (spec 2.4, decision D-1, M6-4), over the Director client's pairing, which owns
+ * the protocol - the pairing code, and the user key sealed to it - so that any Boson app can pair with
+ * any other: [readRequest] reads what a scanned code is asking for; [approve] hands the user key over,
+ * sealed to the code (zero-knowledge to the Director); [deny] rejects the request. A device joins in
+ * onboarding (AuthRepository's pairing).
  *
- *  - **New device:** [createInvite] asks the Director to register this device's key and returns its
- *    pairing code as the QR text; [awaitApproval] waits until the existing device answers, then stores
- *    the user key it received and signs this device in.
- *  - **Existing device:** [readRequest] reads what a scanned code is asking for; [approve] hands the
- *    user key over, sealed to the code (zero-knowledge to the Director); [deny] rejects the request.
- *
- * Photon keeps the QR rendering and scanning, and the messages it shows.
+ * Photon keeps the QR scanning, and the messages it shows.
  */
 interface DevicePairingRepository {
-    suspend fun createInvite(deviceName: String): Result<PairingInvite>
-
-    /** Long-polls until approval; on success stores the received user key and signs in. Returns the userId. */
-    suspend fun awaitApproval(): Result<String>
-
     suspend fun readRequest(qrText: String): Result<PairingRequestInfo>
 
     /**
@@ -90,54 +75,8 @@ interface DevicePairingRepository {
 class DevicePairingRepositoryImpl @Inject constructor(
     private val directorClients: DirectorClients,
     private val keyManager: KeyManager,
-    private val sessionStore: SessionStore,
     @ApplicationContext private val context: Context,
 ) : DevicePairingRepository {
-
-    /** The new device's pending request, kept between showing its code and finishing the pairing. */
-    @Volatile
-    private var active: DeviceRegistration? = null
-
-    override suspend fun createInvite(deviceName: String): Result<PairingInvite> = runCatching {
-        withContext(Dispatchers.IO) {
-            // The pairing registration binds this device key server-side BEFORE the adopted identity
-            // is known, so a key ever registered under a previous identity must be rotated NOW - the
-            // paired identity is guaranteed new-or-unknown (never reuse a device key across users).
-            val deviceKey = keyManager.ensureDeviceKeyFor(null)
-            // Photon acts as the user itself (messaging signs with the user key), so it asks for the
-            // user key: approving hands it over, sealed to this pairing code.
-            val registration = directorClients.guest().requestDeviceRegistration(
-                deviceKey,
-                deviceName.ifBlank { context.getString(R.string.settings_default_device_name) },
-                context.getString(R.string.settings_about_app_name),
-                true,
-            ).await()
-            active = registration
-            PairingInvite(registration.registrationId, registration.pairingCode.toString())
-        }
-    }.mapPairingError()
-
-    override suspend fun awaitApproval(): Result<String> = runCatching {
-        withContext(Dispatchers.IO) {
-            val registration = active
-                ?: throw AppError.InvalidInput(context.getString(R.string.settings_pairing_error_no_active))
-
-            // The Director holds this call until the request is approved, denied or expired.
-            val approval = directorClients.guest().finishDeviceRegistration(registration).await()
-
-            // The library refuses an approval without the key Photon asked for, so it is there.
-            keyManager.storeUserKey(BosonCrypto.privateKeyBytes64(approval.userKey.orElseThrow()))
-            val userId = approval.userId.toString()
-            sessionStore.setSession(userId)
-
-            // Pairing registered this device server-side: record the super node so the first bring-up
-            // after pairing skips re-registration (its presence also marks the key as registered).
-            keyManager.setRegisteredNodeId(directorClients.probeNodeId().toString())
-
-            active = null
-            userId
-        }
-    }.mapPairingError()
 
     override suspend fun readRequest(qrText: String): Result<PairingRequestInfo> = runCatching {
         val code = decode(qrText)
@@ -169,11 +108,12 @@ class DevicePairingRepositoryImpl @Inject constructor(
         Unit
     }.mapPairingError()
 
+    // A code of another kind is named, so that a node or contact code scanned here says what it is.
     private fun decode(qrText: String): PairingCode =
-        try {
-            PairingCode.parse(qrText)
-        } catch (e: IllegalArgumentException) {
-            throw AppError.InvalidInput(context.getString(R.string.settings_pairing_error_invalid_code), e)
+        when (val code = ScannedCode.classify(qrText)) {
+            is ScannedCode.Pairing -> code.code
+            ScannedCode.Unknown -> throw AppError.InvalidInput(context.getString(R.string.settings_pairing_error_invalid_code))
+            else -> throw AppError.InvalidInput(code.misplacedMessage(context))
         }
 
     /**

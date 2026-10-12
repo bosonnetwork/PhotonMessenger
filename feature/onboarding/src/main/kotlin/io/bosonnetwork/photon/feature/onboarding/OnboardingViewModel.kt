@@ -23,27 +23,24 @@
 package io.bosonnetwork.photon.feature.onboarding
 
 import android.content.Context
+import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import io.bosonnetwork.director.client.AuthProvider
-import io.bosonnetwork.director.client.SuperNodeCode
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import io.bosonnetwork.crypto.KeyBackup
+import io.bosonnetwork.photon.core.boson.ScannedCode
+import io.bosonnetwork.photon.core.boson.misplacedMessage
 import io.bosonnetwork.photon.core.boson.toDirectorError
 import io.bosonnetwork.photon.core.designsystem.component.passphraseLockedMessage
 import io.bosonnetwork.photon.core.model.AppError
-import io.bosonnetwork.photon.feature.onboarding.data.AuthCallback
-import io.bosonnetwork.photon.feature.onboarding.data.AuthDeepLinkBus
 import io.bosonnetwork.photon.feature.onboarding.data.AuthRepository
 import io.bosonnetwork.photon.feature.onboarding.data.ProfileSeed
-import io.bosonnetwork.photon.feature.onboarding.data.RecoveryCodes
 import io.bosonnetwork.photon.feature.onboarding.data.SessionState
-import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -51,197 +48,206 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/**
+ * The steps of bringing an identity into Photon, identity first, as Boson Identity does it:
+ * - a new identity: [NewIdentity] > [BackupKey] > [CheckBackup] > [Server] > [CreateProfile] > [Solving];
+ * - an existing one: [Server] > [ChooseWay] > [Pairing] (approved on another device) or [ImportBackup]
+ *   (its key file, QR code or text), then [Passphrase] if the account has one.
+ */
 enum class OnboardingStep {
-    Server, ScanServer, ChooseMethod, ChooseIdentity, CreateProfile, ScanKey, PasteKey, Passphrase, Solving, BackupKey, Authenticated
+    Welcome,
+    NewIdentity, BackupKey, CheckBackup,
+    Server, ScanServer,
+    CreateProfile, Solving,
+    ChooseWay, Pairing, ImportBackup, ScanBackup, Passphrase,
+    Authenticated,
 }
 
 data class OnboardingUiState(
     val loading: Boolean = false,
-    val providers: List<AuthProvider> = emptyList(),
-    val step: OnboardingStep = OnboardingStep.Server,
+    val step: OnboardingStep = OnboardingStep.Welcome,
+    /** True on the way of an identity the user already has; false while making a new one. */
+    val existing: Boolean = false,
     val serverUrl: String = "",
     /** Director node id used to identity-pin its self-signed cert; blank for a CA-fronted Director. */
     val directorNodeId: String = "",
-    /** True only when no identity is bound yet, so "Create new identity" is offered (else import only). */
-    val allowCreateIdentity: Boolean = false,
-    /** True when the node accepts permissionless PoW registration, so "Create a new account" is offered. */
-    val powAvailable: Boolean = false,
-    /**
-     * True when CreateProfile was entered to make a brand-new permissionless account (PoW), so the
-     * optional passphrase field is shown; false when binding a profile to an existing OAuth session.
-     */
-    val creatingNewAccount: Boolean = false,
-    val keyInput: String = "",
+    /** The new identity's id, while it is being made. */
+    val newUserId: String? = null,
+    /** The new identity's key, shown on the [OnboardingStep.BackupKey] screen. */
+    val backupKeyBase58: String? = null,
+    /** The two groups of the key the [OnboardingStep.CheckBackup] screen asks for. */
+    val challenge: KeyBackup.Challenge? = null,
+    val checkFailed: Boolean = false,
+    /** Whether the new identity's backup was checked; if not, Settings reminds the user. */
+    val backupChecked: Boolean = false,
     val displayName: String = "",
     val bio: String = "",
-    /** Optional account passphrase collected during permissionless (PoW) account creation. */
-    val createPassphrase: String = "",
+    /** The pairing code shown on the [OnboardingStep.Pairing] screen, while waiting for its approval. */
+    val pairingCode: String? = null,
+    /** The pairing request expired before anyone approved it: a new code can be shown. */
+    val pairingExpired: Boolean = false,
+    /** The key typed or pasted on the [OnboardingStep.ImportBackup] screen. */
+    val backupInput: String = "",
     val passphraseInput: String = "",
-    /**
-     * True when the [OnboardingStep.Passphrase] step asks for the passphrase of an imported identity, to
-     * link it to the OAuth sign-in; false when it asks for the passphrase to register this device.
-     */
-    val passphraseForLink: Boolean = false,
-    /** Recovery codes made with a new account, shown once over the flow; null when none are waiting. */
-    val recoveryCodes: RecoveryCodes? = null,
-    /** base58 of a freshly created identity key, shown on the [OnboardingStep.BackupKey] screen. */
-    val backupKeyBase58: String? = null,
     val error: String? = null,
 )
 
 /**
- * One-shot request for the app to hand the just-authenticated session to another profile:
- * [existingProfileId] non-null opens that existing profile (reuse); null creates a fresh profile and
- * continues onboarding there. Either way the app seeds the target with the current token + server
- * config before relaunching, so it comes up ready (or ready to continue) without a second sign-in.
- *
- * [seed] is set only for self-sovereign paths (PoW create / key import) that hold a key the target
- * profile lacks: it carries the identity material to seed there. OAuth handoffs leave it null (the
- * target creates or binds its own key), preserving the existing token-only handoff.
+ * One-shot request for the app to hand the identity to another profile: [existingProfileId] non-null
+ * opens that existing profile; null creates a fresh profile. The app seeds the target with [seed] (the
+ * identity material) before relaunching, so it comes up ready.
  */
 data class ProfileHandoff(val existingProfileId: String?, val seed: ProfileSeed? = null)
 
 @HiltViewModel
 class OnboardingViewModel @Inject constructor(
     private val authRepository: AuthRepository,
-    deepLinkBus: AuthDeepLinkBus,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(OnboardingUiState())
     val uiState: StateFlow<OnboardingUiState> = _uiState.asStateFlow()
 
-    /** One-shot URLs for the screen to open in a Custom Tab. */
-    private val _launchAuthUrl = Channel<String>(Channel.BUFFERED)
-    val launchAuthUrl = _launchAuthUrl.receiveAsFlow()
-
-    /** One-shot: the signed-in account belongs to a different profile; the app should hand off to it. */
+    /** One-shot: the identity belongs to a different profile; the app should hand off to it. */
     private val _handoff = Channel<ProfileHandoff>(Channel.BUFFERED)
     val handoff = _handoff.receiveAsFlow()
 
     init {
         authRepository.ensureDeviceKey()
         viewModelScope.launch {
-            if (authRepository.isSignedIn() && !authRepository.hasUserKey()) {
-                // Returning user on a fresh device/reinstall: a token exists but no local key. Skip the
-                // server + OAuth steps and resolve straight to the identity-acquisition screen (O2/O4).
-                resolveExistingSession()
-            } else {
-                // Prefill the server step with the current/default Director URL + pin id (O1, Mattermost-style).
-                _uiState.update {
-                    it.copy(
-                        serverUrl = authRepository.currentDirectorUrl(),
-                        directorNodeId = authRepository.currentDirectorNodeId(),
-                    )
-                }
-            }
-        }
-        viewModelScope.launch {
-            deepLinkBus.events.collect { callback ->
-                when (callback) {
-                    is AuthCallback.Token -> handleToken(callback.token)
-                    is AuthCallback.Error -> _uiState.update { it.copy(loading = false, error = callback.message) }
-                }
+            // Prefill the node step with the current Director URL and pin id.
+            _uiState.update {
+                it.copy(
+                    serverUrl = authRepository.currentDirectorUrl(),
+                    directorNodeId = authRepository.currentDirectorNodeId(),
+                )
             }
         }
     }
 
-    fun onServerUrlChange(value: String) = _uiState.update { it.copy(serverUrl = value) }
+    // ---- Welcome -----------------------------------------------------------------------------------------
 
-    fun onDirectorNodeIdChange(value: String) = _uiState.update { it.copy(directorNodeId = value) }
-
-    /** Returns to the server step to point at a different Director. */
-    fun editServer() = _uiState.update { it.copy(step = OnboardingStep.Server, error = null) }
-
-    /** Opens the camera to scan a super node QR code and prefill the server fields. */
-    fun scanServerQr() = _uiState.update {
-        lastScannedServerValue = null
-        it.copy(step = OnboardingStep.ScanServer, error = null)
-    }
-
-    /** Returns to the manual server step, discarding any in-progress scan. */
-    fun cancelServerScan() = _uiState.update { it.copy(step = OnboardingStep.Server, error = null) }
-
-    // The scanner re-emits the same payload every frame; only act on the first sighting of each value.
-    private var lastScannedServerValue: String? = null
-
-    /**
-     * Handles a super node QR code: the Boson string `boson:supernode:1:<nodeId>:<url>` the portal shows,
-     * or the JSON `{"url": "...", "id": "..."}` it showed before, whose id is optional. The id pins the
-     * node's self-signed certificate. On success the server fields are filled and the flow returns to the
-     * (editable) server step; an unrecognized payload leaves the scanner open with an error.
-     */
-    fun onServerQrScanned(text: String) {
-        if (text == lastScannedServerValue) return
-        lastScannedServerValue = text
-        val code = SuperNodeCode.parse(text).orElse(null)
-        if (code == null) {
-            _uiState.update { it.copy(error = context.getString(R.string.onb_error_invalid_super_node_qr)) }
-            return
-        }
-        val url = code.url
-        val nodeId = code.nodeId.map { it.toBase58String() }.orElse("")
+    /** Makes a new identity, in memory until a node registers it. */
+    fun chooseCreate() {
+        val userId = authRepository.newIdentity()
         _uiState.update {
             it.copy(
-                step = OnboardingStep.Server,
-                serverUrl = url,
-                directorNodeId = nodeId,
+                step = OnboardingStep.NewIdentity,
+                existing = false,
+                newUserId = userId,
+                backupKeyBase58 = null,
+                challenge = null,
+                checkFailed = false,
+                backupChecked = false,
+                displayName = "",
+                bio = "",
                 error = null,
             )
         }
     }
 
+    /** Brings in an identity the user already has: first its home node. */
+    fun chooseExisting() = _uiState.update { it.copy(step = OnboardingStep.Server, existing = true, error = null) }
+
+    // ---- A new identity: back up and check ------------------------------------------------------------
+
+    fun continueToBackup() = _uiState.update {
+        it.copy(step = OnboardingStep.BackupKey, backupKeyBase58 = authRepository.pendingIdentityKeyBase58(), error = null)
+    }
+
+    /** The user saved the key: ask for two of its groups. */
+    fun continueFromBackup() {
+        val key = _uiState.value.backupKeyBase58 ?: return
+        _uiState.update { it.copy(step = OnboardingStep.CheckBackup, challenge = KeyBackup.challenge(key), checkFailed = false) }
+    }
+
+    fun checkBackup(first: String, second: String) {
+        val s = _uiState.value
+        val key = s.backupKeyBase58 ?: return
+        val challenge = s.challenge ?: return
+        if (KeyBackup.verify(key, challenge, first, second)) {
+            _uiState.update { it.copy(step = OnboardingStep.Server, backupChecked = true, backupKeyBase58 = null, challenge = null) }
+        } else {
+            _uiState.update { it.copy(checkFailed = true) }
+        }
+    }
+
+    fun showKeyAgain() = _uiState.update { it.copy(step = OnboardingStep.BackupKey, checkFailed = false) }
+
+    /** Checks the backup later: Settings reminds the user until they do. */
+    fun checkLater() = _uiState.update {
+        it.copy(step = OnboardingStep.Server, backupChecked = false, backupKeyBase58 = null, challenge = null)
+    }
+
+    // ---- The home node -----------------------------------------------------------------------------------
+
+    fun onServerUrlChange(value: String) = _uiState.update { it.copy(serverUrl = value) }
+
+    fun onDirectorNodeIdChange(value: String) = _uiState.update { it.copy(directorNodeId = value) }
+
+    /** Opens the camera to scan a super node QR code and prefill the node fields. */
+    fun scanServerQr() = _uiState.update {
+        lastScanned = null
+        it.copy(step = OnboardingStep.ScanServer, error = null)
+    }
+
+    fun cancelServerScan() = _uiState.update { it.copy(step = OnboardingStep.Server, error = null) }
+
+    // The scanner re-emits the same payload every frame; only act on the first sighting of each value.
+    private var lastScanned: String? = null
+
     /**
-     * Saves the entered Director URL, then probes that server for its OAuth providers AND whether it
-     * accepts permissionless proof-of-work registration, and advances to the method-choice hub. Both
-     * probes run in parallel; PoW is offered as the primary path when available, OAuth as secondary.
+     * Handles a scanned node code (`boson:supernode:1`, or the JSON form read before it): the node
+     * fields are filled and the flow returns to the (editable) node step. Any other code leaves the
+     * scanner open, saying what it is.
+     */
+    fun onServerQrScanned(text: String) {
+        if (text == lastScanned) return
+        lastScanned = text
+        when (val code = ScannedCode.classify(text)) {
+            is ScannedCode.SuperNode -> _uiState.update {
+                it.copy(
+                    step = OnboardingStep.Server,
+                    serverUrl = code.code.url,
+                    directorNodeId = code.code.nodeId.map { id -> id.toBase58String() }.orElse(""),
+                    error = null,
+                )
+            }
+            ScannedCode.Unknown -> _uiState.update { it.copy(error = context.getString(R.string.onb_error_invalid_super_node_qr)) }
+            else -> _uiState.update { it.copy(error = code.misplacedMessage(context)) }
+        }
+    }
+
+    /**
+     * Saves the node and checks it: for a new identity, that it takes new accounts; for an existing one,
+     * that it answers. Then on to the profile, or to the ways in.
      */
     fun confirmServer() {
         val url = _uiState.value.serverUrl.trim()
         if (url.isEmpty()) return
         val nodeId = _uiState.value.directorNodeId.trim().ifBlank { null }
+        val existing = _uiState.value.existing
         viewModelScope.launch {
             _uiState.update { it.copy(loading = true, error = null) }
-            runCatching {
+            try {
                 authRepository.setDirectorUrl(url, nodeId)
-                coroutineScope {
-                    val providers = async { authRepository.providers() }
-                    val pow = async { authRepository.powAvailable() }
-                    providers.await() to pow.await()
+                if (existing) {
+                    authRepository.reachNode()
+                    _uiState.update { it.copy(loading = false, step = OnboardingStep.ChooseWay) }
+                } else if (authRepository.powAvailable()) {
+                    _uiState.update { it.copy(loading = false, step = OnboardingStep.CreateProfile) }
+                } else {
+                    _uiState.update { it.copy(loading = false, error = context.getString(R.string.onb_error_node_no_new_accounts)) }
                 }
-            }.onSuccess { (providers, powAvailable) ->
-                _uiState.update {
-                    it.copy(
-                        loading = false,
-                        providers = providers,
-                        powAvailable = powAvailable,
-                        step = OnboardingStep.ChooseMethod,
-                    )
-                }
-            }.onFailure { e ->
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
                 _uiState.update { it.copy(loading = false, error = serverErrorMessage(e)) }
             }
         }
     }
 
-    /** From the method hub: create a brand-new permissionless account (collect a profile, then PoW). */
-    fun chooseCreateAccount() = _uiState.update {
-        it.copy(
-            step = OnboardingStep.CreateProfile,
-            creatingNewAccount = true,
-            displayName = "",
-            bio = "",
-            createPassphrase = "",
-            error = null,
-        )
-    }
-
-    /** From the method hub: bring an existing identity onto this device by importing its key. */
-    fun addFromAnotherDevice() = _uiState.update {
-        it.copy(step = OnboardingStep.ChooseIdentity, allowCreateIdentity = false, error = null)
-    }
-
-    /** Friendly copy for server-connect failures; TLS trust errors point at the Server ID field. */
+    /** Friendly copy for node-connect failures; TLS trust errors point at the node id field. */
     private fun serverErrorMessage(e: Throwable): String {
         var cause: Throwable? = e
         while (cause != null) {
@@ -253,181 +259,172 @@ class OnboardingViewModel @Inject constructor(
         return e.message ?: context.getString(R.string.onb_error_cant_reach_server)
     }
 
-    /** Reloads providers for the confirmed server (retry affordance on the sign-in step). */
-    fun loadProviders() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(loading = true, error = null) }
-            runCatching { authRepository.providers() }
-                .onSuccess { providers -> _uiState.update { it.copy(loading = false, providers = providers) } }
-                .onFailure { e -> _uiState.update { it.copy(loading = false, error = e.message) } }
-        }
-    }
+    // ---- A new identity: profile and registration -------------------------------------------------------
 
-    fun onProviderSelected(provider: AuthProvider) {
-        viewModelScope.launch {
-            runCatching { authRepository.authorizeUrl(provider.id) }
-                .onSuccess { url -> _launchAuthUrl.send(url) }
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-        }
-    }
+    fun onDisplayNameChange(value: String) = _uiState.update { it.copy(displayName = value) }
 
-    private fun handleToken(token: String) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(loading = true, error = null) }
-            runCatching { authRepository.onAuthToken(token) }
-                .onSuccess { state -> applySession(state) }
-                .onFailure { e -> _uiState.update { it.copy(loading = false, error = e.message) } }
-        }
-    }
+    fun onBioChange(value: String) = _uiState.update { it.copy(bio = value) }
 
-    /** Resolves the session for an already-present token (returning user, no local key). */
-    private suspend fun resolveExistingSession() {
-        _uiState.update { it.copy(loading = true, error = null) }
-        runCatching { authRepository.currentSession() }
-            .onSuccess { state -> applySession(state) }
-            .onFailure { e ->
-                // Offline / server unreachable: land on the import screen so the user can still paste a key.
+    /** The running proof-of-work solve, kept so [cancelSolving] can abort a long search. */
+    private var solveJob: Job? = null
+
+    /**
+     * Registers the new identity on the node by proof of work, off the UI thread on the
+     * [OnboardingStep.Solving] screen. The account exists and this device is registered in one call.
+     * Failures return to the profile with a retryable message; a cancel is silent.
+     */
+    fun createAccount() {
+        val current = _uiState.value
+        _uiState.update { it.copy(loading = false, step = OnboardingStep.Solving, error = null) }
+        solveJob = viewModelScope.launch {
+            try {
+                val state = authRepository.createAccountWithPow(current.displayName, current.bio, current.backupChecked)
+                applySession(state)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
                 _uiState.update {
-                    it.copy(loading = false, step = OnboardingStep.ChooseIdentity, allowCreateIdentity = false, error = e.message)
+                    it.copy(
+                        step = OnboardingStep.CreateProfile,
+                        error = e.message ?: context.getString(R.string.onb_error_create_account_failed),
+                    )
                 }
             }
-    }
-
-    private fun applySession(state: SessionState) {
-        when (state) {
-            // The identity belongs to (or needs) a different profile: hand off to the app to open the
-            // right profile and relaunch. Never touch the active profile's key here.
-            is SessionState.ReuseProfile -> _handoff.trySend(ProfileHandoff(state.profileId, state.seed))
-            is SessionState.NewProfileForIdentity -> _handoff.trySend(ProfileHandoff(null, state.seed))
-            is SessionState.NeedsIdentity ->
-                _uiState.update { it.copy(loading = false, step = OnboardingStep.ChooseIdentity, allowCreateIdentity = true) }
-            is SessionState.NeedsKey ->
-                _uiState.update { it.copy(loading = false, step = OnboardingStep.ChooseIdentity, allowCreateIdentity = false) }
-            is SessionState.Authenticated ->
-                _uiState.update { it.copy(loading = false, step = OnboardingStep.Authenticated) }
         }
     }
 
-    // --- Identity choice (O4) ---
-
-    /** Create a brand-new identity: collect a profile, then generate + bind a fresh key. */
-    fun chooseCreateNew() =
-        _uiState.update { it.copy(step = OnboardingStep.CreateProfile, creatingNewAccount = false, error = null) }
-
-    fun chooseScanKey() = _uiState.update { it.copy(step = OnboardingStep.ScanKey, error = null) }
-
-    fun choosePasteKey() = _uiState.update { it.copy(step = OnboardingStep.PasteKey, keyInput = "", error = null) }
-
-    /** Back to the create/scan/paste choice from a sub-step. */
-    fun backToChoose() = _uiState.update { it.copy(step = OnboardingStep.ChooseIdentity, error = null) }
-
-    fun onKeyInputChange(value: String) = _uiState.update { it.copy(keyInput = value) }
-
-    /** Imports the pasted raw key (base58 or hex). */
-    fun importPastedKey() = importKey(_uiState.value.keyInput)
-
-    // The scanner re-emits the same payload every frame; only act on the first sighting of each value.
-    private var lastScannedValue: String? = null
-
-    /** Imports a raw key scanned from another device's QR. */
-    fun onKeyScanned(text: String) {
-        if (_uiState.value.loading || text == lastScannedValue) return
-        lastScannedValue = text
-        importKey(text)
+    fun cancelSolving() {
+        solveJob?.cancel()
+        solveJob = null
+        _uiState.update { it.copy(loading = false, step = OnboardingStep.CreateProfile, error = null) }
     }
 
-    /** The key of an identity waiting for its passphrase, to be linked to the OAuth sign-in. */
-    private var keyAwaitingPassphrase: String? = null
+    // ---- An existing identity: pairing ----------------------------------------------------------------
 
-    private fun importKey(text: String) {
+    private var pairingJob: Job? = null
+
+    /**
+     * Shows this device's pairing code and waits for another device that holds the identity (Boson
+     * Identity, or Photon) to approve it. Approval registers this device and hands the user key over.
+     */
+    fun choosePairing() {
+        pairingJob?.cancel()
+        _uiState.update { it.copy(step = OnboardingStep.Pairing, pairingCode = null, pairingExpired = false, error = null) }
+        pairingJob = viewModelScope.launch {
+            try {
+                val code = authRepository.startPairing(deviceName())
+                _uiState.update { it.copy(pairingCode = code) }
+                applySession(authRepository.finishPairing())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: AppError.Timeout) {
+                _uiState.update { it.copy(pairingCode = null, pairingExpired = true) }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(pairingCode = null, error = e.message ?: context.getString(R.string.onb_error_pairing_failed))
+                }
+            }
+        }
+    }
+
+    fun cancelPairing() {
+        pairingJob?.cancel()
+        pairingJob = null
+        authRepository.cancelPairing()
+        _uiState.update { it.copy(step = OnboardingStep.ChooseWay, pairingCode = null, pairingExpired = false, error = null) }
+    }
+
+    private fun deviceName(): String =
+        listOfNotNull(Build.MANUFACTURER?.replaceFirstChar { it.uppercase() }, Build.MODEL)
+            .joinToString(" ")
+            .trim()
+
+    // ---- An existing identity: its backup --------------------------------------------------------------
+
+    fun chooseImport() = _uiState.update { it.copy(step = OnboardingStep.ImportBackup, backupInput = "", error = null) }
+
+    fun onBackupInputChange(value: String) = _uiState.update { it.copy(backupInput = value) }
+
+    fun importTyped() = importBackup(_uiState.value.backupInput)
+
+    /** The text of a key file the user opened. */
+    fun onBackupFileOpened(text: String) = importBackup(text)
+
+    fun scanBackup() = _uiState.update {
+        lastScanned = null
+        it.copy(step = OnboardingStep.ScanBackup, error = null)
+    }
+
+    fun cancelBackupScan() = _uiState.update { it.copy(step = OnboardingStep.ImportBackup, error = null) }
+
+    /** A scanned key; any other code leaves the scanner open, saying what it is. */
+    fun onBackupScanned(text: String) {
+        if (_uiState.value.loading || text == lastScanned) return
+        lastScanned = text
+        when (val code = ScannedCode.classify(text)) {
+            ScannedCode.PrivateKey -> importBackup(text)
+            ScannedCode.Unknown -> _uiState.update { it.copy(error = context.getString(R.string.onb_error_invalid_key)) }
+            else -> _uiState.update { it.copy(error = code.misplacedMessage(context)) }
+        }
+    }
+
+    private fun importBackup(text: String) {
         if (text.isBlank()) return
         viewModelScope.launch {
             _uiState.update { it.copy(loading = true, error = null) }
-            runCatching { authRepository.importUserKeyText(text) }
-                .onSuccess { state ->
-                    // Hosted on the active profile -> finish device setup here; otherwise the identity
-                    // belongs to (or needs) another profile -> hand off (never touch the active profile).
-                    when (state) {
-                        is SessionState.Authenticated -> finishIdentitySetup()
-                        else -> applySession(state)
-                    }
+            try {
+                when (val state = authRepository.importBackup(text)) {
+                    is SessionState.Authenticated -> finishIdentitySetup()
+                    else -> applySession(state)
                 }
-                .onFailure { e ->
-                    if (e.toDirectorError() is AppError.PassphraseRequired) {
-                        // The identity has a passphrase, and linking a sign-in to it takes the passphrase.
-                        keyAwaitingPassphrase = text
-                        _uiState.update {
-                            it.copy(
-                                loading = false,
-                                step = OnboardingStep.Passphrase,
-                                passphraseInput = "",
-                                passphraseForLink = true,
-                            )
-                        }
-                    } else {
-                        _uiState.update { it.copy(loading = false, error = e.message ?: context.getString(R.string.onb_error_invalid_key)) }
-                    }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        loading = false,
+                        step = if (it.step == OnboardingStep.ScanBackup) OnboardingStep.ImportBackup else it.step,
+                        error = e.message ?: context.getString(R.string.onb_error_invalid_key),
+                    )
                 }
+            }
         }
     }
 
     /**
-     * After an identity is acquired on this device (create or import), registers this device so it can
-     * connect to the messaging service. Adding a device is passphrase-gated: a passphrase-protected
-     * account is routed to the [OnboardingStep.Passphrase] step to collect the passphrase first; a
-     * non-protected account skips straight to [OnboardingStep.Authenticated], where the connect path
-     * registers the device silently.
+     * After an imported identity is stored, registers this device so it can connect to the messaging
+     * service. Adding a device is passphrase-gated: a passphrase-protected account goes to the
+     * [OnboardingStep.Passphrase] step first; otherwise straight on, where the connect path registers the
+     * device silently.
      */
     private fun finishIdentitySetup() {
         viewModelScope.launch {
             _uiState.update { it.copy(loading = true, error = null) }
-            runCatching { authRepository.isPassphraseProtected() }
-                .onSuccess { protected ->
-                    _uiState.update {
-                        if (protected) {
-                            it.copy(
-                                loading = false,
-                                step = OnboardingStep.Passphrase,
-                                passphraseInput = "",
-                                passphraseForLink = false,
-                            )
-                        } else {
-                            it.copy(loading = false, step = OnboardingStep.Authenticated)
-                        }
-                    }
-                }
-                .onFailure {
-                    // Couldn't determine passphrase state; proceed and let the connect path register the
-                    // device (non-protected) or surface a retryable connection error.
-                    _uiState.update { it.copy(loading = false, step = OnboardingStep.Authenticated) }
-                }
+            val protected = try {
+                authRepository.isPassphraseProtected()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Couldn't tell: go on, and let the connect path register the device or surface a
+                // retryable connection error.
+                false
+            }
+            _uiState.update {
+                if (protected) it.copy(loading = false, step = OnboardingStep.Passphrase, passphraseInput = "")
+                else it.copy(loading = false, step = OnboardingStep.Authenticated)
+            }
         }
     }
 
     fun onPassphraseInputChange(value: String) = _uiState.update { it.copy(passphraseInput = value) }
 
-    /**
-     * Registers this device under a passphrase-protected account using the supplied passphrase (adding a
-     * device is a passphrase-gated action). On success the device is ready to connect; a wrong passphrase
-     * (403) keeps the user on the passphrase step with an error.
-     */
+    /** Registers this device with the account's passphrase; a wrong one keeps the user on the step. */
     fun submitPassphrase() {
         val passphrase = _uiState.value.passphraseInput
         if (passphrase.isBlank()) return
-        val keyToLink = keyAwaitingPassphrase.takeIf { _uiState.value.passphraseForLink }
         viewModelScope.launch {
             _uiState.update { it.copy(loading = true, error = null) }
             try {
-                if (keyToLink != null) {
-                    // Link the imported identity with its passphrase; the same passphrase then registers
-                    // this device, so it is asked for only once.
-                    val state = authRepository.importUserKeyText(keyToLink, passphrase)
-                    keyAwaitingPassphrase = null
-                    if (state !is SessionState.Authenticated) {
-                        applySession(state)
-                        return@launch
-                    }
-                }
                 authRepository.registerDevice(passphrase)
                 _uiState.update { it.copy(loading = false, step = OnboardingStep.Authenticated) }
             } catch (e: CancellationException) {
@@ -446,129 +443,47 @@ class OnboardingViewModel @Inject constructor(
         else -> error.message ?: context.getString(R.string.onb_error_register_device_failed)
     }
 
-    fun onDisplayNameChange(value: String) = _uiState.update { it.copy(displayName = value) }
+    // ---- Where the identity lands ------------------------------------------------------------------------
 
-    fun onBioChange(value: String) = _uiState.update { it.copy(bio = value) }
-
-    fun onCreatePassphraseChange(value: String) = _uiState.update { it.copy(createPassphrase = value) }
-
-    /**
-     * Finalizes the CreateProfile step. With an OAuth session present the profile is bound to that
-     * account (bind path); without one it is a permissionless account creation via proof-of-work.
-     */
-    fun completeProfile() {
-        if (authRepository.isSignedIn()) bindProfileIdentity() else createAccount()
-    }
-
-    private fun bindProfileIdentity() {
-        viewModelScope.launch {
-            val current = _uiState.value
-            _uiState.update { it.copy(loading = true, error = null) }
-            runCatching { authRepository.bindIdentity(current.displayName, current.bio) }
-                .onSuccess { state ->
-                    // A brand-new key was generated: prompt the user to back it up before finishing. The
-                    // continuation registers this device (hosted here) or hands off (fresh/existing profile).
-                    promptBackupThen(state) {
-                        when (state) {
-                            is SessionState.Authenticated -> finishIdentitySetup()
-                            else -> applySession(state)
-                        }
-                    }
-                }
-                .onFailure { e -> _uiState.update { it.copy(loading = false, error = e.message) } }
+    private fun applySession(state: SessionState) {
+        when (state) {
+            // The identity belongs to (or needs) a different profile: hand off to the app to open the
+            // right profile and relaunch. Never touch the active profile's key here.
+            is SessionState.ReuseProfile -> _handoff.trySend(ProfileHandoff(state.profileId, state.seed))
+            is SessionState.NewProfileForIdentity -> _handoff.trySend(ProfileHandoff(null, state.seed))
+            is SessionState.Authenticated -> _uiState.update { it.copy(loading = false, step = OnboardingStep.Authenticated) }
         }
     }
 
-    /** Deferred completion to run once the user acknowledges the [OnboardingStep.BackupKey] prompt. */
-    private var afterBackup: (() -> Unit)? = null
+    // ---- Back --------------------------------------------------------------------------------------------
 
-    /**
-     * Routes a just-created identity through the key-backup screen before completing. [proceed] is the
-     * path-specific continuation (finish device setup / hand off) and runs when the user taps Continue. If
-     * no fresh key is present (should not happen on the create paths) it proceeds immediately.
-     */
-    private fun promptBackupThen(state: SessionState, proceed: () -> Unit) {
-        val key = authRepository.newKeyBackupBase58(state)
-        if (key == null) {
-            proceed()
-            return
-        }
-        afterBackup = proceed
-        _uiState.update {
-            it.copy(loading = false, step = OnboardingStep.BackupKey, backupKeyBase58 = key, error = null)
-        }
+    /** Whether the system back gesture goes to a previous step (rather than leaving the app). */
+    fun canGoBack(): Boolean = when (_uiState.value.step) {
+        OnboardingStep.Welcome, OnboardingStep.Passphrase, OnboardingStep.Authenticated -> false
+        else -> true
     }
 
-    /** Recovery codes made with the account just created, shown after its key. */
-    private var codesAfterBackup: RecoveryCodes? = null
-
-    /**
-     * Continues past the backup screen: shows the recovery codes made with the account, if any, then
-     * clears the shown key and runs the deferred completion.
-     */
-    fun continueFromBackup() {
-        codesAfterBackup?.let { codes ->
-            codesAfterBackup = null
-            _uiState.update { it.copy(recoveryCodes = codes) }
-            return
-        }
-        val proceed = afterBackup ?: return
-        afterBackup = null
-        _uiState.update { it.copy(backupKeyBase58 = null) }
-        proceed()
-    }
-
-    /** The user saved the recovery codes shown; carries on as [continueFromBackup] does. */
-    fun dismissRecoveryCodes() {
-        _uiState.update { it.copy(recoveryCodes = null) }
-        continueFromBackup()
-    }
-
-    /** The running PoW solve, kept so [cancelSolving] can abort a long/expensive search. */
-    private var solveJob: Job? = null
-
-    /**
-     * Permissionless account creation: runs the memory-hard proof-of-work off the UI thread on the
-     * [OnboardingStep.Solving] screen. On success the account exists and this device is registered
-     * (one call), so the flow jumps straight to Authenticated. Failures return to CreateProfile with a
-     * retryable message; a cancel is silent (the UI already reset).
-     */
-    private fun createAccount() {
-        val current = _uiState.value
-        _uiState.update { it.copy(loading = false, step = OnboardingStep.Solving, error = null) }
-        solveJob = viewModelScope.launch {
-            try {
-                // Hosted on the active profile -> Home (the device was registered by usersAndInitialDevice);
-                // otherwise the identity belongs on a fresh profile -> hand off seeded and relaunch there.
-                val state = authRepository.createAccountWithPow(
-                    current.displayName, current.bio, current.createPassphrase,
-                )
-                codesAfterBackup = authRepository.takeRecoveryCodes()
-                // A brand-new key was generated: prompt the user to back it up before finishing. The device
-                // is already registered (usersAndInitialDevice), so hosted-here goes straight to Home.
-                promptBackupThen(state) {
-                    when (state) {
-                        is SessionState.Authenticated -> _uiState.update { it.copy(step = OnboardingStep.Authenticated) }
-                        else -> applySession(state)
-                    }
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        step = OnboardingStep.CreateProfile,
-                        error = e.message ?: context.getString(R.string.onb_error_create_account_failed),
-                    )
-                }
+    /** One step back. */
+    fun back() {
+        val s = _uiState.value
+        when (s.step) {
+            OnboardingStep.NewIdentity -> {
+                authRepository.dropPendingIdentity()
+                _uiState.update { it.copy(step = OnboardingStep.Welcome, newUserId = null, error = null) }
             }
+            OnboardingStep.BackupKey -> _uiState.update { it.copy(step = OnboardingStep.NewIdentity, error = null) }
+            OnboardingStep.CheckBackup -> showKeyAgain()
+            OnboardingStep.Server ->
+                if (s.existing) _uiState.update { it.copy(step = OnboardingStep.Welcome, existing = false, error = null) }
+                else continueToBackup()
+            OnboardingStep.ScanServer -> cancelServerScan()
+            OnboardingStep.CreateProfile -> _uiState.update { it.copy(step = OnboardingStep.Server, error = null) }
+            OnboardingStep.Solving -> cancelSolving()
+            OnboardingStep.ChooseWay -> _uiState.update { it.copy(step = OnboardingStep.Server, error = null) }
+            OnboardingStep.Pairing -> cancelPairing()
+            OnboardingStep.ImportBackup -> _uiState.update { it.copy(step = OnboardingStep.ChooseWay, error = null) }
+            OnboardingStep.ScanBackup -> cancelBackupScan()
+            OnboardingStep.Welcome, OnboardingStep.Passphrase, OnboardingStep.Authenticated -> Unit
         }
-    }
-
-    /** Aborts an in-progress PoW solve and returns to the profile step. */
-    fun cancelSolving() {
-        solveJob?.cancel()
-        solveJob = null
-        _uiState.update { it.copy(loading = false, step = OnboardingStep.CreateProfile, error = null) }
     }
 }

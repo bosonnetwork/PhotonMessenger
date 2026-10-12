@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="bw_code_super_node">这是超级节点的二维码。请在选择主节点的地方扫描。</string>
+    <string name="bw_code_pairing">这是请求配对的新设备。请在“设置”的“设备”中批准它。</string>
+    <string name="bw_code_user_id">这是某人的 ID。请在“联系人”中添加。</string>
+    <string name="bw_code_private_key">这是私钥。只能用来导入你自己的身份，切勿分享。</string>
+    <string name="bw_code_enroll">这个二维码用于设置超级节点的管理员。请用 Boson Identity 扫描。</string>
+    <string name="bw_code_move">这个二维码用于把身份迁移到新手机。请用 Boson Identity 扫描。</string>
+    <string name="bw_code_sign_in">这个二维码用于网页登录。请用 Boson Identity 扫描。</string>
+    <string name="bw_code_other">Photon 不使用这种 Boson 二维码。</string>
+    <string name="bw_code_unknown">Photon 无法识别这个二维码。</string>
+</resources>

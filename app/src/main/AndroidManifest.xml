@@ -31,23 +31,6 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
-            <!-- OAuth return from nodes 3.2 and later: an App Link that only Photon receives, verified by
-                 https://bosonnetwork.io/.well-known/assetlinks.json. The result is in the fragment. -->
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="bosonnetwork.io" android:path="/photon/auth" />
-            </intent-filter>
-
-            <!-- OAuth return from nodes before 3.2: the app's own scheme, the result in the query. -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="io.bosonnetwork.photon" android:host="auth" />
-            </intent-filter>
         </activity>
 
         <service

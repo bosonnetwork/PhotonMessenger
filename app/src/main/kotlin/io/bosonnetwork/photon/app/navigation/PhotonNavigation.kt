@@ -50,7 +50,8 @@ object Routes {
     const val SIGN_IN_ACCOUNTS = "signInAccounts"
     const val SESSIONS = "sessions"
     const val DEVICES = "devices"
-    const val ADD_DEVICE = "addDevice"
+    /** Backing up the identity key and checking the copy (the reminder in Settings). */
+    const val BACKUP_KEY = "backupKey"
     const val APPROVE_DEVICE = "approveDevice"
     const val SHOW_KEY = "showKey"
     const val SHOW_IDENTITY_KEY = "showIdentityKey"

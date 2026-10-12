@@ -53,7 +53,9 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -100,6 +102,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.bosonnetwork.Id
 import io.bosonnetwork.photon.core.designsystem.component.ConfirmDialog
@@ -127,13 +130,20 @@ fun SettingsScreen(
     onOpenDevices: () -> Unit,
     onOpenLanguage: () -> Unit,
     onShowIdentityKey: () -> Unit,
+    onBackUpKey: () -> Unit,
     onSignedOut: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val theme by viewModel.theme.collectAsStateWithLifecycle()
     val notifications by viewModel.notifications.collectAsStateWithLifecycle()
+    val backupPending by viewModel.backupPending.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+
+    LifecycleResumeEffect(Unit) {
+        viewModel.refreshBackupState()
+        onPauseOrDispose { }
+    }
 
     LaunchedEffect(Unit) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
     LaunchedEffect(Unit) { viewModel.signedOut.collect { onSignedOut() } }
@@ -176,6 +186,7 @@ fun SettingsScreen(
                 else -> Column(
                     Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
                 ) {
+                    if (backupPending) BackupReminder(onBackUpKey)
                     ProfileHeader(
                         profile = state.profile,
                         onChangePhoto = { pickAvatar.launch("image/*") },
@@ -1045,4 +1056,32 @@ private fun ThemeMode.label(): String = when (this) {
     ThemeMode.SYSTEM -> stringResource(R.string.settings_theme_system)
     ThemeMode.LIGHT -> stringResource(R.string.settings_theme_light)
     ThemeMode.DARK -> stringResource(R.string.settings_theme_dark)
+}
+
+/**
+ * Shown while the backup of an identity made on this phone hasn't been checked: without a copy, losing
+ * the phone loses the identity.
+ */
+@Composable
+private fun BackupReminder(onBackUpKey: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                stringResource(R.string.settings_backup_reminder_title),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                stringResource(R.string.settings_backup_reminder_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(onClick = onBackUpKey) { Text(stringResource(R.string.settings_backup_reminder_action)) }
+        }
+    }
 }

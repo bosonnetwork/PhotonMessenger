@@ -58,6 +58,9 @@ import kotlinx.coroutines.future.await
  * sign-out. Returns UI models so the ViewModels stay decoupled and unit-testable.
  */
 interface SettingsRepository {
+    /** True while this identity's backup, made when it was created here, hasn't been checked. */
+    fun isBackupPending(): Boolean = false
+
     val themePreferences: Flow<ThemePreferences>
     val notificationPreferences: Flow<NotificationPreferences>
 
@@ -130,6 +133,8 @@ class SettingsRepositoryImpl @Inject constructor(
     private val avatarPreparer: AvatarPreparer,
     @ApplicationContext private val context: Context,
 ) : SettingsRepository {
+
+    override fun isBackupPending(): Boolean = keyManager.isBackupPending()
 
     private suspend fun director() = directorClients.client()
 

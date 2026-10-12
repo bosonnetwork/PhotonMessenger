@@ -24,10 +24,9 @@ package io.bosonnetwork.photon.feature.onboarding
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -36,7 +35,6 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -46,23 +44,29 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.SwitchAccount
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -73,10 +77,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -84,13 +88,14 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import io.bosonnetwork.photon.core.designsystem.component.RecoveryCodesDialog
-import io.bosonnetwork.photon.core.designsystem.component.passphraseProblem
+import io.bosonnetwork.photon.core.designsystem.component.SecureScreen
 import io.bosonnetwork.photon.core.qr.QrScanner
 import io.bosonnetwork.photon.core.qr.rememberQrBitmap
-import io.bosonnetwork.photon.feature.onboarding.R
 
-/** Welcome / OAuth onboarding (design spec screen 1, wireframe 1). */
+/**
+ * Bringing an identity into Photon, identity first: a new one, or one the user already has (see
+ * [OnboardingStep]).
+ */
 @Composable
 fun OnboardingScreen(
     onAuthenticated: () -> Unit,
@@ -104,16 +109,8 @@ fun OnboardingScreen(
     viewModel: OnboardingViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
 
-    // Open the Director authorize URL in a Custom Tab (no WebView; spec 4.8).
-    LaunchedEffect(Unit) {
-        viewModel.launchAuthUrl.collect { url ->
-            CustomTabsIntent.Builder().build().launchUrl(context, Uri.parse(url))
-        }
-    }
-
-    // The signed-in account belongs to a different profile: hand off to the app to open it.
+    // The identity belongs to a different profile: hand off to the app to open it.
     LaunchedEffect(Unit) {
         viewModel.handoff.collect { onHandoffProfile(it) }
     }
@@ -122,446 +119,388 @@ fun OnboardingScreen(
         if (state.step == OnboardingStep.Authenticated) onAuthenticated()
     }
 
-    state.recoveryCodes?.let { codes ->
-        RecoveryCodesDialog(codes = codes.codes, userId = codes.userId, onDone = viewModel::dismissRecoveryCodes)
-    }
+    BackHandler(enabled = viewModel.canGoBack() && !state.loading) { viewModel.back() }
 
     Box(modifier = modifier.fillMaxSize()) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Surface(
-            color = MaterialTheme.colorScheme.primaryContainer,
-            shape = CircleShape,
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 48.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Box(modifier = Modifier.size(72.dp), contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Chat,
-                    contentDescription = null,
-                    modifier = Modifier.size(36.dp),
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-        }
-        Spacer(Modifier.height(16.dp))
-        Text(text = stringResource(R.string.onb_welcome_title), style = MaterialTheme.typography.headlineMedium)
-        Text(
-            text = stringResource(R.string.onb_welcome_tagline),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(32.dp))
-
-        AnimatedContent(
-            targetState = state.loading to state.step,
-            transitionSpec = {
-                (fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 16 })
-                    .togetherWith(fadeOut(tween(120)))
-            },
-            label = "onboarding-step",
-        ) { (loading, step) ->
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                when {
-                    loading -> CircularProgressIndicator()
-
-                    step == OnboardingStep.Server -> {
-                        Text(stringResource(R.string.onb_server_step_title), style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = state.serverUrl,
-                            onValueChange = viewModel::onServerUrlChange,
-                            label = { Text(stringResource(R.string.onb_server_url_label)) },
-                            placeholder = { Text(stringResource(R.string.onb_server_url_placeholder)) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        var showAdvanced by remember { mutableStateOf(state.directorNodeId.isNotBlank()) }
-                        Spacer(Modifier.height(8.dp))
-                        if (showAdvanced) {
-                            OutlinedTextField(
-                                value = state.directorNodeId,
-                                onValueChange = viewModel::onDirectorNodeIdChange,
-                                label = { Text(stringResource(R.string.onb_server_id_label)) },
-                                placeholder = { Text(stringResource(R.string.onb_server_id_placeholder)) },
-                                supportingText = {
-                                    Text(stringResource(R.string.onb_server_id_supporting_text))
-                                },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        } else {
-                            TextButton(onClick = { showAdvanced = true }) { Text(stringResource(R.string.onb_advanced_options)) }
-                        }
-                        Spacer(Modifier.height(16.dp))
-                        Button(
-                            onClick = viewModel::confirmServer,
-                            enabled = state.serverUrl.isNotBlank(),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(stringResource(R.string.onb_continue))
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        OutlinedButton(
-                            onClick = viewModel::scanServerQr,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(stringResource(R.string.onb_scan_super_node))
-                        }
-                    }
-
-                    step == OnboardingStep.ScanServer ->
-                        CameraScanStep(
-                            title = stringResource(R.string.onb_scan_super_node_title),
-                            description = stringResource(R.string.onb_scan_super_node_desc),
-                            onScanned = viewModel::onServerQrScanned,
-                            onCancel = viewModel::cancelServerScan,
-                        )
-
-                    step == OnboardingStep.ChooseIdentity -> {
-                        Text(stringResource(R.string.onb_choose_identity_title), style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = if (state.allowCreateIdentity) {
-                                stringResource(R.string.onb_choose_identity_desc_can_create)
-                            } else {
-                                stringResource(R.string.onb_choose_identity_desc_import_only)
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            textAlign = TextAlign.Center,
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        if (state.allowCreateIdentity) {
-                            Button(onClick = viewModel::chooseCreateNew, modifier = Modifier.fillMaxWidth()) {
-                                Text(stringResource(R.string.onb_create_new_identity))
-                            }
-                            Spacer(Modifier.height(12.dp))
-                        }
-                        OutlinedButton(onClick = viewModel::chooseScanKey, modifier = Modifier.fillMaxWidth()) {
-                            Text(stringResource(R.string.onb_scan_qr_another_device))
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        OutlinedButton(onClick = viewModel::choosePasteKey, modifier = Modifier.fillMaxWidth()) {
-                            Text(stringResource(R.string.onb_enter_key_manually))
-                        }
-                    }
-
-                    step == OnboardingStep.ScanKey ->
-                        KeyScanStep(onScanned = viewModel::onKeyScanned, onCancel = viewModel::backToChoose)
-
-                    step == OnboardingStep.PasteKey -> {
-                        Text(stringResource(R.string.onb_enter_identity_key_title), style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            stringResource(R.string.onb_paste_key_desc),
-                            style = MaterialTheme.typography.bodyMedium,
-                            textAlign = TextAlign.Center,
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = state.keyInput,
-                            onValueChange = viewModel::onKeyInputChange,
-                            label = { Text(stringResource(R.string.onb_private_key_label)) },
-                            minLines = 2,
-                            maxLines = 4,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        Button(
-                            onClick = viewModel::importPastedKey,
-                            enabled = state.keyInput.isNotBlank(),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(stringResource(R.string.onb_import_identity))
-                        }
-                        TextButton(onClick = viewModel::backToChoose) { Text(stringResource(R.string.onb_back)) }
-                    }
-
-                    step == OnboardingStep.CreateProfile -> {
-                        Text(stringResource(R.string.onb_create_profile_title), style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = state.displayName,
-                            onValueChange = viewModel::onDisplayNameChange,
-                            label = { Text(stringResource(R.string.onb_display_name_label)) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = state.bio,
-                            onValueChange = viewModel::onBioChange,
-                            label = { Text(stringResource(R.string.onb_bio_label)) },
-                            minLines = 2,
-                            maxLines = 4,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        // Setting a passphrase only applies to permissionless account creation; the OAuth
-                        // bind path manages account security differently, so hide it there.
-                        val createPassphraseProblem = state.createPassphrase
-                            .takeIf { state.creatingNewAccount && it.isNotEmpty() }
-                            ?.let(::passphraseProblem)
-                        if (state.creatingNewAccount) {
-                            var showAdvanced by remember { mutableStateOf(state.createPassphrase.isNotBlank()) }
-                            Spacer(Modifier.height(8.dp))
-                            if (showAdvanced) {
-                                OutlinedTextField(
-                                    value = state.createPassphrase,
-                                    onValueChange = viewModel::onCreatePassphraseChange,
-                                    label = { Text(stringResource(R.string.onb_passphrase_optional_label)) },
-                                    supportingText = {
-                                        Text(
-                                            stringResource(
-                                                createPassphraseProblem ?: R.string.onb_passphrase_optional_supporting,
-                                            ),
-                                        )
-                                    },
-                                    isError = createPassphraseProblem != null,
-                                    singleLine = true,
-                                    visualTransformation = PasswordVisualTransformation(),
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            } else {
-                                TextButton(onClick = { showAdvanced = true }) { Text(stringResource(R.string.onb_advanced_options)) }
-                            }
-                        }
-                        Spacer(Modifier.height(16.dp))
-                        Button(
-                            onClick = viewModel::completeProfile,
-                            enabled = state.displayName.isNotBlank() && createPassphraseProblem == null,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(
-                                if (state.creatingNewAccount) stringResource(R.string.onb_create_account)
-                                else stringResource(R.string.onb_continue),
-                            )
-                        }
-                    }
-
-                    step == OnboardingStep.Passphrase -> {
-                        Text(stringResource(R.string.onb_passphrase_title), style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            stringResource(
-                                if (state.passphraseForLink) R.string.onb_passphrase_link_desc
-                                else R.string.onb_passphrase_desc,
-                            ),
-                            style = MaterialTheme.typography.bodyMedium,
-                            textAlign = TextAlign.Center,
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = state.passphraseInput,
-                            onValueChange = viewModel::onPassphraseInputChange,
-                            label = { Text(stringResource(R.string.onb_passphrase_label)) },
-                            singleLine = true,
-                            visualTransformation = PasswordVisualTransformation(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        Button(
-                            onClick = viewModel::submitPassphrase,
-                            enabled = state.passphraseInput.isNotBlank(),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(stringResource(R.string.onb_register_device))
-                        }
-                    }
-
-                    step == OnboardingStep.BackupKey ->
-                        state.backupKeyBase58?.let { key ->
-                            BackupKeyStep(keyBase58 = key, onContinue = viewModel::continueFromBackup)
-                        }
-
-                    step == OnboardingStep.Solving -> {
+            AnimatedContent(
+                targetState = state.loading to state.step,
+                transitionSpec = {
+                    (fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 16 })
+                        .togetherWith(fadeOut(tween(120)))
+                },
+                label = "onboarding-step",
+            ) { (loading, step) ->
+                Column(
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 520.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    if (loading) {
                         CircularProgressIndicator()
-                        Spacer(Modifier.height(16.dp))
-                        Text(stringResource(R.string.onb_solving_title), style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            stringResource(R.string.onb_solving_desc),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        TextButton(onClick = viewModel::cancelSolving) { Text(stringResource(R.string.onb_cancel)) }
-                    }
-
-                    else -> {
-                        // ChooseMethod hub: proof-of-work account creation is the primary, permissionless
-                        // path; importing an existing identity and OAuth sign-in are secondary options.
-                        Text(stringResource(R.string.onb_setup_account_title), style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(16.dp))
-                        if (state.powAvailable) {
-                            Button(onClick = viewModel::chooseCreateAccount, modifier = Modifier.fillMaxWidth()) {
-                                Text(stringResource(R.string.onb_create_new_account))
-                            }
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                stringResource(R.string.onb_pow_no_signin_desc),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center,
-                            )
-                            Spacer(Modifier.height(20.dp))
-                        }
-                        Text(
-                            stringResource(R.string.onb_already_have_account),
-                            style = MaterialTheme.typography.bodyMedium,
-                            textAlign = TextAlign.Center,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedButton(
-                            onClick = viewModel::addFromAnotherDevice,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(stringResource(R.string.onb_add_from_another_device))
-                        }
-                        if (state.providers.isNotEmpty()) {
-                            Spacer(Modifier.height(20.dp))
-                            HorizontalDivider()
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                stringResource(R.string.onb_other_sign_in_ways),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            state.providers.forEach { provider ->
-                                OutlinedButton(
-                                    onClick = { viewModel.onProviderSelected(provider) },
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text(stringResource(R.string.onb_continue_with_provider, provider.name))
-                                }
-                                Spacer(Modifier.height(8.dp))
-                            }
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        TextButton(onClick = viewModel::editServer) {
-                            Text(stringResource(R.string.onb_change_super_node))
-                        }
+                    } else {
+                        Step(step, state, viewModel)
                     }
                 }
             }
+
+            state.error?.let { error ->
+                Spacer(Modifier.height(16.dp))
+                Text(text = error, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+            }
         }
 
-        state.error?.let { error ->
-            Spacer(Modifier.height(16.dp))
-            Text(text = error, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+        if (viewModel.canGoBack() && !state.loading) {
+            IconButton(onClick = viewModel::back, modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.onb_back))
+            }
         }
-    }
 
-        // Returning-user shortcut: only on the first (server) screen, and only when the app reports
-        // existing accounts to sign back into (sign-out keeps their keys/data, just ends the session).
-        if (onOpenExistingAccounts != null && state.step == OnboardingStep.Server) {
+        // Returning-user shortcut: only on the welcome screen, and only when the app reports existing
+        // accounts to sign back into (sign-out keeps their keys/data, just ends the session).
+        if (onOpenExistingAccounts != null && state.step == OnboardingStep.Welcome) {
             IconButton(
                 onClick = onOpenExistingAccounts,
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
             ) {
-                Icon(
-                    Icons.Filled.SwitchAccount,
-                    contentDescription = stringResource(R.string.onb_use_existing_account),
-                )
+                Icon(Icons.Filled.SwitchAccount, contentDescription = stringResource(R.string.onb_use_existing_account))
             }
         }
     }
 }
 
-/**
- * Post-create backup prompt: shown once, only when a brand-new identity key was generated (never on
- * import/restore). The key IS the account and cannot be recovered if lost, so it is offered as a QR and
- * as selectable/copyable base58 for the user to save before continuing.
- */
 @Composable
-private fun BackupKeyStep(keyBase58: String, onContinue: () -> Unit) {
-    val clipboard = LocalClipboardManager.current
-    var copied by remember { mutableStateOf(false) }
-    var acknowledged by remember { mutableStateOf(false) }
+private fun Step(step: OnboardingStep, state: OnboardingUiState, viewModel: OnboardingViewModel) {
+    when (step) {
+        OnboardingStep.Welcome -> WelcomeStep(onCreate = viewModel::chooseCreate, onExisting = viewModel::chooseExisting)
 
-    Text(stringResource(R.string.onb_backup_key_title), style = MaterialTheme.typography.titleMedium)
-    Spacer(Modifier.height(8.dp))
+        OnboardingStep.NewIdentity ->
+            state.newUserId?.let { NewIdentityStep(it, onContinue = viewModel::continueToBackup) }
+
+        OnboardingStep.BackupKey -> {
+            val key = state.backupKeyBase58
+            val userId = state.newUserId
+            if (key != null && userId != null)
+                BackupKeyStep(key, userId, onContinue = viewModel::continueFromBackup)
+        }
+
+        OnboardingStep.CheckBackup ->
+            state.challenge?.let { challenge ->
+                CheckBackupStep(
+                    challenge = challenge,
+                    failed = state.checkFailed,
+                    onCheck = viewModel::checkBackup,
+                    onShowKeyAgain = viewModel::showKeyAgain,
+                    onSkip = viewModel::checkLater,
+                )
+            }
+
+        OnboardingStep.Server -> ServerStep(state, viewModel)
+
+        OnboardingStep.ScanServer ->
+            CameraScanStep(
+                title = stringResource(R.string.onb_scan_super_node_title),
+                description = stringResource(
+                    if (state.existing) R.string.onb_scan_home_node_desc else R.string.onb_scan_super_node_desc,
+                ),
+                onScanned = viewModel::onServerQrScanned,
+            )
+
+        OnboardingStep.CreateProfile -> {
+            StepTitle(stringResource(R.string.onb_create_profile_title))
+            StepText(stringResource(R.string.onb_create_profile_body))
+            OutlinedTextField(
+                value = state.displayName,
+                onValueChange = viewModel::onDisplayNameChange,
+                label = { Text(stringResource(R.string.onb_display_name_label)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = state.bio,
+                onValueChange = viewModel::onBioChange,
+                label = { Text(stringResource(R.string.onb_bio_label)) },
+                minLines = 2,
+                maxLines = 4,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = viewModel::createAccount,
+                enabled = state.displayName.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.onb_create_account))
+            }
+        }
+
+        OnboardingStep.Solving -> {
+            CircularProgressIndicator()
+            Spacer(Modifier.height(16.dp))
+            StepTitle(stringResource(R.string.onb_solving_title))
+            StepText(stringResource(R.string.onb_solving_desc))
+            TextButton(onClick = viewModel::cancelSolving) { Text(stringResource(R.string.onb_cancel)) }
+        }
+
+        OnboardingStep.ChooseWay -> {
+            StepTitle(stringResource(R.string.onb_choose_way_title))
+            StepText(stringResource(R.string.onb_choose_way_body))
+            WayCard(
+                icon = Icons.Filled.Devices,
+                title = stringResource(R.string.onb_way_pair_title),
+                body = stringResource(R.string.onb_way_pair_body),
+                onClick = viewModel::choosePairing,
+            )
+            Spacer(Modifier.height(12.dp))
+            WayCard(
+                icon = Icons.Filled.Key,
+                title = stringResource(R.string.onb_way_import_title),
+                body = stringResource(R.string.onb_way_import_body),
+                onClick = viewModel::chooseImport,
+            )
+        }
+
+        OnboardingStep.Pairing -> PairingStep(state, viewModel)
+
+        OnboardingStep.ImportBackup -> ImportBackupStep(state, viewModel)
+
+        OnboardingStep.ScanBackup -> {
+            SecureScreen()
+            CameraScanStep(
+                title = stringResource(R.string.onb_scan_backup_title),
+                description = stringResource(R.string.onb_scan_backup_desc),
+                onScanned = viewModel::onBackupScanned,
+            )
+        }
+
+        OnboardingStep.Passphrase -> {
+            StepTitle(stringResource(R.string.onb_passphrase_title))
+            StepText(stringResource(R.string.onb_passphrase_desc))
+            OutlinedTextField(
+                value = state.passphraseInput,
+                onValueChange = viewModel::onPassphraseInputChange,
+                label = { Text(stringResource(R.string.onb_passphrase_label)) },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = viewModel::submitPassphrase,
+                enabled = state.passphraseInput.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.onb_register_device))
+            }
+        }
+
+        OnboardingStep.Authenticated -> CircularProgressIndicator()
+    }
+}
+
+@Composable
+private fun WelcomeStep(onCreate: () -> Unit, onExisting: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = CircleShape) {
+        Box(modifier = Modifier.size(72.dp), contentAlignment = Alignment.Center) {
+            Icon(
+                Icons.AutoMirrored.Filled.Chat,
+                contentDescription = null,
+                modifier = Modifier.size(36.dp),
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
+    }
+    Spacer(Modifier.height(16.dp))
+    Text(text = stringResource(R.string.onb_welcome_title), style = MaterialTheme.typography.headlineMedium)
     Text(
-        stringResource(R.string.onb_backup_key_desc),
+        text = stringResource(R.string.onb_welcome_tagline),
         style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
     )
-    Spacer(Modifier.height(20.dp))
-    rememberQrBitmap(keyBase58)?.let { qr ->
-        Image(
-            bitmap = qr,
-            contentDescription = stringResource(R.string.onb_identity_key_qr_cd),
-            modifier = Modifier.size(220.dp),
-        )
-        Spacer(Modifier.height(16.dp))
-    }
-    SelectionContainer {
-        Text(
-            text = keyBase58,
-            style = MaterialTheme.typography.bodySmall,
-            textAlign = TextAlign.Center,
-        )
-    }
-    Spacer(Modifier.height(16.dp))
-    OutlinedButton(
-        onClick = {
-            clipboard.setText(AnnotatedString(keyBase58))
-            copied = true
-        },
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(if (copied) stringResource(R.string.onb_copied) else stringResource(R.string.onb_copy_key))
-    }
-    Spacer(Modifier.height(16.dp))
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Checkbox(checked = acknowledged, onCheckedChange = { acknowledged = it })
-        Text(
-            stringResource(R.string.onb_saved_key_ack),
-            style = MaterialTheme.typography.bodyMedium,
-        )
+    Spacer(Modifier.height(32.dp))
+    StepText(stringResource(R.string.onb_welcome_body))
+    Button(onClick = onCreate, modifier = Modifier.fillMaxWidth()) {
+        Text(stringResource(R.string.onb_welcome_create))
     }
     Spacer(Modifier.height(12.dp))
+    OutlinedButton(onClick = onExisting, modifier = Modifier.fillMaxWidth()) {
+        Text(stringResource(R.string.onb_welcome_existing))
+    }
+}
+
+@Composable
+private fun ServerStep(state: OnboardingUiState, viewModel: OnboardingViewModel) {
+    StepTitle(stringResource(if (state.existing) R.string.onb_home_node_existing_title else R.string.onb_home_node_new_title))
+    StepText(stringResource(if (state.existing) R.string.onb_home_node_existing_body else R.string.onb_home_node_new_body))
+    OutlinedButton(onClick = viewModel::scanServerQr, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.Filled.QrCodeScanner, contentDescription = null)
+        Text(stringResource(R.string.onb_scan_super_node), Modifier.padding(start = 8.dp))
+    }
+    Spacer(Modifier.height(16.dp))
+    OutlinedTextField(
+        value = state.serverUrl,
+        onValueChange = viewModel::onServerUrlChange,
+        label = { Text(stringResource(R.string.onb_server_url_label)) },
+        placeholder = { Text(stringResource(R.string.onb_server_url_placeholder)) },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    var showAdvanced by remember { mutableStateOf(state.directorNodeId.isNotBlank()) }
+    Spacer(Modifier.height(8.dp))
+    if (showAdvanced) {
+        OutlinedTextField(
+            value = state.directorNodeId,
+            onValueChange = viewModel::onDirectorNodeIdChange,
+            label = { Text(stringResource(R.string.onb_server_id_label)) },
+            placeholder = { Text(stringResource(R.string.onb_server_id_placeholder)) },
+            supportingText = { Text(stringResource(R.string.onb_server_id_supporting_text)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    } else {
+        TextButton(onClick = { showAdvanced = true }) { Text(stringResource(R.string.onb_advanced_options)) }
+    }
+    Spacer(Modifier.height(16.dp))
     Button(
-        onClick = onContinue,
-        enabled = acknowledged,
+        onClick = viewModel::confirmServer,
+        enabled = state.serverUrl.isNotBlank(),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Text(stringResource(R.string.onb_continue))
     }
 }
 
-/** Camera step for scanning a raw identity-key QR from another device (O4). */
 @Composable
-private fun KeyScanStep(onScanned: (String) -> Unit, onCancel: () -> Unit) =
-    CameraScanStep(
-        title = stringResource(R.string.onb_scan_identity_qr_title),
-        onScanned = onScanned,
-        onCancel = onCancel,
-    )
+private fun WayCard(icon: ImageVector, title: String, body: String, onClick: () -> Unit) {
+    OutlinedCard(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(16.dp))
+            Column {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(4.dp))
+                Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
 
 /**
- * Camera step that decodes a QR code and hands each raw payload to [onScanned]. Requests CAMERA inline and
- * shows a rationale plus a grant button when the permission is denied. [description] is optional helper
- * text shown under the title.
+ * This device's pairing code, for Boson Identity or Photon on another device to scan and approve, and
+ * the wait for that answer. The code itself holds no secret: only a device that holds the identity can
+ * approve it.
  */
 @Composable
-private fun CameraScanStep(
-    title: String,
-    onScanned: (String) -> Unit,
-    onCancel: () -> Unit,
-    description: String? = null,
-) {
+private fun PairingStep(state: OnboardingUiState, viewModel: OnboardingViewModel) {
+    StepTitle(stringResource(R.string.onb_pairing_title))
+    val code = state.pairingCode
+    when {
+        code != null -> {
+            StepText(stringResource(R.string.onb_pairing_body))
+            rememberQrBitmap(code)?.let {
+                Image(it, contentDescription = stringResource(R.string.onb_pairing_qr_description), modifier = Modifier.size(240.dp))
+            }
+            Spacer(Modifier.height(16.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.onb_pairing_waiting), style = MaterialTheme.typography.bodyMedium)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(R.string.onb_pairing_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+        state.pairingExpired -> {
+            StepText(stringResource(R.string.onb_pairing_expired))
+            Button(onClick = viewModel::choosePairing, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.onb_pairing_new_code))
+            }
+        }
+        state.error != null ->
+            Button(onClick = viewModel::choosePairing, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.onb_try_again))
+            }
+        else -> CircularProgressIndicator()
+    }
+    Spacer(Modifier.height(8.dp))
+    TextButton(onClick = viewModel::cancelPairing) { Text(stringResource(R.string.onb_cancel)) }
+}
+
+/**
+ * Bringing in a backup: the key file (opened through the system's file picker), its QR code, or the key
+ * typed or pasted, with or without the row numbers of its printed form. Kept out of screenshots.
+ */
+@Composable
+private fun ImportBackupStep(state: OnboardingUiState, viewModel: OnboardingViewModel) {
+    SecureScreen()
+    val context = LocalContext.current
+    val openFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val text = runCatching {
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    // A key file is a few hundred bytes; anything far larger is not one.
+                    String(input.readNBytesCompat(MAX_KEY_FILE_BYTES), Charsets.UTF_8)
+                }
+            }.getOrNull()
+            viewModel.onBackupFileOpened(text.orEmpty())
+        }
+    }
+
+    StepTitle(stringResource(R.string.onb_import_title))
+    StepText(stringResource(R.string.onb_import_body))
+    OutlinedButton(onClick = { openFile.launch(arrayOf("text/*", "application/octet-stream")) }, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.Filled.FileOpen, contentDescription = null)
+        Text(stringResource(R.string.onb_import_open_file), Modifier.padding(start = 8.dp))
+    }
+    Spacer(Modifier.height(8.dp))
+    OutlinedButton(onClick = viewModel::scanBackup, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.Filled.QrCodeScanner, contentDescription = null)
+        Text(stringResource(R.string.onb_import_scan), Modifier.padding(start = 8.dp))
+    }
+    Spacer(Modifier.height(16.dp))
+    OutlinedTextField(
+        value = state.backupInput,
+        onValueChange = viewModel::onBackupInputChange,
+        label = { Text(stringResource(R.string.onb_private_key_label)) },
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(
+            capitalization = KeyboardCapitalization.None,
+            autoCorrectEnabled = false,
+            keyboardType = KeyboardType.Password,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(Modifier.height(8.dp))
+    Button(
+        onClick = viewModel::importTyped,
+        enabled = state.backupInput.isNotBlank(),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(stringResource(R.string.onb_import_identity))
+    }
+}
+
+/**
+ * Camera step that decodes a QR code and hands each raw payload to [onScanned]. Requests CAMERA inline
+ * and shows a rationale plus a grant button when the permission is denied. Back returns to the step
+ * before (the screen's back arrow and the system back gesture).
+ */
+@Composable
+private fun CameraScanStep(title: String, description: String?, onScanned: (String) -> Unit) {
     val context = LocalContext.current
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -577,28 +516,29 @@ private fun CameraScanStep(
         if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
-    Text(title, style = MaterialTheme.typography.titleMedium)
-    if (description != null) {
-        Spacer(Modifier.height(8.dp))
-        Text(description, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
-    }
-    Spacer(Modifier.height(12.dp))
+    StepTitle(title)
+    if (description != null)
+        StepText(description)
     if (hasCameraPermission) {
-        QrScanner(
-            onScanned = onScanned,
-            modifier = Modifier.fillMaxWidth().height(280.dp),
-        )
+        QrScanner(onScanned = onScanned, modifier = Modifier.fillMaxWidth().height(280.dp))
     } else {
-        Text(
-            stringResource(R.string.onb_camera_permission_needed),
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(12.dp))
+        StepText(stringResource(R.string.onb_camera_permission_needed))
         Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
             Text(stringResource(R.string.onb_grant_camera_access))
         }
     }
-    Spacer(Modifier.height(12.dp))
-    TextButton(onClick = onCancel) { Text(stringResource(R.string.onb_back)) }
+}
+
+private const val MAX_KEY_FILE_BYTES = 16 * 1024
+
+// InputStream.readNBytes(int) is Java 11 (Android API 33); read in a loop so the bound holds anywhere.
+private fun java.io.InputStream.readNBytesCompat(max: Int): ByteArray {
+    val out = java.io.ByteArrayOutputStream()
+    val buffer = ByteArray(4096)
+    while (out.size() < max) {
+        val n = read(buffer, 0, minOf(buffer.size, max - out.size()))
+        if (n < 0) break
+        out.write(buffer, 0, n)
+    }
+    return out.toByteArray()
 }

@@ -35,7 +35,6 @@ import io.bosonnetwork.photon.core.model.SessionStore
 import io.bosonnetwork.photon.core.network.DirectorConfigStore
 import io.bosonnetwork.photon.core.security.ProfileManager
 import io.bosonnetwork.photon.core.security.SecretStore
-import io.bosonnetwork.utils.Base58
 import io.mockk.every
 import io.mockk.mockk
 import io.vertx.core.Vertx
@@ -64,8 +63,8 @@ import org.junit.rules.TemporaryFolder
 /**
  * The account flows of [AuthRepository] against a stand-in Director, through the real Director client:
  * device registration management (the connect path probes the super node id and skips re-registration
- * while the stored registered-node id matches; a node change re-registers), the OAuth session, proof-of-
- * work registration, key import, and the profile each identity lands in. (Rotation of the device key on
+ * while the stored registered-node id matches; a node change re-registers), proof-of-work registration
+ * of a new identity, import of a backup, and the profile each identity lands in. (Rotation of the device key on
  * identity change lives in KeyManager's ensureDeviceKeyFor / AuthRepository.adoptIdentity and is
  * unit-tested in KeyManagerTest.)
  */
@@ -302,70 +301,6 @@ class AuthRepositoryRegistrationTest {
         assertEquals(node2, migration?.toNodeId)
     }
 
-    /** Serves auth/me with the given bound identity (null = no bound identity). */
-    private fun serveMe(userId: String?) {
-        val sessionId = Id.random()
-        director = { r ->
-            when {
-                r.isTo("GET", "/auth/me") -> Answer(
-                    200,
-                    if (userId != null) """{"sessionId":"$sessionId","userId":"$userId"}"""
-                    else """{"sessionId":"$sessionId"}""",
-                )
-                else -> Answer(404)
-            }
-        }
-    }
-
-    @Test
-    fun `an OAuth session for the local identity is Authenticated and signs in`() = runTest {
-        val userId = givenSignedInUser()
-        sessionStore.session = null // signed out earlier; signing back in through OAuth
-        serveMe(userId)
-        assertTrue(repository.onAuthToken("oauth-token") is SessionState.Authenticated)
-        // The session recorded is the identity, never the OAuth token.
-        assertEquals(userId, sessionStore.session)
-        assertTrue("the OAuth token authenticated the session lookup", received.any { it.isTo("GET", "/auth/me") })
-    }
-
-    @Test
-    fun `an OAuth session reuses an existing profile bound to the signed-in identity`() = runTest {
-        givenSignedInUser() // active profile key = some identity U
-        // Another on-device profile is already bound to the account's identity.
-        val otherUser = Id.random().toString()
-        val other = profileManager.createProfile()
-        profileManager.bindUserId(other, otherUser, displayName = null, homeNodeId = null)
-        serveMe(otherUser)
-        val state = repository.onAuthToken("oauth-token")
-        assertEquals(other, (state as? SessionState.ReuseProfile)?.profileId)
-        assertEquals(otherUser, (state as? SessionState.ReuseProfile)?.userId)
-    }
-
-    @Test
-    fun `an OAuth session imports the key in-context when a bound account's identity is not on this device`() = runTest {
-        givenSignedInUser() // active profile key = some identity U (no profile for the account's identity)
-        val otherUser = Id.random().toString()
-        serveMe(otherUser) // the account is bound to a different identity
-        // No pre-key handoff: import in the current context and let the commit resolve the profile.
-        val state = repository.onAuthToken("oauth-token")
-        assertEquals(otherUser, (state as? SessionState.NeedsKey)?.userId)
-    }
-
-    @Test
-    fun `an OAuth session creates an identity in-context for an unbound account`() = runTest {
-        givenSignedInUser()
-        serveMe(null) // the account has no bound identity
-        assertTrue(repository.onAuthToken("oauth-token") is SessionState.NeedsIdentity)
-    }
-
-    @Test
-    fun `currentSession without an OAuth session is unauthorized`() = runTest {
-        givenSignedInUser()
-        assertThrows(AppError.Unauthorized::class.java) {
-            kotlinx.coroutines.runBlocking { repository.currentSession() }
-        }
-    }
-
     // --- Permissionless proof-of-work registration + self-sovereign key import ---
 
     private fun randomNonceB64(): String {
@@ -437,7 +372,12 @@ class AuthRepositoryRegistrationTest {
         serveRegistration()
 
         // A fresh-scratch active profile hosts the new identity: it is persisted locally.
-        val state = repository.createAccountWithPow("Alice", "hello", null) as SessionState.Authenticated
+        val newId = repository.newIdentity()
+        assertNull("nothing is stored before the node registers it", keyManager.userId())
+        val state = repository.createAccountWithPow("Alice", "hello", backupChecked = true) as SessionState.Authenticated
+        assertEquals(newId, state.userId)
+        assertTrue(!keyManager.isBackupPending())
+        assertNull("the new identity is no longer pending", repository.pendingIdentityId())
         val userId = state.userId
 
         assertTrue(keyManager.hasUserKey())
@@ -460,21 +400,22 @@ class AuthRepositoryRegistrationTest {
         // A lost response: the registration went through, and the resubmit conflicts.
         serveRegistration(registrationCode = 409)
 
-        val state = repository.createAccountWithPow("Alice", null, null) as SessionState.Authenticated
+        repository.newIdentity()
+        val state = repository.createAccountWithPow("Alice", null, backupChecked = true) as SessionState.Authenticated
 
         assertEquals(state.userId, sessionStore.session)
         assertTrue("the identity is confirmed by acting as it", drainRequests().any { it.isTo("GET", "/client/profile") })
     }
 
     @Test
-    fun `importing a key without an OAuth session signs in with the user key and never calls auth-me`() = runTest {
+    fun `importing a backup signs in with the user key`() = runTest {
         configStore.setBaseUrl(baseUrl())
         val userKp = BosonCrypto.generateKeyPair()
         val keyText = BosonCrypto.privateKey64ToBase58(BosonCrypto.privateKeyBytes64(userKp))
         serveDirector()
 
         // A fresh-scratch active profile hosts the imported identity.
-        val state = repository.importUserKeyText(keyText) as SessionState.Authenticated
+        val state = repository.importBackup(keyText) as SessionState.Authenticated
 
         assertEquals(BosonCrypto.idOf(userKp).toString(), state.userId)
         assertEquals(state.userId, sessionStore.session)
@@ -483,7 +424,6 @@ class AuthRepositoryRegistrationTest {
         val reqs = drainRequests()
         val profile = reqs.first { it.isTo("GET", "/client/profile") }
         assertTrue("signed in as the user", profile.method == "GET")
-        assertTrue("no auth/me on the self-sovereign path", reqs.none { it.path.endsWith("/auth/me") })
     }
 
     @Test
@@ -493,11 +433,52 @@ class AuthRepositoryRegistrationTest {
         director = { r -> if (r.isTo("GET", "/client/id")) nodeIdAnswer() else Answer(401) }
 
         assertThrows(Exception::class.java) {
-            kotlinx.coroutines.runBlocking { repository.importUserKeyText(keyText) }
+            kotlinx.coroutines.runBlocking { repository.importBackup(keyText) }
         }
 
         assertTrue(!keyManager.hasUserKey())
         assertNull(sessionStore.session)
+    }
+
+    @Test
+    fun `an unchecked backup leaves a reminder on the profile`() = runTest {
+        configStore.setBaseUrl(baseUrl())
+        serveRegistration()
+        repository.newIdentity()
+        repository.createAccountWithPow("Alice", null, backupChecked = false)
+        assertTrue(keyManager.isBackupPending())
+    }
+
+    @Test
+    fun `registering without a new identity fails and stores nothing`() = runTest {
+        configStore.setBaseUrl(baseUrl())
+        serveRegistration()
+        assertThrows(AppError.InvalidInput::class.java) {
+            kotlinx.coroutines.runBlocking { repository.createAccountWithPow("Alice", null, backupChecked = true) }
+        }
+        assertTrue(!keyManager.hasUserKey())
+    }
+
+    @Test
+    fun `a backup in its printed form, numbered rows and all, imports`() = runTest {
+        configStore.setBaseUrl(baseUrl())
+        val userKp = BosonCrypto.generateKeyPair()
+        val base58 = BosonCrypto.privateKey64ToBase58(BosonCrypto.privateKeyBytes64(userKp))
+        serveDirector()
+        val printed = io.bosonnetwork.crypto.KeyBackup.gridLines(base58).joinToString("\n")
+        val state = repository.importBackup(printed) as SessionState.Authenticated
+        assertEquals(BosonCrypto.idOf(userKp).toString(), state.userId)
+    }
+
+    @Test
+    fun `an identity this node doesn't know is told apart`() = runTest {
+        configStore.setBaseUrl(baseUrl())
+        val keyText = BosonCrypto.privateKey64ToBase58(BosonCrypto.privateKeyBytes64(BosonCrypto.generateKeyPair()))
+        director = { r -> if (r.isTo("GET", "/client/id")) nodeIdAnswer() else Answer(401) }
+        val e = assertThrows(AppError.InvalidInput::class.java) {
+            kotlinx.coroutines.runBlocking { repository.importBackup(keyText) }
+        }
+        assertNotNull(e.cause)
     }
 
     private fun idOfKey64(privateKey64: ByteArray): String =
@@ -509,7 +490,8 @@ class AuthRepositoryRegistrationTest {
         val existingId = givenSignedInUser() // active profile already holds a DIFFERENT identity's key
         serveRegistration()
 
-        val state = repository.createAccountWithPow("Bob", null, null) as SessionState.NewProfileForIdentity
+        repository.newIdentity()
+        val state = repository.createAccountWithPow("Bob", null, backupChecked = false) as SessionState.NewProfileForIdentity
 
         // The seed carries the brand-new identity, its registered initial device and node.
         val seed = state.seed
@@ -518,6 +500,7 @@ class AuthRepositoryRegistrationTest {
         assertEquals(state.userId, idOfKey64(seed.userPrivateKey64))
         assertNotNull(seed.devicePrivateKey64)
         assertEquals(nodeId, seed.registeredNodeId)
+        assertTrue("the unchecked backup's reminder travels with the seed", seed.backupPending)
 
         // The foreign active profile is untouched: its key, session and (absent) registration all stand.
         assertEquals(existingId, keyManager.userId()?.toString())
@@ -534,7 +517,7 @@ class AuthRepositoryRegistrationTest {
         val keyText = BosonCrypto.privateKey64ToBase58(BosonCrypto.privateKeyBytes64(importedKp))
         serveDirector()
 
-        val state = repository.importUserKeyText(keyText) as SessionState.NewProfileForIdentity
+        val state = repository.importBackup(keyText) as SessionState.NewProfileForIdentity
 
         // The seed carries the imported key; the device registers itself on the target later.
         val seed = state.seed
@@ -561,7 +544,7 @@ class AuthRepositoryRegistrationTest {
         profileManager.bindUserId(other, importedId, displayName = null, homeNodeId = null)
         serveDirector()
 
-        val state = repository.importUserKeyText(keyText) as SessionState.ReuseProfile
+        val state = repository.importBackup(keyText) as SessionState.ReuseProfile
 
         assertEquals(other, state.profileId)
         assertEquals(importedId, state.userId)
@@ -570,76 +553,5 @@ class AuthRepositoryRegistrationTest {
         assertNotNull(seed)
         assertNull(seed!!.devicePrivateKey64)
         assertNull(seed.registeredNodeId)
-    }
-
-    // --- OAuth create (bindIdentity): commit-at-end; the OAuth token is never persisted ---
-
-    /** Answers the OAuth session (unbound), the bind flow (nonce, bind) and the profile write. */
-    private fun serveBind() {
-        val sessionId = Id.random()
-        val nonceB58 = Base58.encode(ByteArray(32).also { SecureRandom().nextBytes(it) })
-        director = { r ->
-            when {
-                r.isTo("GET", "/auth/me") -> Answer(200, """{"sessionId":"$sessionId"}""")
-                r.isTo("GET", "/auth/user-identity/nonce") -> Answer(200, """{"nonce":"$nonceB58"}""")
-                r.isTo("PUT", "/auth/user-identity") ->
-                    Answer(200, """{"token":"bound-cwt","userId":"${Id.random()}"}""")
-                r.isTo("GET", "/client/id") -> nodeIdAnswer()
-                r.isTo("PUT", "/client/profile") -> Answer(204)
-                else -> Answer(404)
-            }
-        }
-    }
-
-    @Test
-    fun `bindIdentity on a fresh profile stores the key and signs in`() = runTest {
-        configStore.setBaseUrl(baseUrl())
-        serveBind()
-        assertTrue(repository.onAuthToken("oauth-token") is SessionState.NeedsIdentity)
-
-        val state = repository.bindIdentity("Alice", "hi") as SessionState.Authenticated
-
-        assertTrue(keyManager.hasUserKey())
-        assertEquals(state.userId, keyManager.userId()?.toString())
-        // The PERSISTED session is the identity, never the OAuth/bind token.
-        assertEquals(state.userId, sessionStore.session)
-        val reqs = drainRequests()
-        val bind = reqs.first { it.isTo("PUT", "/auth/user-identity") }.body
-        assertTrue("the bind names the new key", bind.contains(BosonCrypto.publicKeyBase58(keyManager.userKeyPair()!!)))
-        val profile = reqs.first { it.isTo("PUT", "/client/profile") }.body
-        assertTrue("the chosen name is written as the new user", profile.contains("Alice") && profile.contains("hi"))
-        // The OAuth token is dropped once the identity exists: there is no OAuth session left to resolve.
-        assertThrows(AppError.Unauthorized::class.java) {
-            kotlinx.coroutines.runBlocking { repository.currentSession() }
-        }
-    }
-
-    @Test
-    fun `bindIdentity into a foreign active profile seeds a fresh profile and leaves the active untouched`() = runTest {
-        configStore.setBaseUrl(baseUrl())
-        val existingId = givenSignedInUser() // active profile already holds identity U
-        sessionStore.session = null
-        serveBind()
-        repository.onAuthToken("oauth-token")
-
-        val state = repository.bindIdentity("Bob", null) as SessionState.NewProfileForIdentity
-
-        val seed = state.seed
-        assertNotNull(seed)
-        assertEquals(state.userId, idOfKey64(seed!!.userPrivateKey64))
-        assertEquals("Bob", seed.displayName)
-        assertNull(seed.devicePrivateKey64)
-        assertNull(seed.registeredNodeId)
-        // The foreign active profile is untouched: its key stands and nothing was persisted to its slot.
-        assertEquals(existingId, keyManager.userId()?.toString())
-        assertNull(sessionStore.session)
-    }
-
-    @Test
-    fun `bindIdentity without an OAuth session is unauthorized`() = runTest {
-        configStore.setBaseUrl(baseUrl())
-        assertThrows(AppError.Unauthorized::class.java) {
-            kotlinx.coroutines.runBlocking { repository.bindIdentity("Alice", null) }
-        }
     }
 }

@@ -94,6 +94,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.bosonnetwork.photon.core.boson.ScannedCode
+import io.bosonnetwork.photon.core.boson.misplacedMessage
 import io.bosonnetwork.photon.core.designsystem.component.ConfirmDialog
 import io.bosonnetwork.photon.core.designsystem.component.CountBadge
 import io.bosonnetwork.photon.core.designsystem.component.EmptyState
@@ -764,15 +766,28 @@ private fun AddFriendDialog(
     // body for a camera preview and returns to the form with the id filled in, so the user can still
     // add a hello and review before sending (no auto-send: preserves the original review-then-send UX).
     var scanning by remember { mutableStateOf(false) }
+    var scanError by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
 
     if (scanning) {
         AddFriendScanDialog(
             onScanned = { scanned ->
-                // A user's code is their id as a DID (did:boson:<id>); the field shows the plain id.
-                id = fieldFromStart(scanned.trim().removePrefix("did:boson:"))
+                // A user's code is their id as a DID (did:boson:<id>); the field shows the plain id. Any
+                // other code keeps the scanner open and says what it is.
+                when (val code = ScannedCode.classify(scanned)) {
+                    is ScannedCode.UserId -> {
+                        id = fieldFromStart(code.id.toBase58String())
+                        scanError = null
+                        scanning = false
+                    }
+                    else -> scanError = code.misplacedMessage(context)
+                }
+            },
+            onCancel = {
+                scanError = null
                 scanning = false
             },
-            onCancel = { scanning = false },
+            error = scanError,
         )
         return
     }
@@ -843,6 +858,7 @@ private fun fieldFromStart(text: String): TextFieldValue =
 private fun AddFriendScanDialog(
     onScanned: (String) -> Unit,
     onCancel: () -> Unit,
+    error: String? = null,
 ) {
     val context = LocalContext.current
     var hasCameraPermission by remember {
@@ -877,6 +893,14 @@ private fun AddFriendScanDialog(
                             .height(260.dp)
                             .clip(MaterialTheme.shapes.medium),
                     )
+                    error?.let {
+                        Text(
+                            it,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                 } else {
                     Text(
                         stringResource(R.string.contacts_camera_permission_needed),

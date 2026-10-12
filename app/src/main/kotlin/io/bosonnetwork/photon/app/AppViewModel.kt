@@ -182,7 +182,9 @@ class AppViewModel @Inject constructor(
             val secrets = SecretStore(appContext, profileManager.secretsFileNameFor(targetId))
             if (seed != null) {
                 EncryptedSessionStore(secrets).seedDurably(seed.userId)
-                KeyManager.seedInto(secrets, seed.userPrivateKey64, seed.devicePrivateKey64, seed.registeredNodeId)
+                KeyManager.seedInto(
+                    secrets, seed.userPrivateKey64, seed.devicePrivateKey64, seed.registeredNodeId, seed.backupPending,
+                )
                 profileManager.bindUserId(targetId, seed.userId, seed.displayName, seed.registeredNodeId)
             } else {
                 // Reuse: the target already holds its key + device; sign in with that key so it comes up

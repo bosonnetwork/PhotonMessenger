@@ -125,7 +125,6 @@
     <string name="settings_devices_empty">No registered devices</string>
     <string name="settings_device_remove_confirm_title">Remove %1$s?</string>
     <string name="settings_device_remove_confirm_body">The device is deregistered from your account and can no longer sign in with its device key. Any active session it has is ended when it next reconnects.</string>
-    <string name="settings_add_device_action">Add this device</string>
     <string name="settings_approve_device_action">Approve a device</string>
     <string name="settings_enter_passphrase_title">Enter passphrase</string>
     <string name="settings_enter_passphrase_body">Your account is protected by a passphrase. Enter it to remove this device.</string>
@@ -161,16 +160,6 @@
     <string name="settings_scan_again_action">Scan again</string>
     <string name="settings_pairing_failed">Pairing failed</string>
 
-    <!-- PairNewDeviceScreen -->
-    <string name="settings_pair_preparing">Preparing pairing code...</string>
-    <string name="settings_pair_scan_hint">Scan this code from a device that is already signed in</string>
-    <string name="settings_pair_qr_content_description">Pairing QR code</string>
-    <string name="settings_pair_waiting">Waiting for approval...</string>
-    <string name="settings_pair_success">This device is now paired</string>
-    <string name="settings_continue_action">Continue</string>
-    <string name="settings_try_again_action">Try again</string>
-    <string name="settings_device_name_fallback">Android device</string>
-
     <!-- KeyReveal shared scaffold -->
     <string name="settings_reveal_key_action">Reveal key</string>
     <string name="settings_key_copied">Copied</string>
@@ -197,7 +186,6 @@
     <string name="settings_avatar_error_cannot_open">Cannot open image</string>
 
     <!-- data/DevicePairingRepository -->
-    <string name="settings_pairing_error_no_active">No pairing in progress</string>
     <string name="settings_pairing_error_no_identity">No user identity on this device</string>
     <string name="settings_pairing_error_invalid_code">Not a pairing code</string>
     <string name="settings_pairing_error_denied">The request was declined on your other device</string>
@@ -221,4 +209,7 @@
     <string name="settings_notifications_update_error">Couldn\'t update notifications: %1$s</string>
     <string name="settings_sign_out_error">Couldn\'t sign out: %1$s</string>
     <string name="settings_unknown_error">unknown error</string>
+    <string name="settings_backup_reminder_title">Back up your key</string>
+    <string name="settings_backup_reminder_body">Your identity\'s key isn\'t backed up and checked yet. If you lose this phone without a copy, no one can bring your identity back.</string>
+    <string name="settings_backup_reminder_action">Back up now</string>
 </resources>

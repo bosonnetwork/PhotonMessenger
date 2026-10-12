@@ -26,13 +26,15 @@ import android.content.Context
 import android.os.Build
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.bosonnetwork.Id
+import io.bosonnetwork.crypto.KeyBackup
 import io.bosonnetwork.crypto.Signature
-import io.bosonnetwork.director.client.AuthProvider
+import io.bosonnetwork.director.client.DeviceRegistration
 import io.bosonnetwork.director.client.DirectorClient
-import io.bosonnetwork.director.client.DirectorOAuth
-import io.bosonnetwork.director.client.ProfileUpdate
 import io.bosonnetwork.director.client.UserRegistration
+import io.bosonnetwork.director.client.exceptions.NotFoundException
 import io.bosonnetwork.director.client.exceptions.ProofOfWorkException
+import io.bosonnetwork.director.client.exceptions.RegistrationDeniedException
+import io.bosonnetwork.director.client.exceptions.RegistrationExpiredException
 import io.bosonnetwork.photon.core.boson.BosonCrypto
 import io.bosonnetwork.photon.core.boson.DirectorClients
 import io.bosonnetwork.photon.core.boson.KeyManager
@@ -51,25 +53,15 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.future.await
 import kotlinx.coroutines.withContext
 
-/** Outcome of consuming an OAuth callback token (spec 2.1). */
+/** Where an identity brought onto this device belongs. */
 sealed interface SessionState {
-    /** Authenticated but no Boson identity bound yet -> offer create/import (spec 2.2). */
-    data object NeedsIdentity : SessionState
-
-    /**
-     * A Boson identity is already bound to this account, but this device has no local user key
-     * (returning user on a fresh device/reinstall). The key must be imported from another device.
-     */
-    data class NeedsKey(val userId: String) : SessionState
-
-    /** Fully signed in with a bound Boson user id and the matching key present on this device. */
+    /** Hosted on the active profile, with its key on this device. */
     data class Authenticated(val userId: String) : SessionState
 
     /**
-     * The signed-in account resolves to a Boson identity ([userId]) that ALREADY has its own on-device
-     * profile ([profileId]), which is not the active one. The app must open that profile - never rehost
-     * the identity here. The app seeds the target profile with the identity so it comes up signed in
-     * without a second sign-in.
+     * The identity ([userId]) ALREADY has its own on-device profile ([profileId]), which is not the active
+     * one. The app opens that profile - never rehosts the identity here - seeded with the identity so it
+     * comes up signed in.
      */
     data class ReuseProfile(
         val profileId: String,
@@ -78,24 +70,23 @@ sealed interface SessionState {
     ) : SessionState
 
     /**
-     * The signed-in account's identity ([userId], null when the account has no bound identity) does not
-     * match the active profile and has no profile of its own, yet the active profile is already bound to
-     * a DIFFERENT identity - so it cannot host this one. The app must open a fresh profile (seeded with
-     * the identity) and continue onboarding there, never overwriting the active profile.
+     * The identity ([userId]) has no profile of its own, and the active profile is already bound to a
+     * DIFFERENT identity, so it cannot host this one. The app opens a fresh profile seeded with the
+     * identity, never overwriting the active profile.
      */
     data class NewProfileForIdentity(
-        val userId: String?,
+        val userId: String,
         val seed: ProfileSeed? = null,
     ) : SessionState
 }
 
 /**
- * Identity material to seed into a target profile during a self-sovereign handoff (PoW create / key
- * import), so the target comes up signed in after the single relaunch without re-authenticating. OAuth
- * handoffs carry none of this ([SessionState] seed stays null): their target creates or binds its own
- * key. [devicePrivateKey64]/[registeredNodeId] are set only when a device is already registered for the
- * identity (the PoW initial device); a fresh device that must register itself on the target leaves them
- * null. This is a one-shot event payload - do not rely on data-class equality of the byte arrays.
+ * Identity material to seed into a target profile during a handoff, so the target comes up signed in
+ * after the single relaunch. [devicePrivateKey64]/[registeredNodeId] are set only when a device is already
+ * registered for the identity (a new account's initial device, or a paired device); a device that must
+ * register itself on the target leaves them null. [backupPending] carries the reminder of a new
+ * identity whose backup wasn't checked yet. This is a one-shot event payload - do not rely on data-class
+ * equality of the byte arrays.
  */
 data class ProfileSeed(
     val userId: String,
@@ -103,6 +94,7 @@ data class ProfileSeed(
     val userPrivateKey64: ByteArray,
     val devicePrivateKey64: ByteArray?,
     val registeredNodeId: String?,
+    val backupPending: Boolean = false,
 )
 
 /**
@@ -113,13 +105,13 @@ data class ProfileSeed(
 data class NodeMigration(val fromNodeId: String, val toNodeId: String)
 
 /**
- * OAuth sign-in, session, and Boson identity binding against the Director (spec 2.1-2.2,
- * M1-7..M1-13), through the Director client ([DirectorClients]).
+ * Brings a Boson identity onto this device, identity first: a new one (made here, backed up, then
+ * registered on a node by proof of work), or an existing one (paired from another device that holds it,
+ * or imported from its backup), through the Director client ([DirectorClients]).
  *
- * The Director client issues its own tokens from the key it acts with, so a Boson identity needs no
- * session token: once this device holds the user key it can act as the user. The OAuth session token is
- * onboarding-time only - it authorizes the identity bind - and is held IN MEMORY ONLY, never written to
- * disk. What is persisted ([SessionStore]) is just that this profile is signed in, and as whom.
+ * Photon acts as the user itself (messaging encrypts and signs with the user key), so every way in ends
+ * with the user key on this device. Nothing is written to the active profile until the identity is known
+ * and accepted; an identity that belongs to another profile is handed off to it instead ([SessionState]).
  */
 @Singleton
 class AuthRepository @Inject constructor(
@@ -130,28 +122,24 @@ class AuthRepository @Inject constructor(
     private val profileManager: ProfileManager,
     @ApplicationContext private val context: Context,
 ) {
-    /** The OAuth session token of an onboarding in progress; memory only. */
-    @Volatile
-    private var oauthToken: String? = null
-
     private suspend fun config(): DirectorConfig = configStore.config.first()
 
     /**
-     * Current Director base URL for prefilling the pre-login server step (O1), or "" when none has been
-     * configured yet so the field starts empty (the built-in placeholder default is not surfaced as text
-     * the user would have to clear).
+     * Current Director base URL for prefilling the node step, or "" when none has been configured yet so
+     * the field starts empty (the built-in placeholder default is not surfaced as text the user would have
+     * to clear).
      */
     suspend fun currentDirectorUrl(): String = config().baseUrl.let { url ->
         if (url.trimEnd('/') == DirectorConfigStore.DEFAULT_DIRECTOR_URL.trimEnd('/')) "" else url
     }
 
-    /** Current Director node id used to identity-pin its cert, or "" when none is set (prefill, O1). */
+    /** Current Director node id used to identity-pin its cert, or "" when none is set (prefill). */
     suspend fun currentDirectorNodeId(): String = config().nodeId.orEmpty()
 
     /**
-     * Persists the Director base URL and its identity-pin node id (pre-login server step, O1); the
-     * Director clients follow the new config. A self-signed HTTPS Director requires [nodeId] to be
-     * trusted; pass null or blank to clear it (a Director fronted by a real CA certificate needs none).
+     * Persists the Director base URL and its identity-pin node id; the Director clients follow the new
+     * config. A self-signed HTTPS Director requires [nodeId] to be trusted; pass null or blank to clear it
+     * (a Director fronted by a real CA certificate needs none).
      */
     suspend fun setDirectorUrl(url: String, nodeId: String?) {
         val cleanId = nodeId?.trim()?.ifBlank { null }
@@ -173,33 +161,19 @@ class AuthRepository @Inject constructor(
         keyManager.ensureDeviceKey()
     }
 
-    suspend fun providers(): List<AuthProvider> = directorClients.guest().providers.await()
-
-    suspend fun authorizeUrl(provider: String): String =
-        directorClients.guest().authorizeUrl(provider, redirectUri())
-
-    /**
-     * Where this node should send the sign-in back: the App Link, which no other app can claim, on nodes
-     * from 3.2, which put the result in its fragment; the app's own scheme on older ones, which put it in
-     * the query of any address (on an https address, a token in the query would reach the site whenever
-     * the link opens in the browser instead of the app). A node whose version can't be read is taken to be
-     * an older one.
-     */
-    private suspend fun redirectUri(): String {
-        val version = runCatching { directorClients.guest().nodeStatus.await().version.orElse(null) }.getOrNull()
-        return if (returnsInFragment(version)) APP_LINK_REDIRECT_URI else REDIRECT_URI
-    }
+    /** Asks the configured Director for its node id: that it is there, and who it is. */
+    suspend fun reachNode(): String = withContext(Dispatchers.IO) { directorClients.probeNodeId().toString() }
 
     /** The registration options of a Director, remembered per config: they change only with it. */
     @Volatile
     private var registrationOptions: Pair<DirectorConfig, Boolean>? = null
 
     /**
-     * True if this node accepts permissionless proof-of-work registration (policy `pow`/`either`); when it
-     * does not, the node is OAuth-only and the "Create a new account" option is hidden. Asked once per
-     * Director config, and without side effects on the node. A Director too old to report its options is
-     * taken to accept it: registering there then fails plainly if it does not. Other failures propagate so
-     * a genuine connectivity problem surfaces.
+     * True if this node accepts permissionless proof-of-work registration (policy `pow`/`either`); a node
+     * that doesn't can't take a new identity from Photon. Asked once per Director config, and without side
+     * effects on the node. A Director too old to report its options is taken to accept it: registering
+     * there then fails plainly if it does not. Other failures propagate so a genuine connectivity problem
+     * surfaces.
      */
     suspend fun powAvailable(): Boolean = withContext(Dispatchers.IO) {
         val cfg = config()
@@ -216,27 +190,54 @@ class AuthRepository @Inject constructor(
         pow
     }
 
+    // ---- A new identity ----------------------------------------------------------------------------
+
     /**
-     * Permissionless account creation (no OAuth): generates a user key and a device key, and has the
-     * Director client fetch a proof-of-work challenge, solve the memory-hard puzzle (on a worker thread)
-     * and create the user + initial device in one call (spec RegistrationPoW.md).
+     * The key of a new identity, made by [newIdentity] and held IN MEMORY ONLY until it is registered
+     * ([createAccountWithPow]) or dropped: an identity is written to a profile only once a node accepted it.
+     */
+    @Volatile
+    private var pendingKey: Signature.KeyPair? = null
+
+    /** Makes a new identity's key, in memory, replacing any earlier one not yet registered; returns its id. */
+    fun newIdentity(): String {
+        val key = BosonCrypto.generateKeyPair()
+        pendingKey = key
+        return BosonCrypto.idOf(key).toString()
+    }
+
+    /** The new identity's id, or null when none is pending. */
+    fun pendingIdentityId(): String? = pendingKey?.let { BosonCrypto.idOf(it).toString() }
+
+    /** The new identity's private key as Base58, for its backup, or null when none is pending. */
+    fun pendingIdentityKeyBase58(): String? =
+        pendingKey?.let { KeyBackup.encode(BosonCrypto.privateKeyBytes64(it)) }
+
+    /** Forgets the new identity, never registered. */
+    fun dropPendingIdentity() {
+        pendingKey = null
+    }
+
+    /**
+     * Registers the new identity ([newIdentity]) on the configured node by proof of work: the Director
+     * client fetches a challenge, solves the memory-hard puzzle (on a worker thread) and creates the user
+     * and this initial device in one call (spec RegistrationPoW.md). [backupChecked] says whether the user
+     * checked the backup; if not, Settings keeps reminding them.
      *
-     * The user id is derived from the freshly generated key and resolved against the profile registry
-     * BEFORE anything is persisted (like [currentSession] does for the OAuth session):
-     * - the active profile is a fresh scratch (or already this identity): the key + session + registered
+     * The user id is resolved against the profile registry BEFORE anything is persisted:
+     * - the active profile is a fresh scratch (or already this identity): the key, session and registered
      *   node are stored locally and [SessionState.Authenticated] is returned;
      * - the active profile is bound to a DIFFERENT identity: NOTHING is written to it; a
      *   [SessionState.NewProfileForIdentity] carrying a [ProfileSeed] (the new key, its already-registered
-     *   initial device, and the node) is returned so the app opens a fresh profile seeded ready. This
-     *   prevents the new account from bleeding into the previous user's profile.
+     *   initial device, and the node) is returned so the app opens a fresh profile seeded ready.
      *
      * The `(n, k)`/effort parameters are always read from the authenticated challenge, never hardcoded.
      * If the challenge expires between solve and submit (403), it registers again - with a fresh
      * challenge - once.
      */
-    suspend fun createAccountWithPow(name: String?, bio: String?, passphrase: String?): SessionState =
+    suspend fun createAccountWithPow(name: String?, bio: String?, backupChecked: Boolean): SessionState =
         withContext(Dispatchers.Default) {
-            val userKey = BosonCrypto.generateKeyPair()
+            val userKey = pendingKey ?: throw AppError.InvalidInput(context.getString(R.string.onb_error_no_new_identity))
             val userIdBase58 = BosonCrypto.idOf(userKey).toString()
             val target = resolveProfileTarget(userIdBase58)
 
@@ -251,64 +252,41 @@ class AuthRepository @Inject constructor(
             val registration = UserRegistration()
                 .name(cleanName)
                 .bio(bio?.trim()?.ifBlank { null })
-                .passphrase(passphrase?.takeIf { it.isNotBlank() })
                 .initialDevice(Build.MODEL?.takeIf { it.isNotBlank() } ?: DEFAULT_DEVICE_NAME, APP_NAME)
 
-            val cleanPassphrase = passphrase?.takeIf { it.isNotBlank() }
             val nodeIdBase58 = directorClients.withClient(userKey, deviceKey) { client ->
                 val nodeId = config().nodeId?.takeIf { it.isNotBlank() } ?: client.nodeId.await().toString()
                 register(client, registration)
-                // A passphrase comes with recovery codes, so that forgetting it is not the end of the
-                // account. The account exists either way: failing to make them only means making them
-                // later, from Settings.
-                pendingRecoveryCodes = cleanPassphrase?.let { makeRecoveryCodes(client, userIdBase58, it) }
                 nodeId
             }
+            pendingKey = null
 
             // usersAndInitialDevice already registered this device, so the initial bring-up can skip
             // re-registration wherever this identity lands.
             val userPrivateKey64 = BosonCrypto.privateKeyBytes64(userKey)
             when (target) {
                 is ProfileTarget.HostHere -> {
-                    // The active profile hosts this identity: persist locally and proceed to Home.
                     keyManager.storeUserKey(userPrivateKey64)
+                    keyManager.setBackupPending(!backupChecked)
                     sessionStore.setSession(userIdBase58)
                     keyManager.setRegisteredNodeId(nodeIdBase58)
                     SessionState.Authenticated(userIdBase58)
                 }
                 else -> {
-                    // The active profile is a different identity: seed the new account into a fresh (or,
-                    // defensively, existing) profile without touching the active one.
                     val seed = ProfileSeed(
                         userId = userIdBase58,
                         displayName = cleanName,
                         userPrivateKey64 = userPrivateKey64,
                         devicePrivateKey64 = BosonCrypto.privateKeyBytes64(deviceKey),
                         registeredNodeId = nodeIdBase58,
+                        backupPending = !backupChecked,
                     )
                     when (target) {
-                        is ProfileTarget.Existing ->
-                            SessionState.ReuseProfile(target.profileId, userIdBase58, seed)
+                        is ProfileTarget.Existing -> SessionState.ReuseProfile(target.profileId, userIdBase58, seed)
                         else -> SessionState.NewProfileForIdentity(userIdBase58, seed)
                     }
                 }
             }
-        }
-
-    /** Recovery codes made with a new account, waiting to be shown once; see [takeRecoveryCodes]. */
-    @Volatile
-    private var pendingRecoveryCodes: RecoveryCodes? = null
-
-    /** The recovery codes made with the account just created, if any; returned once. */
-    fun takeRecoveryCodes(): RecoveryCodes? = pendingRecoveryCodes.also { pendingRecoveryCodes = null }
-
-    private suspend fun makeRecoveryCodes(client: DirectorClient, userId: String, passphrase: String): RecoveryCodes? =
-        try {
-            RecoveryCodes(userId, client.makeRecoveryCodes(passphrase).await())
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            null
         }
 
     /** Registers the user of [client] with proof-of-work, recovering what can be recovered. */
@@ -352,18 +330,28 @@ class AuthRepository @Inject constructor(
     }
 
     /**
-     * Self-sovereign sign-in: acts as the user of [userKey] (no OAuth, no pre-registered device), which
-     * proves the Director knows the user and accepts the key. Used by the permissionless returning-device
-     * import.
+     * Acts as the user of [userKey] (no pre-registered device), which proves the Director knows the user
+     * and accepts the key. An identity this node doesn't know is told apart: it was probably registered on
+     * another node.
      */
     private suspend fun verifySignIn(userKey: Signature.KeyPair) {
-        directorClients.withClient(userKey) { it.profile.await() }
+        try {
+            directorClients.withClient(userKey) { it.profile.await() }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            when (e.toDirectorError()) {
+                is AppError.Unauthorized, is AppError.NotFound ->
+                    throw AppError.InvalidInput(context.getString(R.string.onb_error_not_registered_here), e)
+                else -> throw e
+            }
+        }
     }
 
     /**
      * Signs in as the identity of a stored key so a profile can be brought up signed in using ONLY the
-     * Boson identity - no OAuth. Returns the user id to record as the session. Exposed for the app-layer
-     * profile switch and the reuse-profile handoff.
+     * Boson identity. Returns the user id to record as the session. Exposed for the app-layer profile
+     * switch and the reuse-profile handoff.
      */
     suspend fun signInWith(privateKey64: ByteArray): String {
         val userKey = BosonCrypto.keyPairFromPrivate64(privateKey64)
@@ -371,59 +359,115 @@ class AuthRepository @Inject constructor(
         return BosonCrypto.idOf(userKey).toString()
     }
 
+    // ---- An existing identity: its backup ------------------------------------------------------------
+
     /**
-     * Consumes the `?token=` from the OAuth deep link. The OAuth token is held IN MEMORY ONLY (never
-     * written to disk) - it is onboarding-time KYC that authorizes the identity bind. Then resolves the
-     * session (identity bound? key present on this device?).
+     * Brings in an identity from its backup, as the user opened, scanned, pasted or typed it (the key
+     * file, the key, or its numbered rows; see [KeyBackup.parse]). The configured node must know the
+     * identity. The key is stored only after it is accepted, and never into a foreign active profile; the
+     * device registers itself afterwards ([registerDevice]).
      */
-    suspend fun onAuthToken(token: String): SessionState {
-        oauthToken = token
-        return currentSession()
+    suspend fun importBackup(text: String): SessionState = withContext(Dispatchers.IO) {
+        val privateKey64 = try {
+            KeyBackup.parse(text)
+        } catch (e: IllegalArgumentException) {
+            throw AppError.InvalidInput(context.getString(R.string.onb_error_invalid_key), e)
+        }
+        val keyPair = BosonCrypto.keyPairFromPrivate64(privateKey64)
+        verifySignIn(keyPair)
+        commitIdentity(privateKey64, BosonCrypto.idOf(keyPair).toString(), displayName = null)
+    }
+
+    // ---- An existing identity: pairing -----------------------------------------------------------------
+
+    /** The pairing in progress: its registration, and whether its device key is the active profile's. */
+    private class Pairing(val registration: DeviceRegistration, val deviceKey: Signature.KeyPair, val profileKey: Boolean)
+
+    @Volatile
+    private var pairing: Pairing? = null
+
+    /**
+     * Asks the configured node to register this device to an account yet to be chosen, and returns the
+     * pairing code (`boson:pair:1`) to show: Boson Identity, or Photon on another device, scans it and
+     * approves, which hands the user key over sealed to the code. The request expires after three minutes.
+     *
+     * The device key is the active profile's when that profile is empty; otherwise a new one, in memory, so
+     * that a profile bound to another identity never has its key replaced.
+     */
+    suspend fun startPairing(deviceName: String): String = withContext(Dispatchers.IO) {
+        val profileKey = keyManager.userId() == null
+        val deviceKey = if (profileKey) keyManager.ensureDeviceKeyFor(null) else BosonCrypto.generateKeyPair()
+        // Photon acts as the user itself, so it asks for the user key.
+        val registration = directorClients.guest()
+            .requestDeviceRegistration(deviceKey, deviceName.ifBlank { DEFAULT_DEVICE_NAME }, APP_NAME, true)
+            .await()
+        pairing = Pairing(registration, deviceKey, profileKey)
+        registration.pairingCode.toString()
     }
 
     /**
-     * Resolves which profile the OAuth-signed-in account belongs to, driven ONLY by the Boson user id
-     * the OAuth session is bound to (never stale local state):
-     * - [SessionState.Authenticated] when the account's identity is the active profile's identity
-     *   (proceed here);
-     * - [SessionState.ReuseProfile] when it already has its OWN profile elsewhere (the app opens that one
-     *   directly, signing in with that profile's own key - no key/import needed);
-     * - [SessionState.NeedsIdentity]/[SessionState.NeedsKey] otherwise: create/import the identity in the
-     *   CURRENT context. The create ([bindIdentity]) / import ([importUserKeyText]) step then resolves the
-     *   profile at completion and commits (or seeds a fresh profile), so a foreign active profile is never
-     *   overwritten. This is the same resolve-and-commit-at-end pattern the self-sovereign paths use.
-     *
-     * @throws AppError.Unauthorized when there is no OAuth session to resolve
+     * Waits for the pairing started by [startPairing] to be answered: the Director holds the call until
+     * the request is approved, denied or expired. On approval this device is registered to the user, and
+     * the identity is committed here or handed to its own profile, with the device and node it was
+     * registered with.
      */
-    suspend fun currentSession(): SessionState {
-        val token = oauthToken ?: throw AppError.Unauthorized("Session expired; please sign in again")
-        val session = withOAuth(token) { it.session.await() }
-        val accountId = session.userId.orElse(null)?.toString() // identity bound to this OAuth account
-        val localId = keyManager.userId()?.toString()             // identity of the active profile's key
-        val activeId = profileManager.activeProfileId()
-
-        // Same identity as the active profile: record the session (dropping the in-memory OAuth token)
-        // so the re-login survives a restart, then proceed here.
-        if (accountId != null && accountId == localId) {
-            sessionStore.setSession(accountId)
-            oauthToken = null
-            return SessionState.Authenticated(accountId)
+    suspend fun finishPairing(): SessionState = withContext(Dispatchers.IO) {
+        val active = pairing ?: throw AppError.InvalidInput(context.getString(R.string.onb_error_pairing_not_started))
+        val approval = try {
+            directorClients.guest().finishDeviceRegistration(active.registration).await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: RegistrationDeniedException) {
+            pairing = null
+            throw AppError.Conflict(context.getString(R.string.onb_error_pairing_denied), e)
+        } catch (e: RegistrationExpiredException) {
+            pairing = null
+            throw AppError.Timeout(context.getString(R.string.onb_error_pairing_expired), e)
+        } catch (e: NotFoundException) {
+            pairing = null
+            throw AppError.Timeout(context.getString(R.string.onb_error_pairing_expired), e)
         }
+        pairing = null
 
-        // The account's identity already has its own profile: open it directly (it holds its own key).
-        if (accountId != null) {
-            val existing = profileManager.findByUserId(accountId)
-            if (existing != null && existing.id != activeId) {
-                return SessionState.ReuseProfile(existing.id, accountId)
+        // The library refuses an approval without the key Photon asked for, so it is there.
+        val userPrivateKey64 = BosonCrypto.privateKeyBytes64(approval.userKey.orElseThrow())
+        val userId = approval.userId.toString()
+        val nodeId = config().nodeId?.takeIf { it.isNotBlank() } ?: directorClients.probeNodeId().toString()
+        val devicePrivateKey64 = BosonCrypto.privateKeyBytes64(active.deviceKey)
+
+        when (val target = resolveProfileTarget(userId)) {
+            is ProfileTarget.HostHere -> {
+                keyManager.storeUserKey(userPrivateKey64)
+                if (!active.profileKey)
+                    keyManager.storeDeviceKey(devicePrivateKey64)
+                sessionStore.setSession(userId)
+                keyManager.setRegisteredNodeId(nodeId)
+                SessionState.Authenticated(userId)
+            }
+            else -> {
+                val seed = ProfileSeed(
+                    userId = userId,
+                    displayName = null,
+                    userPrivateKey64 = userPrivateKey64,
+                    devicePrivateKey64 = devicePrivateKey64,
+                    registeredNodeId = nodeId,
+                )
+                when (target) {
+                    is ProfileTarget.Existing -> SessionState.ReuseProfile(target.profileId, userId, seed)
+                    else -> SessionState.NewProfileForIdentity(userId, seed)
+                }
             }
         }
-
-        // Create (unbound account) or import (bound account whose key is not on this device) in the current
-        // context; completion commits to the right profile without touching a foreign active one.
-        return if (accountId == null) SessionState.NeedsIdentity else SessionState.NeedsKey(accountId)
     }
 
-    /** Where a self-sovereign identity (derived from a key we hold) belongs relative to the active profile. */
+    /** Forgets the pairing in progress; its request expires on the node by itself. */
+    fun cancelPairing() {
+        pairing = null
+    }
+
+    // ---- Profiles ------------------------------------------------------------------------------------
+
+    /** Where an identity (derived from a key we hold) belongs relative to the active profile. */
     private sealed interface ProfileTarget {
         /** The active profile is a fresh scratch or already this identity: host it here. */
         object HostHere : ProfileTarget
@@ -434,10 +478,9 @@ class AuthRepository @Inject constructor(
     }
 
     /**
-     * Resolves which profile a self-sovereign identity ([userId], derived from a public key rather than
-     * from the OAuth session) belongs to, WITHOUT writing anything to the active profile. Mirrors
-     * [currentSession]'s routing so PoW registration and key import land in the right profile instead of
-     * overwriting the active (possibly foreign) one.
+     * Resolves which profile an identity ([userId]) belongs to, WITHOUT writing anything to the active
+     * profile, so a new, paired or imported identity lands in the right profile instead of overwriting the
+     * active (possibly foreign) one.
      */
     private fun resolveProfileTarget(userId: String): ProfileTarget {
         val localId = keyManager.userId()?.toString()
@@ -458,73 +501,10 @@ class AuthRepository @Inject constructor(
     fun hasUserKey(): Boolean = keyManager.hasUserKey()
 
     /**
-     * The base58 identity private key just generated in [state], for the post-create backup prompt: read
-     * from the local key store when the identity is hosted on the active profile, or from the seed when it
-     * is about to be handed to another profile. Null when [state] carries no freshly created key (an
-     * imported or returning identity), so the backup screen is offered only for a brand-new key.
-     */
-    fun newKeyBackupBase58(state: SessionState): String? = when (state) {
-        is SessionState.Authenticated ->
-            keyManager.userKeyPair()?.let { BosonCrypto.privateKey64ToBase58(BosonCrypto.privateKeyBytes64(it)) }
-        is SessionState.NewProfileForIdentity ->
-            state.seed?.let { BosonCrypto.privateKey64ToBase58(it.userPrivateKey64) }
-        is SessionState.ReuseProfile ->
-            state.seed?.let { BosonCrypto.privateKey64ToBase58(it.userPrivateKey64) }
-        else -> null
-    }
-
-    /**
-     * Imports a user key pasted or scanned as raw text (base58 or hex, O4). With no OAuth session this is
-     * a self-sovereign returning device: the identity is resolved against the profile registry (like a
-     * PoW create) and may hand off to another profile. With an OAuth session, if no identity is bound to
-     * the account the imported key is bound; if one is, the imported key must derive to the same user id.
-     * The 64-byte key is stored only after it is accepted, and never into a foreign active profile.
-     *
-     * Linking the account to an identity that has a passphrase takes the passphrase: without [passphrase]
-     * that fails with [AppError.PassphraseRequired] (428), a wrong one with [AppError.Forbidden] (403).
-     */
-    suspend fun importUserKeyText(text: String, passphrase: String? = null): SessionState {
-        val privateKey64 = BosonCrypto.decodePrivateKey64(text) // throws IllegalArgumentException on bad input
-        return importUserKey(privateKey64, passphrase)
-    }
-
-    private suspend fun importUserKey(privateKey64: ByteArray, passphrase: String?): SessionState =
-        withContext(Dispatchers.IO) {
-            val kp = BosonCrypto.keyPairFromPrivate64(privateKey64)
-            val derivedId = BosonCrypto.idOf(kp).toString()
-
-            // Self-sovereign returning device (no OAuth session): act as the user with the imported key,
-            // which proves the Director knows it, then commit-at-end.
-            val token = oauthToken
-            if (token == null) {
-                verifySignIn(kp)
-                return@withContext commitIdentity(privateKey64, derivedId, displayName = null)
-            }
-
-            // OAuth session present. Establish/confirm the account's identity, then commit-at-end (never
-            // overwrite a foreign active profile).
-            withOAuth(token) { oauth ->
-                val boundId = oauth.session.await().userId.orElse(null)?.toString()
-                if (boundId == null) {
-                    // No identity bound to this account yet: bind the imported key as the account identity.
-                    // An existing identity with a passphrase takes it to gain this sign-in.
-                    oauth.bindUserIdentity(kp, passphrase?.takeIf { it.isNotBlank() }).await()
-                } else if (derivedId != boundId) {
-                    // An identity is already bound: the imported key must match it, or we would fork identity.
-                    throw AppError.InvalidInput(context.getString(R.string.onb_error_key_mismatch))
-                }
-            }
-            oauthToken = null // the identity authenticates by its own key from here on
-            commitIdentity(privateKey64, derivedId, displayName = null)
-        }
-
-    /**
-     * Commits an identity ([privateKey64]/[userId]) the Director has accepted (via bind or key import - no
-     * device registered yet): stored on the active profile, and recorded as its session, when it can host
-     * the identity, else returned as a [ProfileSeed] for a handoff with NOTHING written to the (foreign)
-     * active profile. The device is registered on the target's first bring-up (no device key / node is
-     * seeded). [displayName] names the profile when known (the entered name on create; null on import,
-     * where the name is fetched from the Director profile on the target's first bring-up).
+     * Commits an identity ([privateKey64]/[userId]) the Director has accepted, with no device registered
+     * yet: stored on the active profile, and recorded as its session, when it can host the identity, else
+     * returned as a [ProfileSeed] for a handoff with NOTHING written to the (foreign) active profile. The
+     * device is registered afterwards, here or on the target's first bring-up.
      */
     private suspend fun commitIdentity(
         privateKey64: ByteArray,
@@ -557,8 +537,7 @@ class AuthRepository @Inject constructor(
      * Prepares this device for adopting [newUserId] as its identity: when the device key is already
      * registered under a different user, it is rotated (a device key must never straddle two
      * identities; rotation also clears the registered-node marker). A never-registered key, or one
-     * already owned by the current user == [newUserId], is kept. Ownership is derived from the current
-     * user key - a device key is owned by exactly one user by design.
+     * already owned by the current user == [newUserId], is kept.
      */
     private fun adoptIdentity(newUserId: String?) {
         val current = keyManager.userId()?.toString()
@@ -566,40 +545,6 @@ class AuthRepository @Inject constructor(
             keyManager.rotateDeviceKey()
         }
     }
-
-    /**
-     * Completes OAuth registration: generates a fresh user keypair IN MEMORY, binds its public key as
-     * this session's Boson identity (authorized by the OAuth session), and writes the chosen name/bio
-     * acting as the new user. The OAuth token is then dropped - it is never persisted past onboarding.
-     * The identity is then resolved against the profile registry and committed at the end (like the
-     * self-sovereign paths):
-     * - [SessionState.Authenticated] with the key stored locally when the active profile can host it;
-     * - a [SessionState.ReuseProfile]/[SessionState.NewProfileForIdentity] carrying a [ProfileSeed]
-     *   otherwise, with NOTHING written to the (foreign) active profile.
-     * The device is registered afterwards by the existing finish/connect path (this bind does not
-     * register a device), so the seed carries no device key / node.
-     */
-    suspend fun bindIdentity(name: String? = null, bio: String? = null): SessionState =
-        withContext(Dispatchers.IO) {
-            val token = oauthToken ?: throw AppError.Unauthorized("Session expired; please sign in again")
-            val cleanName = name?.trim()?.ifBlank { null }
-            val cleanBio = bio?.trim()?.ifBlank { null }
-
-            // Generate the identity key in memory: it is persisted only if the active profile hosts it,
-            // so binding on a foreign active profile never overwrites its key.
-            val userKey = BosonCrypto.generateKeyPair()
-            val userId = BosonCrypto.idOf(userKey).toString()
-            withOAuth(token) { it.bindUserIdentity(userKey).await() }
-            oauthToken = null // the identity now exists and authenticates by its own key
-
-            if (cleanName != null || cleanBio != null) {
-                val update = ProfileUpdate()
-                cleanName?.let { update.name(it) }
-                cleanBio?.let { update.bio(it) }
-                directorClients.withClient(userKey) { it.updateProfile(update).await() }
-            }
-            commitIdentity(BosonCrypto.privateKeyBytes64(userKey), userId, cleanName)
-        }
 
     /**
      * True if the signed-in account requires a passphrase for sensitive actions (adding a device is
@@ -626,8 +571,8 @@ class AuthRepository @Inject constructor(
     /**
      * Registers THIS device under the signed-in user so the messaging service will authorize its mqtts
      * session. The Director's `authenticateDevice` rejects any device absent from the user's device table,
-     * and neither the OAuth bind nor a raw-key import registers a device (only the pairing flow and
-     * self-registration do) - so without this the messaging client connects but never reaches READY
+     * and an imported backup registers no device (only pairing and a new account's registration do) - so
+     * without this the messaging client connects but never reaches READY
      * ("always connecting"). Idempotent: a 409 (already registered) is treated as success. Must be called
      * with a local user key present.
      *
@@ -710,51 +655,14 @@ class AuthRepository @Inject constructor(
     private suspend fun probeNodeId(): String? =
         runCatching { directorClients.probeNodeId().toString() }.getOrNull()
 
-    /** Runs [block] with a client for the OAuth session of [token], closing it afterwards. */
-    private suspend fun <T> withOAuth(token: String, block: suspend (DirectorOAuth) -> T): T {
-        val oauth = directorClients.oauth(token)
-        try {
-            return block(oauth)
-        } finally {
-            oauth.close()
-        }
-    }
-
-    /** True if signed in, or signing in through OAuth (gates onboarding vs. home, and bind vs. create). */
-    fun isSignedIn(): Boolean = oauthToken != null || sessionStore.currentSession() != null
-
     suspend fun signOut() {
-        oauthToken = null
         sessionStore.clear()
         // Sign-out ends the session only; keys, the registered-node marker, and local data are retained.
         // Deleting an identity is an explicit delete-profile action, not a side effect of signing out.
     }
 
     companion object {
-        /**
-         * Where nodes before 3.2 send the OAuth sign-in back to: the app's own scheme, `?token=...` (or
-         * `?error=...`). Any app could claim the scheme, which is why newer nodes get [APP_LINK_REDIRECT_URI].
-         */
-        const val REDIRECT_URI = "io.bosonnetwork.photon://auth"
-
-        /**
-         * Where nodes from 3.2 send the OAuth sign-in back to: the App Link `#token=...` (or `#error=...`),
-         * which Android hands only to Photon (bosonnetwork.io's assetlinks.json names it).
-         */
-        const val APP_LINK_REDIRECT_URI = "https://bosonnetwork.io/photon/auth"
-
-        /** Whether a node of [version] (its software version, "3.2.0" or "3.2.0-SNAPSHOT") returns https results in the fragment. */
-        fun returnsInFragment(version: String?): Boolean {
-            val parts = version?.trim()?.split('.', '-')?.take(2)?.map { it.toIntOrNull() } ?: return false
-            val major = parts.getOrNull(0) ?: return false
-            val minor = parts.getOrNull(1) ?: return false
-            return major > 3 || (major == 3 && minor >= 2)
-        }
-
         private const val APP_NAME = "Photon"
         private const val DEFAULT_DEVICE_NAME = "Android device"
     }
 }
-
-/** New passphrase recovery codes of [userId], shown to the user once. */
-data class RecoveryCodes(val userId: String, val codes: List<String>)

@@ -25,7 +25,6 @@ package io.bosonnetwork.photon.feature.settings
 import android.content.Context
 import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.feature.settings.data.DevicePairingRepository
-import io.bosonnetwork.photon.feature.settings.data.PairingInvite
 import io.bosonnetwork.photon.feature.settings.data.PairingRequestInfo
 import io.mockk.every
 import io.mockk.mockk
@@ -52,8 +51,6 @@ class PairingViewModelsTest {
     }
 
     private class FakePairingRepo(
-        var invite: Result<PairingInvite> = Result.success(PairingInvite("reg1", "pmpair:1:reg1:AAAA")),
-        var approval: Result<String> = Result.success("user-xyz"),
         var request: Result<PairingRequestInfo> =
             Result.success(PairingRequestInfo("reg1", "dev1", "Pixel 9", "PhotonMessenger")),
         var approveResult: Result<Unit> = Result.success(Unit),
@@ -63,8 +60,6 @@ class PairingViewModelsTest {
         var approvedPassphrase: String? = null
         var deniedQr: String? = null
 
-        override suspend fun createInvite(deviceName: String) = invite
-        override suspend fun awaitApproval() = approval
         override suspend fun readRequest(qrText: String) = request
         override suspend fun approve(qrText: String, passphrase: String?) =
             approveResult.also { approvedQr = qrText; approvedPassphrase = passphrase }
@@ -79,32 +74,6 @@ class PairingViewModelsTest {
     @After
     fun tearDown() {
         Dispatchers.resetMain()
-    }
-
-    @Test
-    fun `new device shows QR then reaches paired on approval`() {
-        val vm = PairNewDeviceViewModel(FakePairingRepo(), fakeContext())
-        // With an unconfined dispatcher the init chain runs to completion synchronously.
-        val state = vm.uiState.value
-        assertTrue(state is PairNewDeviceUiState.Paired)
-        assertEquals("user-xyz", (state as PairNewDeviceUiState.Paired).userId)
-    }
-
-    @Test
-    fun `new device surfaces a registration failure`() {
-        val repo = FakePairingRepo(invite = Result.failure(IllegalStateException("offline")))
-        val vm = PairNewDeviceViewModel(repo, fakeContext())
-        val state = vm.uiState.value
-        assertTrue(state is PairNewDeviceUiState.Failed)
-        assertEquals("offline", (state as PairNewDeviceUiState.Failed).message)
-    }
-
-    @Test
-    fun `new device surfaces an approval failure`() {
-        val repo = FakePairingRepo(approval = Result.failure(IllegalStateException("denied by user")))
-        val vm = PairNewDeviceViewModel(repo, fakeContext())
-        val state = vm.uiState.value
-        assertTrue(state is PairNewDeviceUiState.Failed)
     }
 
     @Test

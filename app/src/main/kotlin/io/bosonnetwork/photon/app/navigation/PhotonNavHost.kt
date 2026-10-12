@@ -70,11 +70,11 @@ import io.bosonnetwork.photon.feature.contacts.InviteContactPickerScreen
 import io.bosonnetwork.photon.feature.contacts.ContactDetailScreen
 import io.bosonnetwork.photon.feature.contacts.ContactsScreen
 import io.bosonnetwork.photon.feature.contacts.CreateChannelScreen
+import io.bosonnetwork.photon.feature.onboarding.KeyBackupScreen
 import io.bosonnetwork.photon.feature.onboarding.OnboardingScreen
 import io.bosonnetwork.photon.feature.settings.ApproveDeviceScreen
 import io.bosonnetwork.photon.feature.settings.DevicesScreen
 import io.bosonnetwork.photon.feature.settings.LanguageScreen
-import io.bosonnetwork.photon.feature.settings.PairNewDeviceScreen
 import io.bosonnetwork.photon.feature.settings.SessionsScreen
 import io.bosonnetwork.photon.feature.settings.SettingsScreen
 import io.bosonnetwork.photon.feature.settings.ShowIdentityKeyScreen
@@ -245,6 +245,7 @@ fun PhotonNavHost(
                     onOpenDevices = { navController.navigate(Routes.DEVICES) },
                     onOpenLanguage = { navController.navigate(Routes.LANGUAGE) },
                     onShowIdentityKey = { navController.navigate(Routes.SHOW_IDENTITY_KEY) },
+                    onBackUpKey = { navController.navigate(Routes.BACKUP_KEY) },
                     onSignedOut = {
                         appViewModel.onSignedOut()
                         navController.navigate(Routes.ONBOARDING) {
@@ -271,7 +272,6 @@ fun PhotonNavHost(
             composable(Routes.DEVICES) {
                 DevicesScreen(
                     onBack = { navController.popBackStack() },
-                    onAddDevice = { navController.navigate(Routes.ADD_DEVICE) },
                     onApproveDevice = { navController.navigate(Routes.APPROVE_DEVICE) },
                     onShowKey = { navController.navigate(Routes.SHOW_KEY) },
                 )
@@ -299,10 +299,10 @@ fun PhotonNavHost(
                     onBack = { navController.popBackStack() },
                 )
             }
-            composable(Routes.ADD_DEVICE) {
-                PairNewDeviceScreen(
+            composable(Routes.BACKUP_KEY) {
+                KeyBackupScreen(
                     onBack = { navController.popBackStack() },
-                    onPaired = { navController.popBackStack() },
+                    onDone = { navController.popBackStack() },
                 )
             }
             composable(Routes.APPROVE_DEVICE) {

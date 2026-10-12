@@ -123,7 +123,6 @@
     <string name="settings_devices_empty">没有已注册的设备</string>
     <string name="settings_device_remove_confirm_title">移除 %1$s？</string>
     <string name="settings_device_remove_confirm_body">该设备将从你的账户中取消注册，无法再使用其设备密钥登录。它当前的任何活动会话都将在下次重新连接时结束。</string>
-    <string name="settings_add_device_action">添加此设备</string>
     <string name="settings_approve_device_action">批准设备</string>
     <string name="settings_enter_passphrase_title">输入口令</string>
     <string name="settings_enter_passphrase_body">你的账户已通过口令保护。请输入口令以移除此设备。</string>
@@ -159,16 +158,6 @@
     <string name="settings_scan_again_action">重新扫描</string>
     <string name="settings_pairing_failed">配对失败</string>
 
-    <!-- PairNewDeviceScreen -->
-    <string name="settings_pair_preparing">正在准备配对码…</string>
-    <string name="settings_pair_scan_hint">使用已登录的设备扫描此码</string>
-    <string name="settings_pair_qr_content_description">配对二维码</string>
-    <string name="settings_pair_waiting">等待批准…</string>
-    <string name="settings_pair_success">此设备已配对</string>
-    <string name="settings_continue_action">继续</string>
-    <string name="settings_try_again_action">重试</string>
-    <string name="settings_device_name_fallback">Android 设备</string>
-
     <!-- KeyReveal shared scaffold -->
     <string name="settings_reveal_key_action">显示密钥</string>
     <string name="settings_key_copied">已复制</string>
@@ -195,7 +184,6 @@
     <string name="settings_avatar_error_cannot_open">无法打开图片</string>
 
     <!-- data/DevicePairingRepository -->
-    <string name="settings_pairing_error_no_active">当前没有正在进行的配对</string>
     <string name="settings_pairing_error_no_identity">此设备上没有用户身份</string>
     <string name="settings_pairing_error_invalid_code">不是有效的配对码</string>
     <string name="settings_pairing_error_denied">您的另一台设备拒绝了此请求</string>
@@ -219,4 +207,7 @@
     <string name="settings_notifications_update_error">无法更新通知设置：%1$s</string>
     <string name="settings_sign_out_error">无法退出登录：%1$s</string>
     <string name="settings_unknown_error">未知错误</string>
+    <string name="settings_backup_reminder_title">备份你的密钥</string>
+    <string name="settings_backup_reminder_body">你身份的密钥还没有备份并检查。如果没有副本又丢了这部手机，任何人都无法找回你的身份。</string>
+    <string name="settings_backup_reminder_action">立即备份</string>
 </resources>

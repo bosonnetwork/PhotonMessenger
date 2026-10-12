@@ -24,7 +24,6 @@ package io.bosonnetwork.photon.app
 
 import android.Manifest
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -41,16 +40,11 @@ import io.bosonnetwork.photon.core.designsystem.theme.PhotonTheme
 import io.bosonnetwork.photon.core.model.ThemeMode
 import io.bosonnetwork.photon.core.model.ThemePreferences
 import io.bosonnetwork.photon.core.network.ThemePreferencesStore
-import io.bosonnetwork.photon.feature.onboarding.data.authCallbackOf
-import io.bosonnetwork.photon.feature.onboarding.data.AuthDeepLinkBus
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
-
-    @Inject
-    lateinit var deepLinkBus: AuthDeepLinkBus
 
     @Inject
     lateinit var themeStore: ThemePreferencesStore
@@ -71,7 +65,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         ensureNotificationPermission()
-        handleAuthDeepLink(intent)
         setContent {
             val prefs by themeStore.preferences.collectAsStateWithLifecycle(ThemePreferences())
             val darkTheme = when (prefs.mode) {
@@ -85,12 +78,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        handleAuthDeepLink(intent)
-    }
-
     /**
      * Asks for POST_NOTIFICATIONS on Android 13+ (the permission does not exist below that, where the
      * manifest grant suffices). Without it the OS drops every notification - message, friend request,
@@ -101,14 +88,5 @@ class MainActivity : ComponentActivity() {
         val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
         if (!granted) requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-    }
-
-    /**
-     * Captures the OAuth Custom Tab's return: the App Link https://bosonnetwork.io/photon/auth#token=...,
-     * or io.bosonnetwork.photon://auth?token=... from nodes before 3.2 (M1-8).
-     */
-    private fun handleAuthDeepLink(intent: Intent?) {
-        val data = intent?.data ?: return
-        authCallbackOf(data.toString())?.let(deepLinkBus::post)
     }
 }

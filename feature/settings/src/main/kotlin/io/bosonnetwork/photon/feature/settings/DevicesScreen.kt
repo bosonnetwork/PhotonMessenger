@@ -83,7 +83,6 @@ import io.bosonnetwork.photon.feature.settings.model.UiDevice
 @Composable
 fun DevicesScreen(
     onBack: () -> Unit,
-    onAddDevice: () -> Unit,
     onApproveDevice: () -> Unit,
     onShowKey: () -> Unit,
     viewModel: DevicesViewModel = hiltViewModel(),
@@ -138,7 +137,7 @@ fun DevicesScreen(
                     }
                 }
                 HorizontalDivider()
-                DevicePairingActions(onAddDevice = onAddDevice, onApproveDevice = onApproveDevice)
+                DevicePairingActions(onApproveDevice = onApproveDevice)
             }
         }
     }
@@ -165,19 +164,14 @@ fun DevicesScreen(
     }
 }
 
-/** Pair another device to this account, or approve a device that is requesting to join. */
+/**
+ * Approve a device that is asking to join this account: it shows its pairing code (Photon, during its
+ * onboarding) and this device scans it. Joining from this device is done in onboarding.
+ */
 @Composable
-private fun DevicePairingActions(onAddDevice: () -> Unit, onApproveDevice: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        OutlinedButton(onClick = onAddDevice, modifier = Modifier.weight(1f)) {
-            Text(stringResource(R.string.settings_add_device_action))
-        }
-        OutlinedButton(onClick = onApproveDevice, modifier = Modifier.weight(1f)) {
-            Text(stringResource(R.string.settings_approve_device_action))
-        }
+private fun DevicePairingActions(onApproveDevice: () -> Unit) {
+    OutlinedButton(onClick = onApproveDevice, modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+        Text(stringResource(R.string.settings_approve_device_action))
     }
 }
 

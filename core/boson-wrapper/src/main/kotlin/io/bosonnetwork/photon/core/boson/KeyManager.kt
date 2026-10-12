@@ -61,6 +61,10 @@ class KeyManager(
     fun storeUserKey(privateKey64: ByteArray): Signature.KeyPair =
         BosonCrypto.keyPairFromPrivate64(privateKey64).also { secrets.putBytes(KEY_USER, privateKey64) }
 
+    /** Stores [privateKey64] (64-byte) as this profile's device key, as a pairing registered it. */
+    fun storeDeviceKey(privateKey64: ByteArray): Signature.KeyPair =
+        BosonCrypto.keyPairFromPrivate64(privateKey64).also { secrets.putBytes(KEY_DEVICE, privateKey64) }
+
     /** Returns the device keypair, generating and persisting one on first use. */
     fun ensureDeviceKey(): Signature.KeyPair =
         deviceKeyPair() ?: BosonCrypto.generateKeyPair()
@@ -101,16 +105,31 @@ class KeyManager(
 
     override fun hasUserKey(): Boolean = secrets.getBytes(KEY_USER) != null
 
+    /**
+     * True while the backup of an identity created on this device hasn't been checked: the user saved it
+     * (or said they would) but didn't yet show they can read it back. Settings reminds them until then.
+     * An imported or paired identity has its backup elsewhere and never sets it.
+     */
+    fun isBackupPending(): Boolean = secrets.getBytes(KEY_BACKUP_PENDING) != null
+
+    /** Marks the backup of this profile's identity as waiting for its check, or as checked. */
+    fun setBackupPending(pending: Boolean) {
+        if (pending) secrets.putBytes(KEY_BACKUP_PENDING, byteArrayOf(1))
+        else secrets.remove(KEY_BACKUP_PENDING)
+    }
+
     override fun clear() {
         secrets.remove(KEY_USER)
         secrets.remove(KEY_DEVICE)
         secrets.remove(KEY_REG_NODE)
+        secrets.remove(KEY_BACKUP_PENDING)
     }
 
     companion object {
         private const val KEY_USER = "user_key_64"
         private const val KEY_DEVICE = "device_key_64"
         private const val KEY_REG_NODE = "reg_node_id"
+        private const val KEY_BACKUP_PENDING = "backup_pending"
 
         /**
          * Durably writes identity material into an ARBITRARY profile's [secrets] store, for seeding a
@@ -125,10 +144,13 @@ class KeyManager(
             userPrivateKey64: ByteArray,
             devicePrivateKey64: ByteArray?,
             registeredNodeId: String?,
+            backupPending: Boolean = false,
         ) {
             secrets.putBytes(KEY_USER, userPrivateKey64, commit = true)
             devicePrivateKey64?.let { secrets.putBytes(KEY_DEVICE, it, commit = true) }
             registeredNodeId?.let { secrets.putBytes(KEY_REG_NODE, it.encodeToByteArray(), commit = true) }
+            if (backupPending)
+                secrets.putBytes(KEY_BACKUP_PENDING, byteArrayOf(1), commit = true)
         }
 
         /**

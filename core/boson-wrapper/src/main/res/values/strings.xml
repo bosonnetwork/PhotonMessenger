@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- What a scanned code is, when it was scanned in the wrong place (ScannedCode). -->
+    <string name="bw_code_super_node">This is a super node\'s code. Scan it where you choose a home node.</string>
+    <string name="bw_code_pairing">This is a new device asking to be paired. Approve it in Settings, under Devices.</string>
+    <string name="bw_code_user_id">This is someone\'s ID. Add them in Contacts.</string>
+    <string name="bw_code_private_key">This is a private key. Use it only to bring in your own identity, and never share it.</string>
+    <string name="bw_code_enroll">This code makes someone an administrator of a super node. Scan it with Boson Identity.</string>
+    <string name="bw_code_move">This code moves an identity to a new phone. Scan it with Boson Identity.</string>
+    <string name="bw_code_sign_in">This code signs in on the web. Scan it with Boson Identity.</string>
+    <string name="bw_code_other">This Boson code isn\'t one Photon uses.</string>
+    <string name="bw_code_unknown">This isn\'t a code Photon recognizes.</string>
+</resources>
