@@ -52,7 +52,8 @@ import kotlinx.coroutines.launch
  * The steps of bringing an identity into Photon, identity first, as Boson Identity does it:
  * - a new identity: [NewIdentity] > [BackupKey] > [CheckBackup] > [Server] > [CreateProfile] > [Solving];
  * - an existing one: [Server] > [ChooseWay] > [Pairing] (approved on another device) or [ImportBackup]
- *   (its key file, QR code or text), then [Passphrase] if the account has one.
+ *   (its key file, QR code or text), then [Passphrase] if the account has one. With Boson Identity on
+ *   this phone, it gives the node and approves the pairing: [Server] > [Pairing].
  */
 enum class OnboardingStep {
     Welcome,
@@ -86,11 +87,23 @@ data class OnboardingUiState(
     val pairingCode: String? = null,
     /** The pairing request expired before anyone approved it: a new code can be shown. */
     val pairingExpired: Boolean = false,
+    /** Boson Identity on this phone answers app requests: it can give the node and approve the pairing. */
+    val bosonIdentity: Boolean = false,
+    /** The pairing is approved in Boson Identity on this phone, not by scanning the code. */
+    val pairingInApp: Boolean = false,
+    /** Boson Identity approved the pairing; the node's answer is on its way. */
+    val pairingApproved: Boolean = false,
     /** The key typed or pasted on the [OnboardingStep.ImportBackup] screen. */
     val backupInput: String = "",
     val passphraseInput: String = "",
     val error: String? = null,
 )
+
+/** A request for Boson Identity on this phone, for the screen to start. */
+sealed interface IdentityAppRequest {
+    data class HomeNode(val userId: String?) : IdentityAppRequest
+    data class Approve(val approval: BosonIdentityRequests.Approval) : IdentityAppRequest
+}
 
 /**
  * One-shot request for the app to hand the identity to another profile: [existingProfileId] non-null
@@ -111,6 +124,13 @@ class OnboardingViewModel @Inject constructor(
     /** One-shot: the identity belongs to a different profile; the app should hand off to it. */
     private val _handoff = Channel<ProfileHandoff>(Channel.BUFFERED)
     val handoff = _handoff.receiveAsFlow()
+
+    /** One-shot: a request for Boson Identity, for the screen to start for its answer. */
+    private val _identityAppRequests = Channel<IdentityAppRequest>(Channel.BUFFERED)
+    val identityAppRequests = _identityAppRequests.receiveAsFlow()
+
+    // The identity Boson Identity named with the node, proposed again for the approval.
+    private var identityAppUserId: String? = null
 
     init {
         authRepository.ensureDeviceKey()
@@ -234,6 +254,8 @@ class OnboardingViewModel @Inject constructor(
                 if (existing) {
                     authRepository.reachNode()
                     _uiState.update { it.copy(loading = false, step = OnboardingStep.ChooseWay) }
+                    // The node came from Boson Identity: it approves the pairing too.
+                    if (identityAppUserId != null) pairInIdentityApp()
                 } else if (authRepository.powAvailable()) {
                     _uiState.update { it.copy(loading = false, step = OnboardingStep.CreateProfile) }
                 } else {
@@ -301,24 +323,44 @@ class OnboardingViewModel @Inject constructor(
 
     // ---- An existing identity: pairing ----------------------------------------------------------------
 
+    // Asking the node for this device's pairing; then waiting for the node's answer to it.
     private var pairingJob: Job? = null
+    private var waitJob: Job? = null
+
+    // The wait was under way when Photon went to the background, where its answer may be lost.
+    private var waitInterrupted = false
 
     /**
      * Shows this device's pairing code and waits for another device that holds the identity (Boson
      * Identity, or Photon) to approve it. Approval registers this device and hands the user key over.
      */
-    fun choosePairing() {
+    fun choosePairing() = startPairing(inApp = false)
+
+    // Asks the node for a pairing. Scanned on another device, its answer is waited for at once; handed to
+    // Boson Identity on this phone, once Boson Identity answers and Photon is in front again.
+    private fun startPairing(inApp: Boolean) {
         pairingJob?.cancel()
-        _uiState.update { it.copy(step = OnboardingStep.Pairing, pairingCode = null, pairingExpired = false, error = null) }
+        waitJob?.cancel()
+        _uiState.update {
+            it.copy(
+                step = OnboardingStep.Pairing,
+                pairingCode = null,
+                pairingExpired = false,
+                pairingInApp = inApp,
+                pairingApproved = false,
+                error = null,
+            )
+        }
         pairingJob = viewModelScope.launch {
             try {
                 val code = authRepository.startPairing(deviceName())
                 _uiState.update { it.copy(pairingCode = code) }
-                applySession(authRepository.finishPairing())
+                if (inApp)
+                    _identityAppRequests.trySend(IdentityAppRequest.Approve(BosonIdentityRequests.Approval(code, identityAppUserId)))
+                else
+                    awaitApproval()
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: AppError.Timeout) {
-                _uiState.update { it.copy(pairingCode = null, pairingExpired = true) }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(pairingCode = null, error = e.message ?: context.getString(R.string.onb_error_pairing_failed))
@@ -327,11 +369,137 @@ class OnboardingViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Waits for the node's answer to the pairing. Asked again, the node gives the same answer until the
+     * pairing expires, so a wait may be started over: when Photon comes back to the front, as an answer
+     * that arrived while it was in the background may never have reached it.
+     */
+    private fun awaitApproval() {
+        waitJob?.cancel()
+        waitJob = viewModelScope.launch {
+            try {
+                applySession(authRepository.finishPairing())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: AppError.Timeout) {
+                _uiState.update { it.copy(pairingCode = null, pairingExpired = true, pairingApproved = false) }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(pairingCode = null, pairingApproved = false, error = e.message ?: context.getString(R.string.onb_error_pairing_failed))
+                }
+            }
+        }
+    }
+
+    /** Photon went to the background: a wait under way may lose its answer there. */
+    fun onBackground() {
+        waitInterrupted = waitJob?.isActive == true
+    }
+
+    /** Photon is in front again: a wait the background interrupted is started over. */
+    fun onForeground() {
+        if (waitInterrupted && waitJob?.isActive == true) awaitApproval()
+        waitInterrupted = false
+    }
+
     fun cancelPairing() {
         pairingJob?.cancel()
         pairingJob = null
+        waitJob?.cancel()
+        waitJob = null
         authRepository.cancelPairing()
-        _uiState.update { it.copy(step = OnboardingStep.ChooseWay, pairingCode = null, pairingExpired = false, error = null) }
+        _uiState.update {
+            it.copy(
+                step = OnboardingStep.ChooseWay,
+                pairingCode = null,
+                pairingExpired = false,
+                pairingInApp = false,
+                pairingApproved = false,
+                error = null,
+            )
+        }
+    }
+
+    // ---- An existing identity: Boson Identity on this phone --------------------------------------------
+
+    /** Whether Boson Identity on this phone answers app requests, as the screen finds each time it shows. */
+    fun onIdentityAppAvailability(available: Boolean) = _uiState.update { it.copy(bosonIdentity = available) }
+
+    /** Asks Boson Identity for the identity's home node; with it, the pairing follows on its own. */
+    fun useIdentityApp() {
+        _uiState.update { it.copy(error = null) }
+        _identityAppRequests.trySend(IdentityAppRequest.HomeNode(identityAppUserId))
+    }
+
+    /** Boson Identity's answer to [useIdentityApp]: the node is filled in and checked, then paired. */
+    fun onHomeNodeAnswer(answer: BosonIdentityRequests.Answer) {
+        when (answer) {
+            is BosonIdentityRequests.Answer.HomeNode -> {
+                identityAppUserId = answer.userId
+                _uiState.update {
+                    it.copy(
+                        serverUrl = answer.node.url,
+                        directorNodeId = answer.node.nodeId.map { id -> id.toBase58String() }.orElse(""),
+                        error = null,
+                    )
+                }
+                confirmServer()
+            }
+            is BosonIdentityRequests.Answer.Refused -> _uiState.update { it.copy(error = identityAppRefusal(answer.reason)) }
+            is BosonIdentityRequests.Answer.Approved -> Unit
+        }
+    }
+
+    /**
+     * Pairs with Boson Identity on this phone approving: the same pairing as [choosePairing], with the
+     * code handed to Boson Identity instead of scanned.
+     */
+    fun pairInIdentityApp() = startPairing(inApp = true)
+
+    /** Asks Boson Identity again for the pairing under way, after the user left it without answering. */
+    fun reopenIdentityApp() {
+        val code = _uiState.value.pairingCode ?: return
+        // Waited for again when Boson Identity answers, with Photon in front.
+        waitJob?.cancel()
+        _identityAppRequests.trySend(IdentityAppRequest.Approve(BosonIdentityRequests.Approval(code, identityAppUserId)))
+    }
+
+    /** Shows the pairing code instead, for another device to scan, and waits for its answer. */
+    fun showPairingCode() {
+        _uiState.update { it.copy(pairingInApp = false) }
+        if (waitJob?.isActive != true) awaitApproval()
+    }
+
+    /**
+     * Boson Identity's answer to the approval; Photon is in front again, so the node's answer is waited
+     * for now. Approved: that answer completes the pairing. Left without an answer: the pairing goes on,
+     * to open Boson Identity again or show the code. Expired: the node says so. Denied: the pairing ends.
+     */
+    fun onApproveAnswer(answer: BosonIdentityRequests.Answer) {
+        if (_uiState.value.step != OnboardingStep.Pairing || _uiState.value.pairingCode == null) return
+        when (answer) {
+            is BosonIdentityRequests.Answer.Approved -> {
+                _uiState.update { it.copy(pairingApproved = true, error = null) }
+                awaitApproval()
+            }
+            is BosonIdentityRequests.Answer.Refused -> when (answer.reason) {
+                BosonIdentityRequests.ERROR_CANCELED, BosonIdentityRequests.ERROR_EXPIRED -> awaitApproval()
+                else -> {
+                    val message = identityAppRefusal(answer.reason)
+                    cancelPairing()
+                    _uiState.update { it.copy(error = message) }
+                }
+            }
+            is BosonIdentityRequests.Answer.HomeNode -> Unit
+        }
+    }
+
+    private fun identityAppRefusal(reason: String): String? = when (reason) {
+        BosonIdentityRequests.ERROR_CANCELED -> null
+        BosonIdentityRequests.ERROR_NO_IDENTITY -> context.getString(R.string.onb_identity_app_no_identity)
+        BosonIdentityRequests.ERROR_NO_HOME_NODE -> context.getString(R.string.onb_identity_app_no_home_node)
+        BosonIdentityRequests.ERROR_DENIED -> context.getString(R.string.onb_identity_app_denied)
+        else -> context.getString(R.string.onb_identity_app_failed)
     }
 
     private fun deviceName(): String =
@@ -474,12 +642,19 @@ class OnboardingViewModel @Inject constructor(
             OnboardingStep.BackupKey -> _uiState.update { it.copy(step = OnboardingStep.NewIdentity, error = null) }
             OnboardingStep.CheckBackup -> showKeyAgain()
             OnboardingStep.Server ->
-                if (s.existing) _uiState.update { it.copy(step = OnboardingStep.Welcome, existing = false, error = null) }
-                else continueToBackup()
+                if (s.existing) {
+                    identityAppUserId = null
+                    _uiState.update { it.copy(step = OnboardingStep.Welcome, existing = false, error = null) }
+                } else {
+                    continueToBackup()
+                }
             OnboardingStep.ScanServer -> cancelServerScan()
             OnboardingStep.CreateProfile -> _uiState.update { it.copy(step = OnboardingStep.Server, error = null) }
             OnboardingStep.Solving -> cancelSolving()
-            OnboardingStep.ChooseWay -> _uiState.update { it.copy(step = OnboardingStep.Server, error = null) }
+            OnboardingStep.ChooseWay -> {
+                identityAppUserId = null
+                _uiState.update { it.copy(step = OnboardingStep.Server, error = null) }
+            }
             OnboardingStep.Pairing -> cancelPairing()
             OnboardingStep.ImportBackup -> _uiState.update { it.copy(step = OnboardingStep.ChooseWay, error = null) }
             OnboardingStep.ScanBackup -> cancelBackupScan()

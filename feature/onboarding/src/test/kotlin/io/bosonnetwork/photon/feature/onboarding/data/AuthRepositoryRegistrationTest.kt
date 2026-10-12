@@ -51,6 +51,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
@@ -315,6 +316,28 @@ class AuthRepositoryRegistrationTest {
 
     private fun registrationOptions(policy: String, pow: Boolean) =
         Answer(200, """{"policy":"$policy","proofOfWork":$pow,"oauth":true}""")
+
+    @Test
+    fun `a pairing whose key is already a device starts over with a new key`() = runTest {
+        configStore.setBaseUrl(baseUrl())
+        val firstKey = keyManager.ensureDeviceKey()
+        director = { r ->
+            when {
+                r.isTo("GET", "/client/id") -> nodeIdAnswer()
+                // An earlier pairing of this key was approved, but its answer never arrived.
+                r.isTo("POST", "/client/devices/registrations") && r.body.contains(BosonCrypto.idOf(firstKey).toString()) ->
+                    Answer(409, """{"error":"The device already exists"}""")
+                r.isTo("POST", "/client/devices/registrations") -> Answer(200, """{"registrationId":"reg1"}""")
+                else -> Answer(404)
+            }
+        }
+
+        val code = repository.startPairing("Pixel")
+        assertTrue(code.startsWith("boson:pair:1:reg1:"))
+        val newKey = keyManager.deviceKeyPair()!!
+        assertNotEquals(BosonCrypto.idOf(firstKey), BosonCrypto.idOf(newKey))
+        assertEquals(2, received.count { it.isTo("POST", "/client/devices/registrations") })
+    }
 
     @Test
     fun `powAvailable is false on an OAuth-only node`() = runTest {

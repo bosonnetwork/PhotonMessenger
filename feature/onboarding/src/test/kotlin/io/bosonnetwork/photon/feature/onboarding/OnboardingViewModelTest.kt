@@ -26,6 +26,7 @@ import android.content.Context
 import io.bosonnetwork.Id
 import io.bosonnetwork.crypto.KeyBackup
 import io.bosonnetwork.crypto.Signature
+import io.bosonnetwork.director.client.SuperNodeCode
 import io.bosonnetwork.photon.feature.onboarding.data.AuthRepository
 import io.bosonnetwork.photon.feature.onboarding.data.SessionState
 import io.mockk.coEvery
@@ -33,7 +34,11 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -136,6 +141,110 @@ class OnboardingViewModelTest {
         vm.onServerUrlChange("https://node.example.org")
         vm.confirmServer()
         assertEquals(OnboardingStep.ChooseWay, vm.uiState.value.step)
+    }
+
+    // Boson Identity on this phone: what the view model asks it, as the screen would start them.
+    private val identityApp = CoroutineScope(Dispatchers.Main)
+    private val nodeId = Id.random()
+    private val homeNode = BosonIdentityRequests.Answer.HomeNode("alice", SuperNodeCode.of(nodeId, "https://node.example.org"))
+
+    private fun requestsOf(vm: OnboardingViewModel): List<IdentityAppRequest> {
+        val requests = mutableListOf<IdentityAppRequest>()
+        identityApp.launch { vm.identityAppRequests.collect { requests += it } }
+        return requests
+    }
+
+    // An existing identity whose node and pairing come from Boson Identity, waiting for the node's answer.
+    private fun pairingInIdentityApp(): Pair<OnboardingViewModel, List<IdentityAppRequest>> {
+        coEvery { repository.reachNode() } returns nodeId.toString()
+        coEvery { repository.startPairing(any()) } returns "boson:pair:1:reg:key"
+        coEvery { repository.finishPairing() } coAnswers { CompletableDeferred<SessionState>().await() }
+        val vm = OnboardingViewModel(repository, context)
+        val requests = requestsOf(vm)
+        vm.chooseExisting()
+        vm.useIdentityApp()
+        vm.onHomeNodeAnswer(homeNode)
+        return vm to requests
+    }
+
+    @Test
+    fun `Boson Identity's home node is checked, then the pairing is handed to it`() {
+        val (vm, requests) = pairingInIdentityApp()
+        assertEquals(IdentityAppRequest.HomeNode(null), requests[0])
+        assertEquals("https://node.example.org", vm.uiState.value.serverUrl)
+        coVerify { repository.setDirectorUrl("https://node.example.org", nodeId.toBase58String()) }
+        assertEquals(OnboardingStep.Pairing, vm.uiState.value.step)
+        assertTrue(vm.uiState.value.pairingInApp)
+        assertEquals(
+            IdentityAppRequest.Approve(BosonIdentityRequests.Approval("boson:pair:1:reg:key", "alice")),
+            requests[1],
+        )
+        // Photon is in the background while Boson Identity approves: its answer could be lost there.
+        coVerify(exactly = 0) { repository.finishPairing() }
+        identityApp.cancel()
+    }
+
+    @Test
+    fun `an approval in Boson Identity waits for the node, a denial ends the pairing`() {
+        val (vm, _) = pairingInIdentityApp()
+        vm.onApproveAnswer(BosonIdentityRequests.Answer.Approved("alice"))
+        assertTrue(vm.uiState.value.pairingApproved)
+        assertEquals(OnboardingStep.Pairing, vm.uiState.value.step)
+        // Back in front: the node's answer is waited for now.
+        coVerify(exactly = 1) { repository.finishPairing() }
+
+        val (denied, _) = pairingInIdentityApp()
+        denied.onApproveAnswer(BosonIdentityRequests.Answer.Refused(BosonIdentityRequests.ERROR_DENIED))
+        assertEquals(OnboardingStep.ChooseWay, denied.uiState.value.step)
+        assertNotNull(denied.uiState.value.error)
+        verify { repository.cancelPairing() }
+        identityApp.cancel()
+    }
+
+    @Test
+    fun `leaving Boson Identity keeps the pairing, to open it again or show the code`() {
+        val (vm, requests) = pairingInIdentityApp()
+        vm.onApproveAnswer(BosonIdentityRequests.Answer.Refused(BosonIdentityRequests.ERROR_CANCELED))
+        assertEquals(OnboardingStep.Pairing, vm.uiState.value.step)
+        assertNull(vm.uiState.value.error)
+        vm.reopenIdentityApp()
+        assertEquals(3, requests.size)
+        vm.showPairingCode()
+        assertFalse(vm.uiState.value.pairingInApp)
+        assertEquals("boson:pair:1:reg:key", vm.uiState.value.pairingCode)
+        identityApp.cancel()
+    }
+
+    @Test
+    fun `a wait the background interrupted is started over in front, an untouched one is not`() {
+        coEvery { repository.reachNode() } returns nodeId.toString()
+        coEvery { repository.startPairing(any()) } returns "boson:pair:1:reg:key"
+        coEvery { repository.finishPairing() } coAnswers { CompletableDeferred<SessionState>().await() }
+        val vm = OnboardingViewModel(repository, context)
+        vm.chooseExisting()
+        vm.onServerUrlChange("https://node.example.org")
+        vm.confirmServer()
+        vm.choosePairing()
+        coVerify(exactly = 1) { repository.finishPairing() }
+
+        vm.onForeground()
+        coVerify(exactly = 1) { repository.finishPairing() }
+
+        vm.onBackground()
+        vm.onForeground()
+        coVerify(exactly = 2) { repository.finishPairing() }
+    }
+
+    @Test
+    fun `a home node Boson Identity can't give says why, on the node step`() {
+        val vm = OnboardingViewModel(repository, context)
+        vm.chooseExisting()
+        vm.onHomeNodeAnswer(BosonIdentityRequests.Answer.Refused(BosonIdentityRequests.ERROR_CANCELED))
+        assertNull(vm.uiState.value.error)
+        vm.onHomeNodeAnswer(BosonIdentityRequests.Answer.Refused(BosonIdentityRequests.ERROR_NO_HOME_NODE))
+        assertEquals(OnboardingStep.Server, vm.uiState.value.step)
+        assertNotNull(vm.uiState.value.error)
+        coVerify(exactly = 0) { repository.setDirectorUrl(any(), any()) }
     }
 
     @Test

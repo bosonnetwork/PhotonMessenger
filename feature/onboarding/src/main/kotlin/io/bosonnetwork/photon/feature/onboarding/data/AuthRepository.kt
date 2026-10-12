@@ -31,6 +31,7 @@ import io.bosonnetwork.crypto.Signature
 import io.bosonnetwork.director.client.DeviceRegistration
 import io.bosonnetwork.director.client.DirectorClient
 import io.bosonnetwork.director.client.UserRegistration
+import io.bosonnetwork.director.client.exceptions.ConflictException
 import io.bosonnetwork.director.client.exceptions.NotFoundException
 import io.bosonnetwork.director.client.exceptions.ProofOfWorkException
 import io.bosonnetwork.director.client.exceptions.RegistrationDeniedException
@@ -396,11 +397,20 @@ class AuthRepository @Inject constructor(
      */
     suspend fun startPairing(deviceName: String): String = withContext(Dispatchers.IO) {
         val profileKey = keyManager.userId() == null
-        val deviceKey = if (profileKey) keyManager.ensureDeviceKeyFor(null) else BosonCrypto.generateKeyPair()
+        var deviceKey = if (profileKey) keyManager.ensureDeviceKeyFor(null) else BosonCrypto.generateKeyPair()
         // Photon acts as the user itself, so it asks for the user key.
-        val registration = directorClients.guest()
-            .requestDeviceRegistration(deviceKey, deviceName.ifBlank { DEFAULT_DEVICE_NAME }, APP_NAME, true)
+        suspend fun request(key: Signature.KeyPair) = directorClients.guest()
+            .requestDeviceRegistration(key, deviceName.ifBlank { DEFAULT_DEVICE_NAME }, APP_NAME, true)
             .await()
+        val registration = try {
+            request(deviceKey)
+        } catch (e: ConflictException) {
+            // The key is already a registered device: an earlier pairing was approved, but its answer (and
+            // the user key in it) never reached this device. This one pairs as a new device, with a new
+            // key; the other stays in the account's device list, to remove there.
+            deviceKey = if (profileKey) keyManager.rotateDeviceKey() else BosonCrypto.generateKeyPair()
+            request(deviceKey)
+        }
         pairing = Pairing(registration, deviceKey, profileKey)
         registration.pairingCode.toString()
     }

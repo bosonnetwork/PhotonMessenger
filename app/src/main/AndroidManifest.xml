@@ -13,6 +13,11 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!-- Boson Identity's app requests (home node, device approval): Android 11+ hides other apps otherwise. -->
+    <queries>
+        <package android:name="io.bosonnetwork.identity" />
+    </queries>
+
     <application
         android:name=".PhotonApp"
         android:allowBackup="false"

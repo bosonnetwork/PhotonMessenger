@@ -54,6 +54,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -88,6 +89,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import io.bosonnetwork.photon.core.designsystem.component.SecureScreen
 import io.bosonnetwork.photon.core.qr.QrScanner
 import io.bosonnetwork.photon.core.qr.rememberQrBitmap
@@ -117,6 +119,25 @@ fun OnboardingScreen(
 
     LaunchedEffect(state.step) {
         if (state.step == OnboardingStep.Authenticated) onAuthenticated()
+    }
+
+    // Boson Identity on this phone: asked for the home node, and to approve the pairing. Looked for each
+    // time the screen shows, so that one installed meanwhile is offered.
+    val context = LocalContext.current
+    LifecycleResumeEffect(Unit) {
+        viewModel.onIdentityAppAvailability(BosonIdentityRequests.isAvailable(context))
+        viewModel.onForeground()
+        onPauseOrDispose { viewModel.onBackground() }
+    }
+    val askHomeNode = rememberLauncherForActivityResult(BosonIdentityRequests.GetHomeNode(), viewModel::onHomeNodeAnswer)
+    val askApproval = rememberLauncherForActivityResult(BosonIdentityRequests.ApproveDevice(), viewModel::onApproveAnswer)
+    LaunchedEffect(Unit) {
+        viewModel.identityAppRequests.collect { request ->
+            when (request) {
+                is IdentityAppRequest.HomeNode -> askHomeNode.launch(request.userId)
+                is IdentityAppRequest.Approve -> askApproval.launch(request.approval)
+            }
+        }
     }
 
     BackHandler(enabled = viewModel.canGoBack() && !state.loading) { viewModel.back() }
@@ -252,6 +273,15 @@ private fun Step(step: OnboardingStep, state: OnboardingUiState, viewModel: Onbo
         OnboardingStep.ChooseWay -> {
             StepTitle(stringResource(R.string.onb_choose_way_title))
             StepText(stringResource(R.string.onb_choose_way_body))
+            if (state.bosonIdentity) {
+                WayCard(
+                    icon = Icons.Filled.Fingerprint,
+                    title = stringResource(R.string.onb_way_identity_app_title),
+                    body = stringResource(R.string.onb_way_identity_app_body),
+                    onClick = viewModel::pairInIdentityApp,
+                )
+                Spacer(Modifier.height(12.dp))
+            }
             WayCard(
                 icon = Icons.Filled.Devices,
                 title = stringResource(R.string.onb_way_pair_title),
@@ -341,6 +371,23 @@ private fun WelcomeStep(onCreate: () -> Unit, onExisting: () -> Unit) {
 private fun ServerStep(state: OnboardingUiState, viewModel: OnboardingViewModel) {
     StepTitle(stringResource(if (state.existing) R.string.onb_home_node_existing_title else R.string.onb_home_node_new_title))
     StepText(stringResource(if (state.existing) R.string.onb_home_node_existing_body else R.string.onb_home_node_new_body))
+    // Boson Identity on this phone knows the node, and approves this device next: nothing to scan or type.
+    if (state.existing && state.bosonIdentity) {
+        Button(onClick = viewModel::useIdentityApp, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Filled.Fingerprint, contentDescription = null)
+            Text(stringResource(R.string.onb_use_identity_app), Modifier.padding(start = 8.dp))
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            stringResource(R.string.onb_use_identity_app_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(stringResource(R.string.onb_or_enter_node), style = MaterialTheme.typography.labelLarge)
+        Spacer(Modifier.height(12.dp))
+    }
     OutlinedButton(onClick = viewModel::scanServerQr, modifier = Modifier.fillMaxWidth()) {
         Icon(Icons.Filled.QrCodeScanner, contentDescription = null)
         Text(stringResource(R.string.onb_scan_super_node), Modifier.padding(start = 8.dp))
@@ -403,7 +450,29 @@ private fun WayCard(icon: ImageVector, title: String, body: String, onClick: () 
 private fun PairingStep(state: OnboardingUiState, viewModel: OnboardingViewModel) {
     StepTitle(stringResource(R.string.onb_pairing_title))
     val code = state.pairingCode
+    val again = if (state.pairingInApp) viewModel::pairInIdentityApp else viewModel::choosePairing
     when {
+        // Approved in Boson Identity on this phone: the code is handed over, not shown.
+        code != null && state.pairingInApp -> {
+            StepText(
+                stringResource(if (state.pairingApproved) R.string.onb_pairing_app_approved else R.string.onb_pairing_app_body),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(if (state.pairingApproved) R.string.onb_pairing_finishing else R.string.onb_pairing_app_waiting),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            if (!state.pairingApproved) {
+                Spacer(Modifier.height(16.dp))
+                OutlinedButton(onClick = viewModel::reopenIdentityApp, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.onb_pairing_app_reopen))
+                }
+                TextButton(onClick = viewModel::showPairingCode) { Text(stringResource(R.string.onb_pairing_show_code)) }
+            }
+        }
         code != null -> {
             StepText(stringResource(R.string.onb_pairing_body))
             rememberQrBitmap(code)?.let {
@@ -425,12 +494,12 @@ private fun PairingStep(state: OnboardingUiState, viewModel: OnboardingViewModel
         }
         state.pairingExpired -> {
             StepText(stringResource(R.string.onb_pairing_expired))
-            Button(onClick = viewModel::choosePairing, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = again, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.onb_pairing_new_code))
             }
         }
         state.error != null ->
-            Button(onClick = viewModel::choosePairing, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = again, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.onb_try_again))
             }
         else -> CircularProgressIndicator()
