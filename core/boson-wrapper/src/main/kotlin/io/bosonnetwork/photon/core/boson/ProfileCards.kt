@@ -93,8 +93,8 @@ sealed interface CardState {
  * persistently and announces it again and again, keeping it in the DHT while the phone is off. The card
  * and the DHT value holding it are signed by the user key; the gateway only carries them, acting for the
  * identity through this device's key. Boson's identity registry does the publishing over the gateway (a
- * [io.bosonnetwork.Node]), choosing the version as every Boson app does, so Photon and Boson Identity
- * never publish below each other.
+ * [io.bosonnetwork.Node]; made without a resolution cache, as it only publishes), choosing the version as
+ * every Boson app does, so Photon and Boson Identity never publish below each other.
  *
  * Every call fails with an [AppError].
  */
@@ -107,7 +107,7 @@ class ProfileCards(
     suspend fun state(): CardState = mapped {
         val (profile, status) = profileAndStatus()
         gateway(status) { gateway ->
-            val published = Registry.DHTRegistry(gateway).getPublished(userId()).await().orElse(null)
+            val published = Registry.DHTRegistry(gateway, 0).getPublished(userId()).await().orElse(null)
             if (published == null) {
                 CardState.NotPublished
             } else {
@@ -134,7 +134,7 @@ class ProfileCards(
                 .card
             // The registry publishes past every version known (the gateway's, the DHT's); this device adds
             // the last one it published, which a card that expired everywhere may still be remembered at.
-            val version = Registry.DHTRegistry(gateway).publish(owner, card, keyManager.cardVersion() ?: -1).await()
+            val version = Registry.DHTRegistry(gateway, 0).publish(owner, card, keyManager.cardVersion() ?: -1).await()
             keyManager.setCardVersion(version)
             version
         }
@@ -158,7 +158,7 @@ class ProfileCards(
      */
     suspend fun unpublish(): Unit = mapped {
         val (_, status) = profileAndStatus()
-        gateway(status) { gateway -> Registry.DHTRegistry(gateway).unpublish(userId()).await() }
+        gateway(status) { gateway -> Registry.DHTRegistry(gateway, 0).unpublish(userId()).await() }
         Unit
     }
 
