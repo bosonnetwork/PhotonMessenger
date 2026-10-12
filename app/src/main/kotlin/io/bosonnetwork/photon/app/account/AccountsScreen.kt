@@ -58,7 +58,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.bosonnetwork.photon.app.R
+import io.bosonnetwork.photon.core.designsystem.component.PhotonAvatar
 import io.bosonnetwork.photon.core.security.Profile
+
+/**
+ * An on-device profile as the account list shows it: its identity's [name], the host of its home node
+ * ([nodeHost]) and its [avatar] image, each null when not known; read from the profile's own files.
+ */
+class Account(
+    val profile: Profile,
+    val name: String?,
+    val nodeHost: String?,
+    val avatar: ByteArray?,
+)
 
 /**
  * Account switcher: lists the on-device profiles (one per Boson identity), lets the user switch to,
@@ -73,7 +85,7 @@ import io.bosonnetwork.photon.core.security.Profile
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AccountsScreen(
-    profiles: List<Profile>,
+    accounts: List<Account>,
     activeProfileId: String,
     onSwitch: (String) -> Unit,
     onAddAccount: () -> Unit,
@@ -81,11 +93,11 @@ fun AccountsScreen(
     onBack: () -> Unit,
     signInMode: Boolean = false,
 ) {
-    var confirmRemove by remember { mutableStateOf<Profile?>(null) }
-    var confirmSwitch by remember { mutableStateOf<Profile?>(null) }
+    var confirmRemove by remember { mutableStateOf<Account?>(null) }
+    var confirmSwitch by remember { mutableStateOf<Account?>(null) }
 
     // Sign-in picker only offers accounts that already have a bound identity to sign into.
-    val shown = if (signInMode) profiles.filter { it.userId != null } else profiles
+    val shown = if (signInMode) accounts.filter { it.profile.userId != null } else accounts
 
     Scaffold(
         topBar = {
@@ -111,16 +123,24 @@ fun AccountsScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             LazyColumn(Modifier.weight(1f)) {
-                items(shown, key = { it.id }) { profile ->
+                items(shown, key = { it.profile.id }) { account ->
+                    val profile = account.profile
                     val active = profile.id == activeProfileId
                     ListItem(
-                        headlineContent = { Text(profileTitle(profile)) },
+                        leadingContent = {
+                            PhotonAvatar(model = account.avatar, name = account.name, size = 40.dp, colorKey = profile.userId)
+                        },
+                        headlineContent = { Text(accountTitle(account)) },
                         supportingContent = {
-                            // Always the short id; the active profile is marked by the trailing check icon.
-                            Text(
-                                profile.userId?.let(::shortId)
-                                    ?: stringResource(R.string.app_accounts_not_signed_in),
-                            )
+                            // Who (the short id) and where (the home node); the active one is checked.
+                            Column {
+                                Text(
+                                    profile.userId?.let(::shortId)
+                                        ?: stringResource(R.string.app_accounts_not_signed_in),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                account.nodeHost?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                            }
                         },
                         trailingContent = {
                             when {
@@ -141,7 +161,7 @@ fun AccountsScreen(
                                         )
                                     }
                                 }
-                                else -> IconButton(onClick = { confirmRemove = profile }) {
+                                else -> IconButton(onClick = { confirmRemove = account }) {
                                     Icon(
                                         Icons.Outlined.Delete,
                                         contentDescription = stringResource(R.string.app_accounts_remove_account_cd),
@@ -154,7 +174,7 @@ fun AccountsScreen(
                         modifier = if (signInMode) {
                             Modifier.clickable { onSwitch(profile.id) }
                         } else {
-                            Modifier.clickable(enabled = !active) { confirmSwitch = profile }
+                            Modifier.clickable(enabled = !active) { confirmSwitch = account }
                         },
                     )
                     HorizontalDivider()
@@ -174,15 +194,15 @@ fun AccountsScreen(
         }
     }
 
-    confirmSwitch?.let { profile ->
+    confirmSwitch?.let { account ->
         AlertDialog(
             onDismissRequest = { confirmSwitch = null },
             title = { Text(stringResource(R.string.app_accounts_switch_dialog_title)) },
             text = {
-                Text(stringResource(R.string.app_accounts_switch_dialog_message, profileTitle(profile)))
+                Text(stringResource(R.string.app_accounts_switch_dialog_message, accountTitle(account)))
             },
             confirmButton = {
-                TextButton(onClick = { onSwitch(profile.id); confirmSwitch = null }) {
+                TextButton(onClick = { onSwitch(account.profile.id); confirmSwitch = null }) {
                     Text(stringResource(R.string.app_accounts_switch))
                 }
             },
@@ -194,15 +214,15 @@ fun AccountsScreen(
         )
     }
 
-    confirmRemove?.let { profile ->
+    confirmRemove?.let { account ->
         AlertDialog(
             onDismissRequest = { confirmRemove = null },
             title = { Text(stringResource(R.string.app_accounts_remove_dialog_title)) },
             text = {
-                Text(stringResource(R.string.app_accounts_remove_dialog_message, profileTitle(profile)))
+                Text(stringResource(R.string.app_accounts_remove_dialog_message, accountTitle(account)))
             },
             confirmButton = {
-                TextButton(onClick = { onRemove(profile.id); confirmRemove = null }) {
+                TextButton(onClick = { onRemove(account.profile.id); confirmRemove = null }) {
                     Text(stringResource(R.string.app_accounts_remove), color = MaterialTheme.colorScheme.error)
                 }
             },
@@ -216,9 +236,10 @@ fun AccountsScreen(
 }
 
 @Composable
-private fun profileTitle(profile: Profile): String =
-    profile.displayName?.takeIf { it.isNotBlank() }
-        ?: profile.userId?.let(::shortId)
+private fun accountTitle(account: Account): String =
+    account.name?.takeIf { it.isNotBlank() }
+        ?: account.profile.displayName?.takeIf { it.isNotBlank() }
+        ?: account.profile.userId?.let(::shortId)
         ?: stringResource(R.string.app_accounts_new_account)
 
 /** first8...last8 abbreviation of a base58 id; short ids are returned as-is. */

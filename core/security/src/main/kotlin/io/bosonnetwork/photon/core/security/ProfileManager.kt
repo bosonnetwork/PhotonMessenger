@@ -23,6 +23,8 @@
 package io.bosonnetwork.photon.core.security
 
 import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 import java.util.Properties
 import java.util.UUID
 
@@ -90,8 +92,16 @@ class ProfileManager(
             p.homeNodeId?.let { props.setProperty("${p.id}.$FIELD_NODE", it) }
             props.setProperty("${p.id}.$FIELD_LAST_ACTIVE", p.lastActiveAt.toString())
         }
+        // Replaced atomically (written and synced, renamed, the directory synced): a power cut leaves the
+        // old registry or the new one, never an empty file that would forget every account.
         filesDir.mkdirs()
-        registryFile.outputStream().use { props.store(it, "Photon profiles") }
+        val tmp = File(filesDir, "$REGISTRY_FILE.tmp")
+        FileOutputStream(tmp).use { out ->
+            props.store(out, "Photon profiles")
+            out.fd.sync()
+        }
+        if (!tmp.renameTo(registryFile)) throw IOException("Could not replace the profile registry")
+        IdentityVault.syncDirectory(filesDir)
     }
 
     /** The active profile id, creating and selecting a fresh one on first run so the graph always binds. */

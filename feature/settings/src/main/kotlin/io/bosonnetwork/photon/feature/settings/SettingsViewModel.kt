@@ -131,6 +131,13 @@ class SettingsViewModel @Inject constructor(
     val card: StateFlow<ProfileCardUi> = _card.asStateFlow()
 
     init {
+        // The profile as kept shows at once, offline too, until the node's answer replaces it.
+        viewModelScope.launch {
+            repository.keptProfile.collect { kept ->
+                if (kept != null && _uiState.value.profile?.synced != true)
+                    _uiState.value = _uiState.value.copy(loading = false, profile = kept)
+            }
+        }
         refresh()
         checkCard()
     }

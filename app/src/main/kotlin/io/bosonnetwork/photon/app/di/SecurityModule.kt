@@ -24,8 +24,13 @@ package io.bosonnetwork.photon.app.di
 
 import android.content.Context
 import io.bosonnetwork.photon.core.boson.KeyManager
+import io.bosonnetwork.photon.core.boson.OwnProfileStore
 import io.bosonnetwork.photon.core.model.SessionStore
+import io.bosonnetwork.photon.core.security.AvatarStore
 import io.bosonnetwork.photon.core.security.EncryptedSessionStore
+import io.bosonnetwork.photon.core.security.IdentityVault
+import io.bosonnetwork.photon.core.security.KeySealer
+import io.bosonnetwork.photon.core.security.KeystoreSealer
 import io.bosonnetwork.photon.core.security.ProfileManager
 import io.bosonnetwork.photon.core.security.SecretStore
 import dagger.Module
@@ -52,7 +57,31 @@ object SecurityModule {
     @Singleton
     fun provideSessionStore(secrets: SecretStore): SessionStore = EncryptedSessionStore(secrets)
 
+    /** Seals the identities' keys with the Android Keystore. */
     @Provides
     @Singleton
-    fun provideKeyManager(secrets: SecretStore): KeyManager = KeyManager(secrets)
+    fun provideKeySealer(): KeySealer = KeystoreSealer()
+
+    /** The active profile's identity record and keys. */
+    @Provides
+    @Singleton
+    fun provideIdentityVault(profileManager: ProfileManager, sealer: KeySealer): IdentityVault {
+        val profileId = profileManager.activeProfileId()
+        return IdentityVault(profileManager.filesRootFor(profileId), IdentityVault.aliasFor(profileId), sealer)
+    }
+
+    @Provides
+    @Singleton
+    fun provideKeyManager(vault: IdentityVault): KeyManager = KeyManager(vault)
+
+    /** The active profile's own avatar, in its files. */
+    @Provides
+    @Singleton
+    fun provideAvatarStore(profileManager: ProfileManager): AvatarStore =
+        AvatarStore(profileManager.filesRootFor(profileManager.activeProfileId()))
+
+    /** The identity's own profile and avatar, kept as the home node gives them. */
+    @Provides
+    @Singleton
+    fun provideOwnProfileStore(vault: IdentityVault, avatars: AvatarStore): OwnProfileStore = OwnProfileStore(vault, avatars)
 }

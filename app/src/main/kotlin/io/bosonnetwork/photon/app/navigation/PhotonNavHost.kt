@@ -206,7 +206,7 @@ fun PhotonNavHost(
             }
             composable(Routes.SIGN_IN_ACCOUNTS) {
                 AccountsScreen(
-                    profiles = remember { appViewModel.profiles() },
+                    accounts = remember { appViewModel.accounts() },
                     activeProfileId = appViewModel.activeProfileId(),
                     signInMode = true,
                     onSwitch = { appViewModel.signInToProfile(it) },
@@ -258,7 +258,7 @@ fun PhotonNavHost(
             composable(Routes.ACCOUNTS) {
                 var refresh by remember { mutableStateOf(0) }
                 AccountsScreen(
-                    profiles = remember(refresh) { appViewModel.profiles() },
+                    accounts = remember(refresh) { appViewModel.accounts() },
                     activeProfileId = appViewModel.activeProfileId(),
                     onSwitch = { appViewModel.switchProfile(it) },
                     onAddAccount = { appViewModel.addAccount() },

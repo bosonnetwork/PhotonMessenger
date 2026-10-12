@@ -22,9 +22,8 @@
 
 package io.bosonnetwork.photon.core.boson
 
-import io.bosonnetwork.photon.core.security.SecretStore
-import io.mockk.every
-import io.mockk.mockk
+import io.bosonnetwork.photon.core.security.IdentityVault
+import io.bosonnetwork.photon.core.security.KeySealer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
@@ -37,32 +36,29 @@ import org.junit.Test
  */
 class KeyManagerTest {
 
-    /** In-memory stand-in for the EncryptedSharedPreferences-backed store. */
-    private fun inMemorySecrets(): SecretStore {
-        val map = mutableMapOf<String, ByteArray>()
-        val store = mockk<SecretStore>()
-        every { store.getBytes(any()) } answers { map[firstArg()] }
-        every { store.putBytes(any(), any()) } answers {
-            val value = secondArg<ByteArray?>()
-            if (value == null) map.remove(firstArg())
-            else map[firstArg<String>()] = value
-        }
-        every { store.remove(any()) } answers { map.remove(firstArg<String>()) }
-        return store
+    /** Stands in for the Keystore: seals in the clear (the vault's own tests check the sealing). */
+    private class PlainSealer : KeySealer {
+        override fun seal(alias: String, plain: ByteArray): String = java.util.Base64.getEncoder().encodeToString(plain)
+        override fun open(alias: String, sealed: String): ByteArray = java.util.Base64.getDecoder().decode(sealed)
+        override fun delete(alias: String) {}
     }
+
+    /** A vault in a fresh directory of its own. */
+    private fun vault(): IdentityVault =
+        IdentityVault(java.nio.file.Files.createTempDirectory("vault").toFile(), "test", PlainSealer())
 
     private fun keyId(kp: io.bosonnetwork.crypto.Signature.KeyPair): String =
         BosonCrypto.idOf(kp).toString()
 
     @Test
     fun `ensureDeviceKey is stable across calls`() {
-        val km = KeyManager(inMemorySecrets())
+        val km = KeyManager(vault())
         assertEquals(keyId(km.ensureDeviceKey()), keyId(km.ensureDeviceKey()))
     }
 
     @Test
     fun `deviceId is null until a device key exists, then matches the device key`() {
-        val km = KeyManager(inMemorySecrets())
+        val km = KeyManager(vault())
         assertNull(km.deviceId())
         val key = km.ensureDeviceKey()
         assertEquals(keyId(key), km.deviceId()?.toString())
@@ -70,7 +66,7 @@ class KeyManagerTest {
 
     @Test
     fun `registeredNodeId round-trips and clears`() {
-        val km = KeyManager(inMemorySecrets())
+        val km = KeyManager(vault())
         assertNull(km.registeredNodeId())
         km.setRegisteredNodeId("NODE-1")
         assertEquals("NODE-1", km.registeredNodeId())
@@ -80,7 +76,7 @@ class KeyManagerTest {
 
     @Test
     fun `rotateDeviceKey produces a fresh key and clears the registered node`() {
-        val km = KeyManager(inMemorySecrets())
+        val km = KeyManager(vault())
         val before = keyId(km.ensureDeviceKey())
         km.setRegisteredNodeId("NODE-1")
 
@@ -93,7 +89,7 @@ class KeyManagerTest {
 
     @Test
     fun `ensureDeviceKeyFor keeps an unregistered key`() {
-        val km = KeyManager(inMemorySecrets())
+        val km = KeyManager(vault())
         val original = keyId(km.ensureDeviceKey())
 
         // No registered-node id: the key was never registered, so it is safe to (re)use for anyone.
@@ -103,7 +99,7 @@ class KeyManagerTest {
 
     @Test
     fun `ensureDeviceKeyFor keeps the key for the same identity`() {
-        val km = KeyManager(inMemorySecrets())
+        val km = KeyManager(vault())
         val user = keyId(km.generateUserKey())
         val original = keyId(km.ensureDeviceKey())
         km.setRegisteredNodeId("NODE-1")
@@ -114,7 +110,7 @@ class KeyManagerTest {
 
     @Test
     fun `ensureDeviceKeyFor rotates on identity change`() {
-        val km = KeyManager(inMemorySecrets())
+        val km = KeyManager(vault())
         km.generateUserKey() // current user
         val original = keyId(km.ensureDeviceKey())
         km.setRegisteredNodeId("NODE-1")
@@ -127,7 +123,7 @@ class KeyManagerTest {
 
     @Test
     fun `ensureDeviceKeyFor rotates a registered key when the adopting identity is unknown`() {
-        val km = KeyManager(inMemorySecrets())
+        val km = KeyManager(vault())
         km.generateUserKey()
         val original = keyId(km.ensureDeviceKey())
         km.setRegisteredNodeId("NODE-1")
@@ -137,7 +133,7 @@ class KeyManagerTest {
 
     @Test
     fun `clear removes user key, device key, and registered node`() {
-        val km = KeyManager(inMemorySecrets())
+        val km = KeyManager(vault())
         km.generateUserKey()
         km.ensureDeviceKey()
         km.setRegisteredNodeId("NODE-1")

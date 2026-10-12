@@ -22,13 +22,17 @@
 
 package io.bosonnetwork.photon.feature.settings.model
 
-/** The signed-in user's profile (spec 2.6). [avatarUrl] is a fetchable HTTPS URL, null when unset. */
+/**
+ * The signed-in user's profile (spec 2.6). [avatar] is the image, null when unset. Until [synced], it is
+ * the profile as this device keeps it, shown at once and offline; the account's state (plan, passphrase,
+ * recovery) is known only once the node answered.
+ */
 data class UiProfile(
     val id: String,
     val name: String,
     val bio: String,
     val email: String,
-    val avatarUrl: String?,
+    val avatar: ByteArray?,
     val plan: String?,
     /** Whether the account is protected by a passphrase (second factor); drives the security UI (M6). */
     val passphraseProtected: Boolean = false,
@@ -36,6 +40,8 @@ data class UiProfile(
     val recovery: UiRecoveryMethods? = null,
     /** The profile's revision, which an edit is made from: one made meanwhile elsewhere isn't overwritten. */
     val revision: Long = 0,
+    /** Read from the node just now, with the account's state; false for the profile as kept. */
+    val synced: Boolean = true,
 )
 
 /**

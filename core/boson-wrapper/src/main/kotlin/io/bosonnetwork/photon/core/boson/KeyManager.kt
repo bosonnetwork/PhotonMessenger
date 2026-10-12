@@ -22,72 +22,67 @@
 
 package io.bosonnetwork.photon.core.boson
 
-import io.bosonnetwork.photon.core.security.KeyStoreManager
-import io.bosonnetwork.photon.core.security.SecretStore
 import io.bosonnetwork.Id
 import io.bosonnetwork.crypto.Signature
+import io.bosonnetwork.photon.core.security.HomeNode
+import io.bosonnetwork.photon.core.security.IdentityInfo
+import io.bosonnetwork.photon.core.security.IdentityVault
+import io.bosonnetwork.photon.core.security.KeyStoreManager
 
 /**
- * Generates and persists the user and device Ed25519 keypairs (libsodium 64-byte form), wrapped at
- * rest by [SecretStore] (Android Keystore). The device key is created on first launch; the user key
- * is created during identity binding (spec 2.2-2.3, M1-5).
+ * The profile's user and device Ed25519 key pairs (libsodium 64-byte form) and what goes with them,
+ * kept in the profile's [IdentityVault]: sealed by the Android Keystore, in one record with the
+ * identity's registration, backup and card state. The device key is made on first use; the user key
+ * when the identity is made or brought in.
  *
- * Keys are returned as Boson `Signature.KeyPair` so they feed `Configuration.userKey/deviceKey` and
- * IonStore directly.
+ * Keys are returned as Boson `Signature.KeyPair` so they feed the messaging and IonStore clients
+ * directly.
  */
 class KeyManager(
-    private val secrets: SecretStore,
+    private val vault: IdentityVault,
 ) : KeyStoreManager {
 
-    fun userKeyPair(): Signature.KeyPair? =
-        secrets.getBytes(KEY_USER)?.let { BosonCrypto.keyPairFromPrivate64(it) }
+    fun userKeyPair(): Signature.KeyPair? = vault.userKey()?.let { BosonCrypto.keyPairFromPrivate64(it) }
 
-    fun deviceKeyPair(): Signature.KeyPair? =
-        secrets.getBytes(KEY_DEVICE)?.let { BosonCrypto.keyPairFromPrivate64(it) }
+    fun deviceKeyPair(): Signature.KeyPair? = vault.deviceKey()?.let { BosonCrypto.keyPairFromPrivate64(it) }
 
-    fun userId(): Id? = userKeyPair()?.let { BosonCrypto.idOf(it) }
+    fun userId(): Id? = vault.info.value.userId?.let { Id.of(it) }
 
     /** The device id (derived from the device key), or null if no device key exists yet. */
-    fun deviceId(): Id? = deviceKeyPair()?.let { BosonCrypto.idOf(it) }
+    fun deviceId(): Id? = vault.info.value.deviceId?.let { Id.of(it) }
 
-    /** Creates and persists a fresh user keypair (identity binding). Overwrites any existing one. */
-    fun generateUserKey(): Signature.KeyPair =
-        BosonCrypto.generateKeyPair().also { secrets.putBytes(KEY_USER, BosonCrypto.privateKeyBytes64(it)) }
+    /** Creates and stores a fresh user key pair. Replaces any existing one. */
+    fun generateUserKey(): Signature.KeyPair = storeUserKey(BosonCrypto.privateKeyBytes64(BosonCrypto.generateKeyPair()))
 
     /**
-     * Persists a user keypair received from another device during multi-device pairing (spec 2.4,
-     * M6-4). [privateKey64] is the libsodium 64-byte (seed || publicKey) form. Overwrites any existing.
+     * Stores a user key received from another device or a backup. [privateKey64] is the libsodium
+     * 64-byte (seed || publicKey) form. Replaces any existing one.
      */
     fun storeUserKey(privateKey64: ByteArray): Signature.KeyPair =
-        BosonCrypto.keyPairFromPrivate64(privateKey64).also { secrets.putBytes(KEY_USER, privateKey64) }
+        BosonCrypto.keyPairFromPrivate64(privateKey64).also { vault.setUserKey(privateKey64, BosonCrypto.idOf(it).toString()) }
 
     /** Stores [privateKey64] (64-byte) as this profile's device key, as a pairing registered it. */
     fun storeDeviceKey(privateKey64: ByteArray): Signature.KeyPair =
-        BosonCrypto.keyPairFromPrivate64(privateKey64).also { secrets.putBytes(KEY_DEVICE, privateKey64) }
+        BosonCrypto.keyPairFromPrivate64(privateKey64).also { vault.setDeviceKey(privateKey64, BosonCrypto.idOf(it).toString()) }
 
-    /** Returns the device keypair, generating and persisting one on first use. */
+    /** Returns the device key pair, making and storing one on first use. */
     fun ensureDeviceKey(): Signature.KeyPair =
-        deviceKeyPair() ?: BosonCrypto.generateKeyPair()
-            .also { secrets.putBytes(KEY_DEVICE, BosonCrypto.privateKeyBytes64(it)) }
+        deviceKeyPair() ?: storeDeviceKey(BosonCrypto.privateKeyBytes64(BosonCrypto.generateKeyPair()))
 
     /**
      * The base58 id of the super node this device is currently REGISTERED with, or null if it has
      * never been registered (or the key was rotated since). Set after a successful registration; used
      * to detect a node change and, by its presence, whether the current device key is registered.
      */
-    fun registeredNodeId(): String? = secrets.getBytes(KEY_REG_NODE)?.decodeToString()
+    fun registeredNodeId(): String? = vault.info.value.registeredNodeId
 
     /** Records (or clears, when null) the super node this device is registered with. */
-    fun setRegisteredNodeId(nodeId: String?) {
-        if (nodeId == null) secrets.remove(KEY_REG_NODE)
-        else secrets.putBytes(KEY_REG_NODE, nodeId.encodeToByteArray())
-    }
+    fun setRegisteredNodeId(nodeId: String?) = vault.update { it.copy(registeredNodeId = nodeId) }
 
-    /** Generates and persists a FRESH device keypair; a rotated key is by definition not registered. */
+    /** Makes and stores a FRESH device key pair; a rotated key is by definition not registered. */
     fun rotateDeviceKey(): Signature.KeyPair {
-        secrets.remove(KEY_REG_NODE)
-        return BosonCrypto.generateKeyPair()
-            .also { secrets.putBytes(KEY_DEVICE, BosonCrypto.privateKeyBytes64(it)) }
+        vault.update { it.copy(registeredNodeId = null) }
+        return storeDeviceKey(BosonCrypto.privateKeyBytes64(BosonCrypto.generateKeyPair()))
     }
 
     /**
@@ -103,73 +98,58 @@ class KeyManager(
         else -> rotateDeviceKey()                              // different (or unknown) identity: rotate
     }
 
-    override fun hasUserKey(): Boolean = secrets.getBytes(KEY_USER) != null
+    override fun hasUserKey(): Boolean = vault.info.value.userId != null
 
     /**
      * True while the backup of an identity created on this device hasn't been checked: the user saved it
      * (or said they would) but didn't yet show they can read it back. Settings reminds them until then.
      * An imported or paired identity has its backup elsewhere and never sets it.
      */
-    fun isBackupPending(): Boolean = secrets.getBytes(KEY_BACKUP_PENDING) != null
+    fun isBackupPending(): Boolean = vault.info.value.backupPending
+
+    /** Marks the backup of this profile's identity as waiting for its check, or as checked. */
+    fun setBackupPending(pending: Boolean) = vault.update { it.copy(backupPending = pending) }
 
     /**
      * The version of the profile card this device last published for the identity, or null when it never
      * did. Kept after the card is unpublished: a later card must still be newer than any version resolvers
      * may remember.
      */
-    fun cardVersion(): Int? = secrets.getBytes(KEY_CARD_VERSION)?.decodeToString()?.toIntOrNull()
+    fun cardVersion(): Int? = vault.info.value.cardVersion
 
-    fun setCardVersion(version: Int) {
-        secrets.putBytes(KEY_CARD_VERSION, version.toString().encodeToByteArray())
-    }
+    fun setCardVersion(version: Int) = vault.update { it.copy(cardVersion = version) }
 
-    /** Marks the backup of this profile's identity as waiting for its check, or as checked. */
-    fun setBackupPending(pending: Boolean) {
-        if (pending) secrets.putBytes(KEY_BACKUP_PENDING, byteArrayOf(1))
-        else secrets.remove(KEY_BACKUP_PENDING)
-    }
-
-    override fun clear() {
-        secrets.remove(KEY_USER)
-        secrets.remove(KEY_DEVICE)
-        secrets.remove(KEY_REG_NODE)
-        secrets.remove(KEY_BACKUP_PENDING)
-        secrets.remove(KEY_CARD_VERSION)
-    }
+    override fun clear() = vault.clear()
 
     companion object {
-        private const val KEY_USER = "user_key_64"
-        private const val KEY_DEVICE = "device_key_64"
-        private const val KEY_REG_NODE = "reg_node_id"
-        private const val KEY_BACKUP_PENDING = "backup_pending"
-        private const val KEY_CARD_VERSION = "card_version"
-
         /**
-         * Durably writes identity material into an ARBITRARY profile's [secrets] store, for seeding a
-         * target profile just before an app relaunch (multi-profile handoff of a self-sovereign identity
-         * whose key the target profile does not yet hold). Mirrors the session seeding in
-         * [io.bosonnetwork.photon.core.security.EncryptedSessionStore.seedDurably]. [devicePrivateKey64]
-         * and [registeredNodeId] are seeded only when non-null: a fresh device that must register itself
-         * on the target passes null for both so no stale registration marker is carried over.
+         * Writes an identity into ANOTHER profile's [vault], seeding it just before an app relaunch (the
+         * handoff of an identity the target profile does not hold yet), with the node it uses. The record
+         * is on disk when this returns. [devicePrivateKey64] and [registeredNodeId] are given only together:
+         * a device that must register itself on the target passes null for both, so that no stale
+         * registration is carried over.
          */
         fun seedInto(
-            secrets: SecretStore,
+            vault: IdentityVault,
             userPrivateKey64: ByteArray,
             devicePrivateKey64: ByteArray?,
             registeredNodeId: String?,
+            homeNode: HomeNode?,
             backupPending: Boolean = false,
         ) {
-            secrets.putBytes(KEY_USER, userPrivateKey64, commit = true)
-            devicePrivateKey64?.let { secrets.putBytes(KEY_DEVICE, it, commit = true) }
-            registeredNodeId?.let { secrets.putBytes(KEY_REG_NODE, it.encodeToByteArray(), commit = true) }
-            if (backupPending)
-                secrets.putBytes(KEY_BACKUP_PENDING, byteArrayOf(1), commit = true)
+            val userId = BosonCrypto.idOf(BosonCrypto.keyPairFromPrivate64(userPrivateKey64)).toString()
+            val deviceId = devicePrivateKey64?.let { BosonCrypto.idOf(BosonCrypto.keyPairFromPrivate64(it)).toString() }
+            vault.store(
+                IdentityInfo(
+                    userId = userId,
+                    deviceId = deviceId,
+                    homeNode = homeNode,
+                    registeredNodeId = registeredNodeId.takeIf { devicePrivateKey64 != null },
+                    backupPending = backupPending,
+                ),
+                userPrivateKey64,
+                devicePrivateKey64,
+            )
         }
-
-        /**
-         * Reads the 64-byte user private key from an ARBITRARY profile's [secrets] store (null when that
-         * profile has no identity yet). Used to mint a fresh session from a reused profile's own key.
-         */
-        fun readUserKey(secrets: SecretStore): ByteArray? = secrets.getBytes(KEY_USER)
     }
 }

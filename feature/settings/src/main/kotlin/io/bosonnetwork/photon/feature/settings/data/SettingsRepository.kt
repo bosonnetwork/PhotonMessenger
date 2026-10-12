@@ -26,10 +26,10 @@ import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.bosonnetwork.director.client.ProfileUpdate
 import io.bosonnetwork.photon.core.boson.BosonSessionManager
-import io.bosonnetwork.photon.core.boson.DirectorAvatars
 import io.bosonnetwork.photon.core.boson.DirectorClients
 import io.bosonnetwork.photon.core.boson.CardState
 import io.bosonnetwork.photon.core.boson.KeyManager
+import io.bosonnetwork.photon.core.boson.OwnProfileStore
 import io.bosonnetwork.photon.core.boson.ProfileCards
 import io.bosonnetwork.photon.core.boson.awaitResult
 import io.bosonnetwork.photon.core.boson.toDirectorError
@@ -52,6 +52,8 @@ import javax.inject.Singleton
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.future.await
 
 /**
@@ -66,6 +68,10 @@ interface SettingsRepository {
     val themePreferences: Flow<ThemePreferences>
     val notificationPreferences: Flow<NotificationPreferences>
 
+    /** The profile as this device keeps it, at once and offline; null before the node first gave it. */
+    val keptProfile: Flow<UiProfile?> get() = flowOf(null)
+
+    /** Reads the profile from the node, and keeps it (with its avatar) on this device. */
     suspend fun loadProfile(): Result<UiProfile>
 
     /**
@@ -146,6 +152,7 @@ class SettingsRepositoryImpl @Inject constructor(
     private val session: BosonSessionManager,
     private val avatarPreparer: AvatarPreparer,
     private val cards: ProfileCards,
+    private val ownProfile: OwnProfileStore,
     @ApplicationContext private val context: Context,
 ) : SettingsRepository {
 
@@ -157,19 +164,33 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override val notificationPreferences: Flow<NotificationPreferences> = notificationStore.preferences
 
-    override suspend fun loadProfile(): Result<UiProfile> = runCatching {
-        val profile = director().profile.await()
-        val id = profile.id.toString()
-        // Bust the image cache when the profile changes.
-        val avatarUrl = profile.avatar.orElse(null)?.takeIf { it.isNotBlank() }?.let {
-            DirectorAvatars.uri(id, profile.updatedAt)
+    override val keptProfile: Flow<UiProfile?> = ownProfile.kept.map { kept ->
+        kept?.let {
+            UiProfile(
+                id = it.userId,
+                name = it.name.orEmpty(),
+                bio = it.bio.orEmpty(),
+                email = it.email.orEmpty(),
+                avatar = it.avatar,
+                plan = null,
+                revision = it.revision,
+                synced = false,
+            )
         }
+    }
+
+    override suspend fun loadProfile(): Result<UiProfile> = runCatching {
+        val client = director()
+        val profile = client.profile.await()
+        // Kept on this device first, the avatar too: the screen shows the image as kept.
+        ownProfile.keep(profile, client)
+        val hasAvatar = profile.avatar.orElse(null)?.isNotBlank() == true
         UiProfile(
-            id = id,
+            id = profile.id.toString(),
             name = profile.name.orElse(""),
             bio = profile.bio.orElse(""),
             email = profile.email.orElse(""),
-            avatarUrl = avatarUrl,
+            avatar = ownProfile.avatar().takeIf { hasAvatar },
             plan = profile.planName,
             passphraseProtected = profile.isPassphraseProtected,
             recovery = loadRecoveryMethods(),

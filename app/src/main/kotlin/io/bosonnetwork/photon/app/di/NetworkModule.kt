@@ -29,6 +29,7 @@ import io.bosonnetwork.photon.core.boson.DirectorClients
 import io.bosonnetwork.photon.core.boson.DirectorProfileResolver
 import io.bosonnetwork.photon.core.boson.KeyManager
 import io.bosonnetwork.photon.core.boson.ProfileCards
+import io.bosonnetwork.photon.core.security.IdentityVault
 import io.bosonnetwork.photon.core.security.ProfileManager
 import io.bosonnetwork.photon.core.model.ProfileResolver
 import io.bosonnetwork.photon.core.network.DirectorConfigStore
@@ -56,8 +57,7 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideDirectorConfigStore(dataStore: DataStore<Preferences>): DirectorConfigStore =
-        DirectorConfigStore(dataStore)
+    fun provideDirectorConfigStore(vault: IdentityVault): DirectorConfigStore = DirectorConfigStore(vault)
 
     @Provides
     @Singleton

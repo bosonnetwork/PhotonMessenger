@@ -246,16 +246,19 @@ fun SettingsScreen(
                     )
                     HorizontalDivider()
 
-                    SectionTitle(stringResource(R.string.settings_section_security))
-                    PassphraseSection(
-                        protected = state.profile?.passphraseProtected == true,
-                        recovery = state.profile?.recovery,
-                        onSet = { showSetPassphrase = true },
-                        onRemove = { showRemovePassphrase = true },
-                        onNewRecoveryCodes = { showNewRecoveryCodes = true },
-                        onForgot = { showForgot = true },
-                    )
-                    HorizontalDivider()
+                    // The account's passphrase is known only once the node answered.
+                    if (state.profile?.synced == true) {
+                        SectionTitle(stringResource(R.string.settings_section_security))
+                        PassphraseSection(
+                            protected = state.profile?.passphraseProtected == true,
+                            recovery = state.profile?.recovery,
+                            onSet = { showSetPassphrase = true },
+                            onRemove = { showRemovePassphrase = true },
+                            onNewRecoveryCodes = { showNewRecoveryCodes = true },
+                            onForgot = { showForgot = true },
+                        )
+                        HorizontalDivider()
+                    }
 
                     ListItem(
                         headlineContent = { Text(stringResource(R.string.settings_sessions_title)) },
@@ -835,14 +838,16 @@ private fun ProfileHeader(
         Modifier.fillMaxWidth().padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        // Changing the profile needs the node: until it answered, the profile as kept is only shown.
+        val editable = profile?.synced == true
         val changePhotoContentDescription = stringResource(R.string.settings_change_photo_content_description)
         PhotonAvatar(
-            model = profile?.avatarUrl,
+            model = profile?.avatar,
             name = profile?.name,
             size = 96.dp,
             contentDescription = changePhotoContentDescription,
             modifier = Modifier
-                .clickable(onClick = onChangePhoto)
+                .clickable(enabled = editable, onClick = onChangePhoto)
                 .semantics { contentDescription = changePhotoContentDescription },
         )
         Spacer(Modifier.height(8.dp))
@@ -867,9 +872,9 @@ private fun ProfileHeader(
         }
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onEdit) { Text(stringResource(R.string.settings_edit_profile_action)) }
-            if (profile?.avatarUrl != null) {
-                TextButton(onClick = onRemovePhoto) { Text(stringResource(R.string.settings_remove_photo_action)) }
+            OutlinedButton(onClick = onEdit, enabled = editable) { Text(stringResource(R.string.settings_edit_profile_action)) }
+            if (profile?.avatar != null) {
+                TextButton(onClick = onRemovePhoto, enabled = editable) { Text(stringResource(R.string.settings_remove_photo_action)) }
             }
         }
     }

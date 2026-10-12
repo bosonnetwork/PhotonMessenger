@@ -22,6 +22,8 @@ android {
 
 dependencies {
     api(project(":core:model"))
+    // The home node is part of the profile's identity record.
+    implementation(project(":core:security"))
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.datastore.preferences)

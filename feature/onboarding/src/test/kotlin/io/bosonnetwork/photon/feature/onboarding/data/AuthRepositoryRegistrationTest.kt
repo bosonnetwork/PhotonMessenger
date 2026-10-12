@@ -23,9 +23,6 @@
 package io.bosonnetwork.photon.feature.onboarding.data
 
 import android.content.Context
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
-import androidx.datastore.preferences.core.Preferences
 import io.bosonnetwork.Id
 import io.bosonnetwork.photon.core.boson.BosonCrypto
 import io.bosonnetwork.photon.core.boson.DirectorClients
@@ -34,12 +31,11 @@ import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.core.model.SessionStore
 import io.bosonnetwork.photon.core.network.DirectorConfigStore
 import io.bosonnetwork.photon.core.security.ProfileManager
-import io.bosonnetwork.photon.core.security.SecretStore
-import io.mockk.every
+import io.bosonnetwork.photon.core.security.IdentityVault
+import io.bosonnetwork.photon.core.security.KeySealer
 import io.mockk.mockk
 import io.vertx.core.Vertx
 import io.vertx.core.http.HttpServer
-import java.io.File
 import java.security.SecureRandom
 import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
@@ -109,17 +105,11 @@ class AuthRepositoryRegistrationTest {
         override suspend fun clear() { session = null }
     }
 
-    private fun inMemorySecrets(): SecretStore {
-        val map = mutableMapOf<String, ByteArray>()
-        val store = mockk<SecretStore>()
-        every { store.getBytes(any()) } answers { map[firstArg()] }
-        every { store.putBytes(any(), any()) } answers {
-            val value = secondArg<ByteArray?>()
-            if (value == null) map.remove(firstArg())
-            else map[firstArg<String>()] = value
-        }
-        every { store.remove(any()) } answers { map.remove(firstArg<String>()) }
-        return store
+    /** Stands in for the Keystore: seals in the clear (the vault's own tests check the sealing). */
+    private class PlainSealer : KeySealer {
+        override fun seal(alias: String, plain: ByteArray): String = java.util.Base64.getEncoder().encodeToString(plain)
+        override fun open(alias: String, sealed: String): ByteArray = java.util.Base64.getDecoder().decode(sealed)
+        override fun delete(alias: String) {}
     }
 
     @Before
@@ -137,11 +127,9 @@ class AuthRepositoryRegistrationTest {
         }.listen(0, "127.0.0.1").toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS)
 
         scope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher())
-        val dataStore: DataStore<Preferences> = PreferenceDataStoreFactory.create(scope = scope) {
-            File(tmp.root, "auth_test.preferences_pb")
-        }
-        keyManager = KeyManager(inMemorySecrets())
-        configStore = DirectorConfigStore(dataStore)
+        val vault = IdentityVault(tmp.newFolder("identity"), "test", PlainSealer())
+        keyManager = KeyManager(vault)
+        configStore = DirectorConfigStore(vault)
         profileManager = ProfileManager(tmp.newFolder("files"), tmp.newFolder("cache"))
         sessionStore = FakeSessionStore()
         repository = AuthRepository(

@@ -23,7 +23,6 @@
 package io.bosonnetwork.photon.app
 
 import android.content.Context
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.bosonnetwork.photon.app.navigation.Routes
@@ -34,7 +33,12 @@ import io.bosonnetwork.photon.core.boson.KeyManager
 import io.bosonnetwork.photon.core.boson.UnreadTracker
 import io.bosonnetwork.photon.core.model.SessionStore
 import io.bosonnetwork.photon.core.network.DirectorConfigStore
+import io.bosonnetwork.photon.app.account.Account
+import io.bosonnetwork.photon.core.security.AvatarStore
 import io.bosonnetwork.photon.core.security.EncryptedSessionStore
+import io.bosonnetwork.photon.core.security.HomeNode
+import io.bosonnetwork.photon.core.security.IdentityVault
+import io.bosonnetwork.photon.core.security.KeySealer
 import io.bosonnetwork.photon.core.security.Profile
 import io.bosonnetwork.photon.core.security.ProfileManager
 import io.bosonnetwork.photon.core.security.SecretStore
@@ -44,7 +48,7 @@ import io.bosonnetwork.photon.feature.onboarding.data.NodeMigration
 import io.bosonnetwork.photon.feature.onboarding.data.ProfileSeed
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.io.File
+import java.net.URI
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
@@ -76,6 +80,7 @@ class AppViewModel @Inject constructor(
     private val sessionStore: SessionStore,
     private val configStore: DirectorConfigStore,
     private val authRepository: AuthRepository,
+    private val sealer: KeySealer,
 ) : ViewModel() {
 
     /**
@@ -109,6 +114,7 @@ class AppViewModel @Inject constructor(
         // Drop transient onboarding leftovers (unbound, non-active profiles) and their secrets prefs.
         profileManager.gcUnboundInactiveProfiles().forEach {
             appContext.deleteSharedPreferences(profileManager.secretsFileNameFor(it))
+            sealer.delete(IdentityVault.aliasFor(it))
         }
         if (authRepository.isReady()) {
             sessionController.ensureConnected()
@@ -123,6 +129,21 @@ class AppViewModel @Inject constructor(
 
     /** The profiles available on this device, and which one is active (for the account switcher). */
     fun profiles(): List<Profile> = profileManager.listProfiles()
+
+    /**
+     * The profiles as the account list shows them: each with its identity's name, home node and avatar,
+     * read from the profile's own record and avatar file (another profile's too, without opening it).
+     */
+    fun accounts(): List<Account> = profileManager.listProfiles().map { profile ->
+        val dir = profileManager.filesRootFor(profile.id)
+        val info = IdentityVault.readInfo(dir)
+        Account(
+            profile = profile,
+            name = info?.profile?.name,
+            nodeHost = info?.homeNode?.url?.let { url -> runCatching { URI(url).host }.getOrNull() ?: url },
+            avatar = AvatarStore.read(dir)?.data?.takeIf { info?.profile?.hasAvatar == true },
+        )
+    }
     fun activeProfileId(): String = profileManager.activeProfileId()
 
     /** Called after onboarding completes (sign-in or identity bind) to bring the session up. */
@@ -180,35 +201,31 @@ class AppViewModel @Inject constructor(
             val cfg = configStore.config.first()
             val targetId = existingProfileId ?: profileManager.createProfile()
             val secrets = SecretStore(appContext, profileManager.secretsFileNameFor(targetId))
+            val vault = vaultOf(targetId)
+            // The node the identity was just brought in through is the target's.
+            val node = HomeNode(cfg.baseUrl, cfg.nodeId)
             if (seed != null) {
                 EncryptedSessionStore(secrets).seedDurably(seed.userId)
                 KeyManager.seedInto(
-                    secrets, seed.userPrivateKey64, seed.devicePrivateKey64, seed.registeredNodeId, seed.backupPending,
+                    vault, seed.userPrivateKey64, seed.devicePrivateKey64, seed.registeredNodeId, node, seed.backupPending,
                 )
                 profileManager.bindUserId(targetId, seed.userId, seed.displayName, seed.registeredNodeId)
             } else {
                 // Reuse: the target already holds its key + device; sign in with that key so it comes up
                 // ready (never through OAuth).
-                KeyManager.readUserKey(secrets)?.let { key ->
+                vault.update { it.copy(homeNode = node) }
+                vault.userKey()?.let { key ->
                     runCatching { authRepository.signInWith(key) }
                         .onSuccess { EncryptedSessionStore(secrets).seedDurably(it) }
                 }
             }
-            seedDirectorConfig(targetId, cfg.baseUrl, cfg.nodeId)
             profileManager.setActive(targetId)
             AppRelauncher.relaunch(appContext)
         }
     }
 
-    /** Writes the Director base URL + pin node id into a target profile's settings (merges, not clobbers). */
-    private suspend fun seedDirectorConfig(id: String, baseUrl: String, nodeId: String?) {
-        val dataStore = PreferenceDataStoreFactory.create {
-            File(profileManager.filesRootFor(id), "settings.preferences_pb")
-        }
-        val configStore = DirectorConfigStore(dataStore)
-        configStore.setBaseUrl(baseUrl)
-        configStore.setNodeId(nodeId)
-    }
+    // Another profile's identity record and keys; never the active one's, which the app holds.
+    private fun vaultOf(id: String) = IdentityVault(profileManager.filesRootFor(id), IdentityVault.aliasFor(id), sealer)
 
     /** Creates a fresh profile and relaunches into onboarding for a new identity. */
     fun addAccount() {
@@ -230,7 +247,7 @@ class AppViewModel @Inject constructor(
             val secrets = SecretStore(appContext, profileManager.secretsFileNameFor(id))
             val store = EncryptedSessionStore(secrets)
             if (store.currentSession() == null) {
-                KeyManager.readUserKey(secrets)?.let { key ->
+                vaultOf(id).userKey()?.let { key ->
                     runCatching { authRepository.signInWith(key) }
                         .onSuccess { store.seedDurably(it) }
                 }
@@ -252,7 +269,7 @@ class AppViewModel @Inject constructor(
             val secrets = SecretStore(appContext, profileManager.secretsFileNameFor(id))
             val store = EncryptedSessionStore(secrets)
             if (store.currentSession() == null) {
-                KeyManager.readUserKey(secrets)?.let { key ->
+                vaultOf(id).userKey()?.let { key ->
                     runCatching { authRepository.signInWith(key) }
                         .onSuccess { store.seedDurably(it) }
                 }
@@ -267,6 +284,7 @@ class AppViewModel @Inject constructor(
         val wasActive = id == profileManager.activeProfileId()
         profileManager.deleteProfile(id)
         appContext.deleteSharedPreferences(profileManager.secretsFileNameFor(id))
+        sealer.delete(IdentityVault.aliasFor(id))
         if (wasActive) {
             val next = profileManager.listProfiles().firstOrNull()?.id ?: profileManager.createProfile()
             profileManager.setActive(next)

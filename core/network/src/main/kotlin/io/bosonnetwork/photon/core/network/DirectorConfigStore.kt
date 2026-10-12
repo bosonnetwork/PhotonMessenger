@@ -22,30 +22,31 @@
 
 package io.bosonnetwork.photon.core.network
 
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
+import io.bosonnetwork.photon.core.security.HomeNode
+import io.bosonnetwork.photon.core.security.IdentityVault
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 
 /**
- * Persists the Director base URL (default + advanced override, M1-1) in DataStore and exposes it as
- * a [DirectorConfig]. The default endpoint is a deployment decision (spec D-2) and is overridable in
- * advanced settings.
+ * The Director of the profile's home node, as a [DirectorConfig]: kept in the profile's identity record
+ * ([IdentityVault]), where onboarding sets it before an identity is chosen. A profile that hasn't chosen
+ * one yet has [DEFAULT_DIRECTOR_URL].
  */
 class DirectorConfigStore(
-    private val dataStore: DataStore<Preferences>,
+    private val vault: IdentityVault,
 ) {
-    val config: Flow<DirectorConfig> = dataStore.data.map { prefs ->
+    val config: Flow<DirectorConfig> = vault.info.map { info ->
         DirectorConfig(
-            baseUrl = prefs[BASE_URL]?.trimEnd('/') ?: DEFAULT_DIRECTOR_URL,
-            nodeId = prefs[NODE_ID]?.takeIf { it.isNotBlank() },
+            baseUrl = info.homeNode?.url ?: DEFAULT_DIRECTOR_URL.trimEnd('/'),
+            nodeId = info.homeNode?.nodeId,
         )
-    }
+    }.distinctUntilChanged()
 
-    suspend fun setBaseUrl(baseUrl: String) {
-        dataStore.edit { it[BASE_URL] = baseUrl.trim().trimEnd('/') }
+    suspend fun setBaseUrl(baseUrl: String) = withContext(Dispatchers.IO) {
+        vault.update { it.copy(homeNode = HomeNode(baseUrl.trim().trimEnd('/'), it.homeNode?.nodeId)) }
     }
 
     /**
@@ -53,15 +54,14 @@ class DirectorConfigStore(
      * certificate (see [DirectorConfig.nodeId]). A self-signed Director requires this; a Director
      * fronted by a real CA certificate does not.
      */
-    suspend fun setNodeId(nodeId: String?) {
-        dataStore.edit {
-            if (nodeId.isNullOrBlank()) it.remove(NODE_ID) else it[NODE_ID] = nodeId.trim()
+    suspend fun setNodeId(nodeId: String?) = withContext(Dispatchers.IO) {
+        vault.update {
+            val url = it.homeNode?.url ?: DEFAULT_DIRECTOR_URL.trimEnd('/')
+            it.copy(homeNode = HomeNode(url, nodeId?.trim()?.ifBlank { null }))
         }
     }
 
     companion object {
         const val DEFAULT_DIRECTOR_URL = "https://your.super.node/"
-        private val BASE_URL = stringPreferencesKey("director_base_url")
-        private val NODE_ID = stringPreferencesKey("director_node_id")
     }
 }
