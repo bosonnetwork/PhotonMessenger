@@ -45,8 +45,12 @@ dependencies {
     api(libs.boson.ion.store.client) {
         exclude(group = "ch.qos.logback")
     }
-    // All Director communication (client API, OAuth sign-in, device pairing).
+    // All Director communication (client API, device pairing).
     api(libs.boson.director.client) {
+        exclude(group = "ch.qos.logback")
+    }
+    // The home node's web gateway: publishes the profile card to the DHT through it.
+    implementation(libs.boson.higgs) {
         exclude(group = "ch.qos.logback")
     }
     // slf4j 2.x binding for Android (writes to System.err, which logcat picks up). A logcat-native

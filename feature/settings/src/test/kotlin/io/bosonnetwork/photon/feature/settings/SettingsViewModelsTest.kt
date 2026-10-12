@@ -24,6 +24,8 @@ package io.bosonnetwork.photon.feature.settings
 
 import android.content.Context
 import app.cash.turbine.test
+import io.bosonnetwork.director.client.exceptions.ProfileChangedException
+import io.bosonnetwork.photon.core.boson.CardState
 import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.core.model.NotificationPreferences
 import io.bosonnetwork.photon.core.model.ThemeMode
@@ -59,6 +61,7 @@ class SettingsViewModelsTest {
      */
     private fun fakeContext(): Context = mockk(relaxed = true) {
         every { getString(R.string.settings_wrong_passphrase) } returns "Wrong passphrase"
+        every { getString(R.string.settings_profile_changed_elsewhere) } returns "Changed elsewhere"
         every { getString(any(), any()) } answers {
             // The vararg formatArgs parameter arrives as its raw Array<out Any?> at this position;
             // unwrap it so the reason text ends up directly in the returned message.
@@ -79,12 +82,13 @@ class SettingsViewModelsTest {
         var removeResult: Result<Unit> = Result.success(Unit),
         var passphraseResult: Result<Unit> = Result.success(Unit),
         var codesResult: Result<List<String>> = Result.success(listOf("AAAA-BBBB-CCCC-DDDD")),
-        var redeemResult: Result<String> = Result.success("grant-1"),
-        var resetResult: Result<Unit> = Result.success(Unit),
+        var card: Result<CardState> = Result.success(CardState.NotPublished),
     ) : SettingsRepository {
         var codesPassphrase: String? = null
-        var redeemedCode: String? = null
-        var resetArgs: Pair<String, String>? = null
+        var editRevision: Long? = null
+        var profileLoads = 0
+        var cardRefreshes = 0
+        var cardPublishes = 0
         var lastThemeMode: ThemeMode? = null
         var notificationsEnabled: Boolean? = null
         var signedOut = false
@@ -96,20 +100,24 @@ class SettingsViewModelsTest {
 
         override val themePreferences = theme
         override val notificationPreferences = MutableStateFlow(NotificationPreferences())
-        override suspend fun loadProfile() = profile
-        override suspend fun updateProfile(name: String?, bio: String?, email: String?, passphrase: String?) =
-            actionResult
-        override suspend fun updateAvatar(uriString: String) = actionResult
-        override suspend fun removeAvatar() = actionResult
+        override suspend fun loadProfile() = profile.also { profileLoads++ }
+        override suspend fun updateProfile(name: String?, bio: String?, email: String?, passphrase: String?, revision: Long) =
+            actionResult.also { editRevision = revision }
+        override suspend fun updateAvatar(uriString: String, revision: Long) = actionResult.also { editRevision = revision }
+        override suspend fun removeAvatar(revision: Long) = actionResult.also { editRevision = revision }
+        override suspend fun cardState() = card
+        override suspend fun publishCard() = actionResult.also {
+            cardPublishes++
+            card = Result.success(CardState.Published(cardPublishes, outdated = false))
+        }
+        override suspend fun refreshCard() = Result.success(true).also { cardRefreshes++ }
+        override suspend fun unpublishCard() = actionResult.also { card = Result.success(CardState.NotPublished) }
         override suspend fun setPassphrase(newPassphrase: String, currentPassphrase: String?) =
             passphraseResult.also { setPassphraseArgs = newPassphrase to currentPassphrase }
         override suspend fun clearPassphrase(currentPassphrase: String) =
             passphraseResult.also { clearedPassphrase = currentPassphrase }
         override suspend fun makeRecoveryCodes(passphrase: String) =
             codesResult.also { codesPassphrase = passphrase }
-        override suspend fun redeemRecoveryCode(code: String) = redeemResult.also { redeemedCode = code }
-        override suspend fun resetPassphrase(grant: String, newPassphrase: String) =
-            resetResult.also { resetArgs = grant to newPassphrase }
         override suspend fun portalUrl() = "https://node.example/portal/"
         override suspend fun loadSessions() = sessions
         override suspend fun loadDevices() = devices
@@ -124,7 +132,7 @@ class SettingsViewModelsTest {
         override suspend fun signOut() = actionResult.also { signedOut = true }
 
         companion object {
-            val SAMPLE_PROFILE = UiProfile("id1", "Alice", "hi there", "a@b.co", null, "Free")
+            val SAMPLE_PROFILE = UiProfile("id1", "Alice", "hi there", "a@b.co", null, "Free", revision = 7)
         }
     }
 
@@ -267,40 +275,65 @@ class SettingsViewModelsTest {
     }
 
     @Test
-    fun `a forgotten passphrase is reset with a recovery code`() = runTest {
+    fun `profile edits are made from the revision shown`() = runTest {
         val repo = FakeSettingsRepo(themeFlow)
         val vm = SettingsViewModel(repo, fakeContext())
-        vm.openForgotPassphrase()
-        vm.forgotWithRecoveryCode()
-        vm.redeemRecoveryCode("aaaa bbbb cccc dddd")
-        assertEquals("aaaa bbbb cccc dddd", repo.redeemedCode)
-        assertEquals(ForgotPassphraseStep.NewPassphrase, vm.forgot.value?.step)
-        vm.resetPassphrase("third passphrase")
-        assertEquals("grant-1" to "third passphrase", repo.resetArgs)
-        assertEquals(null, vm.forgot.value)
+        vm.saveProfile("a", "b", "c")
+        assertEquals(7L, repo.editRevision)
+        repo.editRevision = null
+        vm.removeAvatar()
+        assertEquals(7L, repo.editRevision)
     }
 
     @Test
-    fun `a wrong recovery code keeps the code step with an error`() = runTest {
-        val repo = FakeSettingsRepo(themeFlow, redeemResult = Result.failure(AppError.Forbidden("Invalid recovery code")))
+    fun `a profile changed elsewhere is reloaded, not overwritten`() = runTest {
+        val changed = AppError.Conflict("changed", ProfileChangedException("changed"))
+        val repo = FakeSettingsRepo(themeFlow, actionResult = Result.failure(changed))
         val vm = SettingsViewModel(repo, fakeContext())
-        vm.openForgotPassphrase()
-        vm.forgotWithRecoveryCode()
-        vm.redeemRecoveryCode("nope")
-        assertEquals(ForgotPassphraseStep.Code, vm.forgot.value?.step)
-        assertTrue(vm.forgot.value?.error != null)
+        val loads = repo.profileLoads
+        vm.messages.test {
+            vm.updateAvatar("content://photo")
+            assertEquals("Changed elsewhere", awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(loads + 1, repo.profileLoads)
     }
 
     @Test
-    fun `an expired reset grant goes back to the code step`() = runTest {
-        val repo = FakeSettingsRepo(themeFlow, resetResult = Result.failure(AppError.Unauthorized("expired")))
+    fun `the card shows whether it is published and up to date`() = runTest {
+        val repo = FakeSettingsRepo(themeFlow, card = Result.success(CardState.Published(3, outdated = true)))
         val vm = SettingsViewModel(repo, fakeContext())
-        vm.openForgotPassphrase()
-        vm.forgotWithRecoveryCode()
-        vm.redeemRecoveryCode("code")
-        vm.resetPassphrase("third passphrase")
-        assertEquals(ForgotPassphraseStep.Code, vm.forgot.value?.step)
-        assertEquals(null, vm.forgot.value?.grant)
+        assertEquals(ProfileCardUi.Status.Outdated, vm.card.value.status)
+        vm.publishCard()
+        assertEquals(ProfileCardUi.Status.On, vm.card.value.status)
+        vm.unpublishCard()
+        assertEquals(ProfileCardUi.Status.Off, vm.card.value.status)
+    }
+
+    @Test
+    fun `a node without a web gateway shows the card unavailable`() = runTest {
+        val repo = FakeSettingsRepo(themeFlow, card = Result.failure(AppError.NotFound("no gateway")))
+        val vm = SettingsViewModel(repo, fakeContext())
+        assertEquals(ProfileCardUi.Status.Unavailable, vm.card.value.status)
+    }
+
+    @Test
+    fun `a published card follows a profile edit`() = runTest {
+        val repo = FakeSettingsRepo(themeFlow, card = Result.success(CardState.Published(0, outdated = false)))
+        val vm = SettingsViewModel(repo, fakeContext())
+        vm.saveProfile("a", "b", "c")
+        assertEquals(1, repo.cardRefreshes)
+        vm.removeAvatar()
+        assertEquals(2, repo.cardRefreshes)
+    }
+
+    @Test
+    fun `a card that is off stays off after a profile edit`() = runTest {
+        val repo = FakeSettingsRepo(themeFlow)
+        val vm = SettingsViewModel(repo, fakeContext())
+        vm.saveProfile("a", "b", "c")
+        assertEquals(0, repo.cardRefreshes)
+        assertEquals(0, repo.cardPublishes)
     }
 
     @Test

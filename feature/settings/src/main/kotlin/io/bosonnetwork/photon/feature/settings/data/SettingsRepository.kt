@@ -28,7 +28,9 @@ import io.bosonnetwork.director.client.ProfileUpdate
 import io.bosonnetwork.photon.core.boson.BosonSessionManager
 import io.bosonnetwork.photon.core.boson.DirectorAvatars
 import io.bosonnetwork.photon.core.boson.DirectorClients
+import io.bosonnetwork.photon.core.boson.CardState
 import io.bosonnetwork.photon.core.boson.KeyManager
+import io.bosonnetwork.photon.core.boson.ProfileCards
 import io.bosonnetwork.photon.core.boson.awaitResult
 import io.bosonnetwork.photon.core.boson.toDirectorError
 import io.bosonnetwork.photon.core.model.AppError
@@ -67,12 +69,30 @@ interface SettingsRepository {
     suspend fun loadProfile(): Result<UiProfile>
 
     /**
-     * Updates any subset of {name, bio, email}. [passphrase] is required only when the account has a
-     * passphrase configured; a wrong/missing one fails with [AppError.Forbidden]/[AppError.PassphraseRequired].
+     * Updates any subset of {name, bio, email}, made from the profile at [revision]. [passphrase] is
+     * required only when the account has a passphrase configured; a wrong/missing one fails with
+     * [AppError.Forbidden]/[AppError.PassphraseRequired]. A profile changed meanwhile elsewhere (another
+     * device, Boson Identity) fails with [AppError.Conflict] and is left as it is.
      */
-    suspend fun updateProfile(name: String?, bio: String?, email: String?, passphrase: String?): Result<Unit>
-    suspend fun updateAvatar(uriString: String): Result<Unit>
-    suspend fun removeAvatar(): Result<Unit>
+    suspend fun updateProfile(name: String?, bio: String?, email: String?, passphrase: String?, revision: Long): Result<Unit>
+
+    /** Sets the avatar, made from the profile at [revision]; see [updateProfile] for a conflict. */
+    suspend fun updateAvatar(uriString: String, revision: Long): Result<Unit>
+
+    /** Removes the avatar, made from the profile at [revision]; see [updateProfile] for a conflict. */
+    suspend fun removeAvatar(revision: Long): Result<Unit>
+
+    /** The public profile card's state, against the profile now. */
+    suspend fun cardState(): Result<CardState>
+
+    /** Publishes the profile as the public profile card. */
+    suspend fun publishCard(): Result<Unit>
+
+    /** Publishes the card again if one is published and out of date; returns whether it did. */
+    suspend fun refreshCard(): Result<Boolean>
+
+    /** Stops publishing the public profile card. */
+    suspend fun unpublishCard(): Result<Unit>
 
     /** Sets the first passphrase or changes an existing one; pass [currentPassphrase] when one is set. */
     suspend fun setPassphrase(newPassphrase: String, currentPassphrase: String?): Result<Unit>
@@ -87,15 +107,9 @@ interface SettingsRepository {
     suspend fun makeRecoveryCodes(passphrase: String): Result<List<String>>
 
     /**
-     * Redeems a recovery code of the signed-in user for a short-lived reset grant; a wrong or used code
-     * fails with [AppError.Forbidden]. The code is spent.
+     * The Director's web portal, where a recovery code, a linked account or a passkey resets a forgotten
+     * passphrase (as Boson Identity does).
      */
-    suspend fun redeemRecoveryCode(code: String): Result<String>
-
-    /** Sets a new passphrase with a reset [grant]; an expired or used grant fails with [AppError.Unauthorized]. */
-    suspend fun resetPassphrase(grant: String, newPassphrase: String): Result<Unit>
-
-    /** The Director's web portal, where a linked account or a passkey can reset the passphrase. */
     suspend fun portalUrl(): String
 
     /** Live messaging sessions (service-level); one row per connected device (screen 6). */
@@ -131,6 +145,7 @@ class SettingsRepositoryImpl @Inject constructor(
     private val keyManager: KeyManager,
     private val session: BosonSessionManager,
     private val avatarPreparer: AvatarPreparer,
+    private val cards: ProfileCards,
     @ApplicationContext private val context: Context,
 ) : SettingsRepository {
 
@@ -158,6 +173,7 @@ class SettingsRepositoryImpl @Inject constructor(
             plan = profile.planName,
             passphraseProtected = profile.isPassphraseProtected,
             recovery = loadRecoveryMethods(),
+            revision = profile.profileRevision,
         )
     }
 
@@ -177,10 +193,11 @@ class SettingsRepositoryImpl @Inject constructor(
         bio: String?,
         email: String?,
         passphrase: String?,
+        revision: Long,
     ): Result<Unit> = runCatching {
         // Only the fields given are changed; a null one is left as it is, never cleared.
         if (name == null && bio == null && email == null) return@runCatching
-        val update = ProfileUpdate()
+        val update = ProfileUpdate().ifRevision(revision)
         name?.let { update.name(it) }
         bio?.let { update.bio(it) }
         email?.let { update.email(it) }
@@ -204,28 +221,26 @@ class SettingsRepositoryImpl @Inject constructor(
         director().makeRecoveryCodes(passphrase).await()
     }.mapDirectorError()
 
-    override suspend fun redeemRecoveryCode(code: String): Result<String> = runCatching {
-        val userId = keyManager.userId() ?: throw AppError.Unauthorized("No identity on this device")
-        directorClients.guest().redeemRecoveryCode(userId, code.trim()).await()
-    }.mapDirectorError()
-
-    override suspend fun resetPassphrase(grant: String, newPassphrase: String): Result<Unit> = runCatching {
-        directorClients.guest().resetPassphrase(grant, newPassphrase).await()
-        Unit
-    }.mapDirectorError()
-
     override suspend fun portalUrl(): String = directorClients.config.first().baseUrl + PORTAL_PATH
 
-    override suspend fun updateAvatar(uriString: String): Result<Unit> = runCatching {
+    override suspend fun updateAvatar(uriString: String, revision: Long): Result<Unit> = runCatching {
         val prepared = avatarPreparer.prepare(uriString)
-        director().updateAvatar(prepared.bytes, prepared.mime).await()
+        director().changeAvatar(prepared.bytes, prepared.mime, revision).await()
         Unit
-    }
+    }.mapDirectorError()
 
-    override suspend fun removeAvatar(): Result<Unit> = runCatching {
-        director().removeAvatar().await()
+    override suspend fun removeAvatar(revision: Long): Result<Unit> = runCatching {
+        director().removeAvatar(revision).await()
         Unit
-    }
+    }.mapDirectorError()
+
+    override suspend fun cardState(): Result<CardState> = runCatching { cards.state() }
+
+    override suspend fun publishCard(): Result<Unit> = runCatching { cards.publish(); Unit }
+
+    override suspend fun refreshCard(): Result<Boolean> = runCatching { cards.refresh() }
+
+    override suspend fun unpublishCard(): Result<Unit> = runCatching { cards.unpublish() }
 
     override suspend fun loadSessions(): Result<List<UiDevice>> = runCatching {
         // This screen lists messaging *sessions* (a service-level concept), not the Director device

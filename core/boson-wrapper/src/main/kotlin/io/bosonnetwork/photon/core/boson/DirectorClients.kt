@@ -27,7 +27,6 @@ import io.bosonnetwork.crypto.Signature
 import io.bosonnetwork.director.client.DirectorBuilder
 import io.bosonnetwork.director.client.DirectorClient
 import io.bosonnetwork.director.client.DirectorGuest
-import io.bosonnetwork.director.client.DirectorOAuth
 import io.bosonnetwork.photon.core.model.AppError
 import io.bosonnetwork.photon.core.network.DirectorConfig
 import io.bosonnetwork.photon.core.network.DirectorConfigStore
@@ -43,8 +42,7 @@ import kotlinx.coroutines.future.await
  *  - [client] acts as the profile's own user, with the user key held in [KeyManager];
  *  - [clientFor] acts as a user whose key is only in memory (an identity being created or imported,
  *    not yet committed to a profile);
- *  - [guest] needs no identity: node information, sign-up options, and a new device joining an account;
- *  - [oauth] carries on an OAuth sign-in, with its session token.
+ *  - [guest] needs no identity: node information, sign-up options, and a new device joining an account.
  *
  * A client that acts as a user issues its own tokens from its key, bound to a node id: the configured
  * Server ID, else the node this device is registered with - so a Director that later claimed to be another
@@ -135,12 +133,6 @@ class DirectorClients(
         }
         stale?.let { retire(it::close) }
         return guest
-    }
-
-    /** A client for the OAuth sign-in session of [sessionToken]; the caller closes it. */
-    suspend fun oauth(sessionToken: String): DirectorOAuth {
-        val cfg = configStore.config.first()
-        return DirectorOAuth.builder().configure(cfg, configuredNodeId(cfg)).sessionToken(sessionToken).build()
     }
 
     /** The node id the configured Director reports now, asked every time: how a node change shows. */

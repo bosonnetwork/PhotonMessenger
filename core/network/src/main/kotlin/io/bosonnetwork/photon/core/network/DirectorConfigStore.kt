@@ -60,8 +60,6 @@ class DirectorConfigStore(
     }
 
     companion object {
-        // OAuth providers (Google/GitHub) are discovered via
-        // GET /api/v1/auth/providers.
         const val DEFAULT_DIRECTOR_URL = "https://your.super.node/"
         private val BASE_URL = stringPreferencesKey("director_base_url")
         private val NODE_ID = stringPreferencesKey("director_node_id")

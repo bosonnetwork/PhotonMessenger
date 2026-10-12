@@ -28,6 +28,7 @@ import androidx.datastore.preferences.core.Preferences
 import io.bosonnetwork.photon.core.boson.DirectorClients
 import io.bosonnetwork.photon.core.boson.DirectorProfileResolver
 import io.bosonnetwork.photon.core.boson.KeyManager
+import io.bosonnetwork.photon.core.boson.ProfileCards
 import io.bosonnetwork.photon.core.security.ProfileManager
 import io.bosonnetwork.photon.core.model.ProfileResolver
 import io.bosonnetwork.photon.core.network.DirectorConfigStore
@@ -76,6 +77,15 @@ object NetworkModule {
         configStore: DirectorConfigStore,
         keyManager: KeyManager,
     ): DirectorClients = DirectorClients(vertx, configStore, keyManager)
+
+    /** The profile's public card, published through the home node's web gateway. */
+    @Provides
+    @Singleton
+    fun provideProfileCards(
+        vertx: Vertx,
+        clients: DirectorClients,
+        keyManager: KeyManager,
+    ): ProfileCards = ProfileCards(vertx, clients, keyManager)
 
     /**
      * Resolves public profiles (name/bio/avatar) for ANY user id from the Director, with in-memory TTL

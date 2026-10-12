@@ -112,6 +112,17 @@ class KeyManager(
      */
     fun isBackupPending(): Boolean = secrets.getBytes(KEY_BACKUP_PENDING) != null
 
+    /**
+     * The version of the profile card this device last published for the identity, or null when it never
+     * did. Kept after the card is unpublished: a later card must still be newer than any version resolvers
+     * may remember.
+     */
+    fun cardVersion(): Int? = secrets.getBytes(KEY_CARD_VERSION)?.decodeToString()?.toIntOrNull()
+
+    fun setCardVersion(version: Int) {
+        secrets.putBytes(KEY_CARD_VERSION, version.toString().encodeToByteArray())
+    }
+
     /** Marks the backup of this profile's identity as waiting for its check, or as checked. */
     fun setBackupPending(pending: Boolean) {
         if (pending) secrets.putBytes(KEY_BACKUP_PENDING, byteArrayOf(1))
@@ -123,6 +134,7 @@ class KeyManager(
         secrets.remove(KEY_DEVICE)
         secrets.remove(KEY_REG_NODE)
         secrets.remove(KEY_BACKUP_PENDING)
+        secrets.remove(KEY_CARD_VERSION)
     }
 
     companion object {
@@ -130,6 +142,7 @@ class KeyManager(
         private const val KEY_DEVICE = "device_key_64"
         private const val KEY_REG_NODE = "reg_node_id"
         private const val KEY_BACKUP_PENDING = "backup_pending"
+        private const val KEY_CARD_VERSION = "card_version"
 
         /**
          * Durably writes identity material into an ARBITRARY profile's [secrets] store, for seeding a

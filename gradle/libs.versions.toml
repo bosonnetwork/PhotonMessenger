@@ -93,6 +93,7 @@ desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", ver
 boson-messaging-client = { group = "io.bosonnetwork", name = "boson-messaging-client", version.ref = "boson" }
 boson-ion-store-client = { group = "io.bosonnetwork", name = "boson-ion-store-client", version.ref = "boson" }
 boson-director-client = { group = "io.bosonnetwork", name = "boson-director-client", version.ref = "boson" }
+boson-higgs = { group = "io.bosonnetwork", name = "boson-higgs", version.ref = "boson" }
 vertx-lang-kotlin-coroutines = { group = "io.vertx", name = "vertx-lang-kotlin-coroutines", version.ref = "vertx" }
 slf4j-simple = { group = "org.slf4j", name = "slf4j-simple", version.ref = "slf4j" }
 # Testing

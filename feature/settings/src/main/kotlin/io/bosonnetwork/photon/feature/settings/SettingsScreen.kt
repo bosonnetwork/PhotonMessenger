@@ -98,7 +98,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -153,7 +152,10 @@ fun SettingsScreen(
     var showRemovePassphrase by rememberSaveable { mutableStateOf(false) }
     var showNewRecoveryCodes by rememberSaveable { mutableStateOf(false) }
     val recoveryCodes by viewModel.recoveryCodes.collectAsStateWithLifecycle()
-    val forgot by viewModel.forgot.collectAsStateWithLifecycle()
+    val card by viewModel.card.collectAsStateWithLifecycle()
+    var showForgot by rememberSaveable { mutableStateOf(false) }
+    var confirmPublishCard by rememberSaveable { mutableStateOf(false) }
+    var confirmStopCard by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     var showIdQr by rememberSaveable { mutableStateOf(false) }
     var confirmSignOut by rememberSaveable { mutableStateOf(false) }
@@ -192,6 +194,13 @@ fun SettingsScreen(
                         onChangePhoto = { pickAvatar.launch("image/*") },
                         onRemovePhoto = { viewModel.removeAvatar() },
                         onEdit = { editing = true },
+                    )
+                    ProfileCardRow(
+                        card = card,
+                        onPublish = { confirmPublishCard = true },
+                        onStop = { confirmStopCard = true },
+                        onUpdate = viewModel::publishCard,
+                        onRetry = viewModel::checkCard,
                     )
                     HorizontalDivider()
 
@@ -244,7 +253,7 @@ fun SettingsScreen(
                         onSet = { showSetPassphrase = true },
                         onRemove = { showRemovePassphrase = true },
                         onNewRecoveryCodes = { showNewRecoveryCodes = true },
-                        onForgot = viewModel::openForgotPassphrase,
+                        onForgot = { showForgot = true },
                     )
                     HorizontalDivider()
 
@@ -318,15 +327,34 @@ fun SettingsScreen(
         )
     }
 
-    forgot?.let { flow ->
+    if (showForgot) {
         ForgotPassphraseDialog(
-            state = flow,
             recovery = state.profile?.recovery,
-            onDismiss = viewModel::closeForgotPassphrase,
-            onUseCode = viewModel::forgotWithRecoveryCode,
-            onUsePortal = viewModel::forgotOnPortal,
-            onRedeem = viewModel::redeemRecoveryCode,
-            onReset = viewModel::resetPassphrase,
+            onDismiss = { showForgot = false },
+            onOpenPortal = {
+                showForgot = false
+                viewModel.openPortal()
+            },
+        )
+    }
+
+    if (confirmPublishCard) {
+        ConfirmDialog(
+            title = stringResource(R.string.settings_card_publish_title),
+            text = stringResource(R.string.settings_card_publish_body),
+            confirmLabel = stringResource(R.string.settings_card_publish_action),
+            onConfirm = viewModel::publishCard,
+            onDismiss = { confirmPublishCard = false },
+        )
+    }
+
+    if (confirmStopCard) {
+        ConfirmDialog(
+            title = stringResource(R.string.settings_card_stop_title),
+            text = stringResource(R.string.settings_card_stop_body),
+            confirmLabel = stringResource(R.string.settings_card_stop_action),
+            onConfirm = viewModel::unpublishCard,
+            onDismiss = { confirmStopCard = false },
         )
     }
 
@@ -693,111 +721,95 @@ private fun NewRecoveryCodesDialog(
 }
 
 /**
- * Resetting a forgotten passphrase: with a recovery code, here; or with a linked account or a passkey, on
- * the web portal, since the reset grant those win returns only to the Director's own site.
+ * A forgotten passphrase is reset on the node's web portal or in Boson Identity, with a recovery code, a
+ * linked account or a passkey; the reset grant those win returns only to the Director's own site.
  */
 @Composable
 private fun ForgotPassphraseDialog(
-    state: ForgotPassphraseState,
     recovery: UiRecoveryMethods?,
     onDismiss: () -> Unit,
-    onUseCode: () -> Unit,
-    onUsePortal: () -> Unit,
-    onRedeem: (code: String) -> Unit,
-    onReset: (passphrase: String) -> Unit,
+    onOpenPortal: () -> Unit,
 ) {
-    var code by rememberSaveable { mutableStateOf("") }
-    var new by remember { mutableStateOf("") }
-    var confirm by remember { mutableStateOf("") }
-    val problem = passphraseProblem(new)
-    val matches = new.isNotEmpty() && new == confirm
-    // Unknown methods (an older Director): offer both and let the Director decide.
-    val codesAvailable = recovery == null || recovery.recoveryCodes > 0
-    val portalAvailable = recovery == null || recovery.viaPortal
-
-    // Once a code is spent, a stray tap or Back must not throw away its grant: only Cancel closes.
-    val holdGrant = state.step == ForgotPassphraseStep.NewPassphrase
+    // Unknown methods (an older Director): offer the portal and let it decide.
+    val resettable = recovery == null || recovery.any
     AlertDialog(
-        onDismissRequest = { if (!state.busy) onDismiss() },
-        properties = DialogProperties(dismissOnBackPress = !holdGrant, dismissOnClickOutside = !holdGrant),
+        onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.settings_forgot_title)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                when (state.step) {
-                    ForgotPassphraseStep.Choose -> {
-                        if (!codesAvailable && !portalAvailable) {
-                            Text(stringResource(R.string.settings_forgot_no_method))
-                        } else {
-                            Text(stringResource(R.string.settings_forgot_choose_body))
-                        }
-                        if (codesAvailable) {
-                            OutlinedButton(onClick = onUseCode, modifier = Modifier.fillMaxWidth()) {
-                                Text(stringResource(R.string.settings_forgot_use_code))
-                            }
-                        }
-                        if (portalAvailable) {
-                            OutlinedButton(onClick = onUsePortal, modifier = Modifier.fillMaxWidth()) {
-                                Text(stringResource(R.string.settings_forgot_use_portal))
-                            }
-                            Text(
-                                stringResource(R.string.settings_forgot_portal_hint),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
-                    ForgotPassphraseStep.Code -> {
-                        Text(stringResource(R.string.settings_forgot_code_body))
-                        OutlinedTextField(
-                            value = code,
-                            onValueChange = { code = it },
-                            label = { Text(stringResource(R.string.settings_forgot_code_label)) },
-                            singleLine = true,
-                            enabled = !state.busy,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                    ForgotPassphraseStep.NewPassphrase -> {
-                        Text(stringResource(R.string.settings_forgot_new_body))
-                        PassphraseField(new, { new = it }, stringResource(R.string.settings_passphrase_new_label))
-                        if (new.isNotEmpty() && problem != null) {
-                            Text(
-                                stringResource(problem),
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                        PassphraseField(confirm, { confirm = it }, stringResource(R.string.settings_passphrase_confirm_label))
-                        if (confirm.isNotEmpty() && !matches) {
-                            Text(
-                                stringResource(R.string.settings_passphrase_mismatch),
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
-                }
-                state.error?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
-            }
+            Text(
+                if (resettable) stringResource(R.string.settings_forgot_body)
+                else stringResource(R.string.settings_forgot_no_method),
+            )
         },
         confirmButton = {
-            when (state.step) {
-                ForgotPassphraseStep.Choose -> {}
-                ForgotPassphraseStep.Code ->
-                    TextButton(onClick = { onRedeem(code) }, enabled = code.isNotBlank() && !state.busy) {
-                        Text(stringResource(R.string.settings_action_continue))
-                    }
-                ForgotPassphraseStep.NewPassphrase ->
-                    TextButton(onClick = { onReset(new) }, enabled = matches && problem == null && !state.busy) {
-                        Text(stringResource(R.string.settings_forgot_reset_action))
-                    }
+            if (resettable) {
+                TextButton(onClick = onOpenPortal) { Text(stringResource(R.string.settings_forgot_open_portal)) }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !state.busy) { Text(stringResource(R.string.settings_action_cancel)) }
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(if (resettable) R.string.settings_action_cancel else R.string.settings_action_close))
+            }
         },
     )
+}
+
+/**
+ * The public profile card: the profile as a Boson card anyone can look up by the id, published through
+ * the home node. A switch turns it on and off; a card that no longer shows the profile offers an update.
+ */
+@Composable
+private fun ProfileCardRow(
+    card: ProfileCardUi,
+    onPublish: () -> Unit,
+    onStop: () -> Unit,
+    onUpdate: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    val status = card.status
+    val switchable = status != ProfileCardUi.Status.Unavailable && status != ProfileCardUi.Status.Unknown
+    val enabled = switchable && status != ProfileCardUi.Status.Checking && !card.busy
+    val toggle = { on: Boolean -> if (on) onPublish() else onStop() }
+    val modifier = when {
+        status == ProfileCardUi.Status.Unknown -> Modifier.clickable(role = Role.Button, onClick = onRetry)
+        enabled -> Modifier.toggleable(value = card.published, role = Role.Switch, onValueChange = toggle)
+        else -> Modifier
+    }
+    ListItem(
+        headlineContent = { Text(stringResource(R.string.settings_card_title)) },
+        supportingContent = {
+            Text(
+                stringResource(
+                    when (status) {
+                        ProfileCardUi.Status.Checking -> R.string.settings_card_checking
+                        ProfileCardUi.Status.Off -> R.string.settings_card_off
+                        ProfileCardUi.Status.On -> R.string.settings_card_on
+                        ProfileCardUi.Status.Outdated -> R.string.settings_card_outdated
+                        ProfileCardUi.Status.Unavailable -> R.string.settings_card_unavailable
+                        ProfileCardUi.Status.Unknown -> R.string.settings_card_unknown
+                    },
+                ),
+                color = if (status == ProfileCardUi.Status.Outdated) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        },
+        trailingContent = if (switchable) {
+            { Switch(checked = card.published, onCheckedChange = null, enabled = enabled) }
+        } else {
+            null
+        },
+        modifier = modifier,
+    )
+    if (status == ProfileCardUi.Status.Outdated) {
+        TextButton(
+            onClick = onUpdate,
+            enabled = !card.busy,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        ) { Text(stringResource(R.string.settings_card_update)) }
+    }
 }
 
 @Composable

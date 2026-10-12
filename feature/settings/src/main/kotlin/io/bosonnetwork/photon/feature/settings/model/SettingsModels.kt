@@ -34,11 +34,13 @@ data class UiProfile(
     val passphraseProtected: Boolean = false,
     /** The ways a forgotten passphrase can be reset; null when the Director did not say. */
     val recovery: UiRecoveryMethods? = null,
+    /** The profile's revision, which an edit is made from: one made meanwhile elsewhere isn't overwritten. */
+    val revision: Long = 0,
 )
 
 /**
  * The ways the user can reset a forgotten passphrase without the user key: [linkedAccounts] (OAuth),
- * [passkeys] and unused [recoveryCodes]. The first two work through the web portal, the codes here.
+ * [passkeys] and unused [recoveryCodes], used on the web portal or in Boson Identity.
  */
 data class UiRecoveryMethods(
     val linkedAccounts: Int,
@@ -47,9 +49,6 @@ data class UiRecoveryMethods(
 ) {
     /** Whether any way exists; with none, a forgotten passphrase cannot be reset. */
     val any: Boolean get() = linkedAccounts > 0 || passkeys > 0 || recoveryCodes > 0
-
-    /** Whether the web portal can reset it: with a linked account or a passkey. */
-    val viaPortal: Boolean get() = linkedAccounts > 0 || passkeys > 0
 }
 
 /**
