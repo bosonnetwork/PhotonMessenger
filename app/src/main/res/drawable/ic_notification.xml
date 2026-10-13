@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status-bar icon: the Photon bubble, wave and photon in white (the system uses only the alpha).
+     Heavier strokes and larger particles than the launcher icon, as the brand's small mark has, so it
+     holds at 24dp; the wave is shorter and the nodes are left out, so nothing merges into the bubble. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="32"
+    android:viewportHeight="32">
+    <path android:pathData="M10.13,28.04A13.4,13.4 0,1 0,3.96 21.87C4.11,24.47 4.5,27 4,28.4C6.2,28.7 8.13,28.59 10.13,28.04Z" android:strokeColor="#FFFFFFFF" android:strokeWidth="2.4" android:strokeLineJoin="round" />
+    <path android:pathData="M7.4,16C8.81,14.197 10.147,12.5 11.7,12.5C13.253,12.5 14.59,14.197 16,16C17.41,17.802 18.747,19.5 20.3,19.5C21.853,19.5 23.19,17.802 24.6,16" android:strokeColor="#FFFFFFFF" android:strokeWidth="2.4" android:strokeLineCap="round" />
+    <path android:pathData="M12,16a4,4 0,1 0,8,0a4,4 0,1 0,-8,0z" android:fillColor="#FFFFFFFF" />
+</vector>

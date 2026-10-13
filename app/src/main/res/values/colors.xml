@@ -2,4 +2,6 @@
 <resources>
     <!-- The brand plate, as the Compose theme draws it: shown before the first frame. -->
     <color name="window_background">#FFE8ECF6</color>
+    <!-- The launcher icon's plate: the brand dark plate, in light and dark mode alike. -->
+    <color name="launcher_background">#FF0B1020</color>
 </resources>

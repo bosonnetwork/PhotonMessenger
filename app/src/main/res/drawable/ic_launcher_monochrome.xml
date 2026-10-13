@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed (monochrome) launcher icon: the icon's shapes in one color; the launcher tints it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:translateX="24" android:translateY="24" android:scaleX="1.875" android:scaleY="1.875">
+        <path android:pathData="M10.13,28.04A13.4,13.4 0,1 0,3.96 21.87C4.11,24.47 4.5,27 4,28.4C6.2,28.7 8.13,28.59 10.13,28.04Z" android:strokeColor="#FF000000" android:strokeWidth="1.5" android:strokeLineJoin="round" />
+        <path android:pathData="M8.8,16C9.98,14.352 11.1,12.8 12.4,12.8C13.7,12.8 14.82,14.352 16,16C17.18,17.648 18.3,19.2 19.6,19.2C20.9,19.2 22.02,17.648 23.2,16" android:strokeColor="#FF000000" android:strokeWidth="1.7" android:strokeLineCap="round" />
+        <path android:pathData="M12.6,16a3.4,3.4 0,1 0,6.8,0a3.4,3.4 0,1 0,-6.8,0z" android:fillColor="#FF000000" />
+        <path android:pathData="M4.4,16a2.1,2.1 0,1 0,4.2,0a2.1,2.1 0,1 0,-4.2,0z" android:fillColor="#FF000000" />
+        <path android:pathData="M23.4,16a2.1,2.1 0,1 0,4.2,0a2.1,2.1 0,1 0,-4.2,0z" android:fillColor="#FF000000" />
+    </group>
+</vector>

@@ -87,7 +87,7 @@ class LocalNotificationGateway(
 
     override fun foregroundNotification(contentText: String): Notification =
         NotificationCompat.Builder(context, CHANNEL_SERVICE)
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(context.getString(R.string.app_name))
             .setContentText(contentText)
             .setOngoing(true)
@@ -104,7 +104,7 @@ class LocalNotificationGateway(
         val shownBody = if (prefs.showPreview) body else context.getString(R.string.app_notif_generic_message_body)
 
         val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(shownTitle)
             .setContentText(shownBody)
             .setAutoCancel(true)
@@ -126,7 +126,7 @@ class LocalNotificationGateway(
         else context.getString(R.string.app_notif_generic_friend_request_body)
 
         val notification = NotificationCompat.Builder(context, CHANNEL_REQUESTS)
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(shownTitle)
             .setContentText(shownBody)
             .setAutoCancel(true)
