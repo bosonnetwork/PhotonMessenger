@@ -3,7 +3,7 @@
     <string name="settings_title">设置</string>
     <string name="settings_section_account">账户</string>
     <string name="settings_accounts_title">账户</string>
-    <string name="settings_accounts_subtitle">在此设备上切换或添加账户</string>
+    <string name="settings_accounts_subtitle">切换或添加账户</string>
     <string name="settings_section_appearance">外观</string>
     <string name="settings_theme_title">主题</string>
     <string name="settings_language_title">语言</string>
@@ -23,10 +23,10 @@
     <string name="settings_sessions_title">会话</string>
     <string name="settings_sessions_subtitle">管理你的登录设备</string>
     <string name="settings_devices_title">设备</string>
-    <string name="settings_devices_subtitle">管理已注册到你账户的设备</string>
+    <string name="settings_devices_subtitle">管理你的设备</string>
     <string name="settings_section_about">关于</string>
     <string name="settings_about_app_name">Photon</string>
-    <string name="settings_about_version_line">版本 %1$s - 由 BosonNetwork 提供支持</string>
+    <string name="settings_about_version_line">版本 %1$s\n由 BosonNetwork 提供支持</string>
     <string name="settings_about_version_unknown">未知</string>
     <string name="settings_about_website">bosonnetwork.io</string>
     <string name="settings_about_website_detail">进一步了解 Boson 网络</string>
@@ -50,10 +50,10 @@
     </plurals>
 
     <!-- SettingsScreen: passphrase section + dialogs -->
-    <string name="settings_passphrase_protected_title">已通过口令保护</string>
+    <string name="settings_passphrase_protected_title">已受口令保护</string>
     <string name="settings_passphrase_unset_title">未设置口令</string>
-    <string name="settings_passphrase_protected_subtitle">更改敏感账户设置时需要输入口令。</string>
-    <string name="settings_passphrase_unset_subtitle">添加口令可在密钥泄露时保护敏感账户变更。</string>
+    <string name="settings_passphrase_protected_subtitle">敏感更改需要输入口令</string>
+    <string name="settings_passphrase_unset_subtitle">添加口令以保护敏感更改</string>
     <string name="settings_passphrase_change_action">修改口令</string>
     <string name="settings_passphrase_set_action">设置口令</string>
     <string name="settings_passphrase_current_label">当前口令</string>
@@ -82,11 +82,11 @@
     <string name="settings_action_close">关闭</string>
     <string name="settings_card_title">公开资料卡</string>
     <string name="settings_card_checking">正在检查...</string>
-    <string name="settings_card_off">未开启。只有你主节点上的用户能看到你的资料。</string>
-    <string name="settings_card_on">任何人都可以通过你的 ID 查到你的名称和头像。</string>
-    <string name="settings_card_outdated">已过期：它没有显示你当前的资料。</string>
-    <string name="settings_card_unavailable">你的主节点不发布资料卡。</string>
-    <string name="settings_card_unknown">无法检查你的资料卡。点按重试。</string>
+    <string name="settings_card_off">仅在你的主节点上可见</string>
+    <string name="settings_card_on">任何人都可凭你的 ID 查到</string>
+    <string name="settings_card_outdated">已过期：与当前资料不符</string>
+    <string name="settings_card_unavailable">你的主节点不提供此功能</string>
+    <string name="settings_card_unknown">无法检查，点按重试</string>
     <string name="settings_card_update">更新</string>
     <string name="settings_card_publish_title">发布你的资料卡？</string>
     <string name="settings_card_publish_body">你的名称、简介、头像和主节点将会公开：任何知道你 ID 的人都能查到，Boson 应用也会显示它们。你的电子邮件仍保持私密。\n\n即使这部手机关机，你的主节点也会让资料卡保持可用。</string>

@@ -3,7 +3,7 @@
     <string name="settings_title">Settings</string>
     <string name="settings_section_account">Account</string>
     <string name="settings_accounts_title">Accounts</string>
-    <string name="settings_accounts_subtitle">Switch between or add accounts on this device</string>
+    <string name="settings_accounts_subtitle">Switch between or add accounts</string>
     <string name="settings_section_appearance">Appearance</string>
     <string name="settings_theme_title">Theme</string>
     <string name="settings_language_title">Language</string>
@@ -23,10 +23,10 @@
     <string name="settings_sessions_title">Sessions</string>
     <string name="settings_sessions_subtitle">Manage where you\'re signed in</string>
     <string name="settings_devices_title">Devices</string>
-    <string name="settings_devices_subtitle">Manage devices registered to your account</string>
+    <string name="settings_devices_subtitle">Manage your devices</string>
     <string name="settings_section_about">About</string>
     <string name="settings_about_app_name">Photon</string>
-    <string name="settings_about_version_line">Version %1$s - Powered by BosonNetwork</string>
+    <string name="settings_about_version_line">Version %1$s\nPowered by BosonNetwork</string>
     <string name="settings_about_version_unknown">unknown</string>
     <string name="settings_about_website">bosonnetwork.io</string>
     <string name="settings_about_website_detail">Learn more about the Boson network</string>
@@ -51,10 +51,10 @@
     </plurals>
 
     <!-- SettingsScreen: passphrase section + dialogs -->
-    <string name="settings_passphrase_protected_title">Protected by a passphrase</string>
+    <string name="settings_passphrase_protected_title">Passphrase protected</string>
     <string name="settings_passphrase_unset_title">No passphrase set</string>
-    <string name="settings_passphrase_protected_subtitle">A passphrase is required to change sensitive account settings.</string>
-    <string name="settings_passphrase_unset_subtitle">Add a passphrase to protect sensitive account changes even if your key is exposed.</string>
+    <string name="settings_passphrase_protected_subtitle">Needed for sensitive changes</string>
+    <string name="settings_passphrase_unset_subtitle">Add one to guard sensitive changes</string>
     <string name="settings_passphrase_change_action">Change passphrase</string>
     <string name="settings_passphrase_set_action">Set passphrase</string>
     <string name="settings_passphrase_current_label">Current passphrase</string>
@@ -83,11 +83,11 @@
     <string name="settings_action_close">Close</string>
     <string name="settings_card_title">Public profile card</string>
     <string name="settings_card_checking">Checking...</string>
-    <string name="settings_card_off">Off. Only people on your home node see your profile.</string>
-    <string name="settings_card_on">Anyone can look up your name and photo by your ID.</string>
-    <string name="settings_card_outdated">Out of date: it doesn\'t show your current profile.</string>
-    <string name="settings_card_unavailable">Your home node doesn\'t publish profile cards.</string>
-    <string name="settings_card_unknown">Couldn\'t check your card. Tap to try again.</string>
+    <string name="settings_card_off">Seen only on your home node</string>
+    <string name="settings_card_on">Anyone can find it by your ID</string>
+    <string name="settings_card_outdated">Out of date: not your profile now</string>
+    <string name="settings_card_unavailable">Your home node doesn\'t offer it</string>
+    <string name="settings_card_unknown">Couldn\'t check. Tap to retry</string>
     <string name="settings_card_update">Update</string>
     <string name="settings_card_publish_title">Publish your profile card?</string>
     <string name="settings_card_publish_body">Your name, bio, photo and home node become public: anyone who knows your ID can look them up, and Boson apps show them. Your email stays private.\n\nYour home node keeps the card available, even while this phone is off.</string>

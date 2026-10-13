@@ -99,6 +99,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -108,6 +109,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -485,10 +487,19 @@ private fun UserIdRow(
             // A full base58 id (~44 chars) wraps onto multiple lines even at a small size, so show an
             // abbreviated first-8...last-8 form on a single line, in the same style as the other
             // setting descriptions. The full id stays available via copy and the QR dialog.
-            Text(abbreviateId(userId))
+            Text(abbreviateId(userId), maxLines = 1, overflow = TextOverflow.Ellipsis)
         },
         trailingContent = {
-            Row {
+            // The icon buttons' own 12 dp inset would set the QR code further in than the other rows'
+            // end icons: reaching into the row's end padding lines it up, and leaves the id that much
+            // more room on its line.
+            Row(
+                Modifier.layout { measurable, constraints ->
+                    val reach = 12.dp.roundToPx()
+                    val placeable = measurable.measure(constraints)
+                    layout(placeable.width - reach, placeable.height) { placeable.place(0, 0) }
+                },
+            ) {
                 IconButton(onClick = {
                     clipboard.setText(AnnotatedString(userId))
                     scope.launch { snackbar.showSnackbar(bosonIdCopiedMessage) }
@@ -705,10 +716,8 @@ private fun PassphraseSection(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+        // One action a line; the buttons' own 12 dp inset puts their labels in line with the button above.
+        Column(Modifier.padding(start = 4.dp, bottom = 4.dp)) {
             TextButton(onClick = onNewRecoveryCodes) { Text(stringResource(R.string.settings_recovery_codes_new_action)) }
             TextButton(onClick = onForgot) { Text(stringResource(R.string.settings_forgot_action)) }
         }
