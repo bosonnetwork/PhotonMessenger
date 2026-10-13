@@ -96,7 +96,28 @@ class BosonClientFactory(
          */
         fun newVertx(): Vertx {
             System.setProperty("vertx.disableDnsResolver", "true")
+            seedVertxVersion()
             return Vertx.vertx(VertxOptions().setFileSystemOptions(fileSystemOptions()))
+        }
+
+        /**
+         * Gives Vert.x its version string before anything asks for it. Vert.x reads it from
+         * META-INF/vertx/vertx-version.txt with `new Scanner(InputStream, Charset)`, which Android has
+         * only from 14 (API 34): on Android 13 and older the web client's first use (its User-Agent, in
+         * [io.bosonnetwork.higgs.HiggsNode.start]) threw NoSuchMethodError. The version is cached in a
+         * static field that is read first, so filling it in with a read every Android can do skips that
+         * code. A version that can't be had leaves Vert.x to try as before.
+         */
+        internal fun seedVertxVersion() {
+            runCatching {
+                val field = Class.forName("io.vertx.core.impl.VertxImpl").getDeclaredField("version")
+                field.isAccessible = true
+                if (field.get(null) != null) return
+                val text = Vertx::class.java.classLoader?.getResourceAsStream("META-INF/vertx/vertx-version.txt")
+                    ?.use { it.readBytes().toString(Charsets.UTF_8).trim() }
+                    ?: return
+                field.set(null, text)
+            }
         }
 
         /**
