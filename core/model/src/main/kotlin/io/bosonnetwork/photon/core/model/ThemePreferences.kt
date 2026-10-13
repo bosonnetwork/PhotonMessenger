@@ -32,6 +32,4 @@ enum class ThemeMode {
 /** Persisted appearance preferences applied by the root theme. */
 data class ThemePreferences(
     val mode: ThemeMode = ThemeMode.SYSTEM,
-    /** Android 12+ Material You dynamic color (ignored below API 31). */
-    val dynamicColor: Boolean = true,
 )

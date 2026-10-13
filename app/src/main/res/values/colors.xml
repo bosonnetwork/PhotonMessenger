@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The brand plate, as the Compose theme draws it: shown before the first frame. -->
+    <color name="window_background">#FFE8ECF6</color>
+</resources>

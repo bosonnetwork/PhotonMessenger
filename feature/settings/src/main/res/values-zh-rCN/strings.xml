@@ -5,9 +5,9 @@
     <string name="settings_accounts_title">账户</string>
     <string name="settings_accounts_subtitle">在此设备上切换或添加账户</string>
     <string name="settings_section_appearance">外观</string>
-    <string name="settings_dynamic_color_title">动态取色</string>
-    <string name="settings_dynamic_color_subtitle">使用壁纸中的颜色</string>
+    <string name="settings_theme_title">主题</string>
     <string name="settings_language_title">语言</string>
+    <string name="settings_language_restart">切换语言时 Photon 会重新启动。</string>
     <string name="settings_section_notifications">通知</string>
     <string name="settings_notifications_enabled_title">消息通知</string>
     <string name="settings_notifications_enabled_subtitle">有新消息时通知我</string>
@@ -28,6 +28,8 @@
     <string name="settings_about_app_name">Photon</string>
     <string name="settings_about_version_line">版本 %1$s - 由 BosonNetwork 提供支持</string>
     <string name="settings_about_version_unknown">未知</string>
+    <string name="settings_about_website">bosonnetwork.io</string>
+    <string name="settings_about_website_detail">进一步了解 Boson 网络</string>
     <string name="settings_sign_out_action">退出登录</string>
     <string name="settings_sign_out_confirm_title">退出登录？</string>
     <string name="settings_sign_out_confirm_body">这将结束你在此设备上的会话。你的身份、对话和设置仍会保留在此设备上，因此你可以随时重新登录。你需要重新登录才能再次连接。</string>
@@ -119,11 +121,8 @@
     <string name="settings_action_cancel">取消</string>
     <string name="settings_back_content_description">返回</string>
 
-    <!-- LanguageScreen -->
-    <string name="settings_language_selected_content_description">已选择</string>
+    <!-- SettingsScreen: language choice -->
     <string name="settings_language_system">跟随系统</string>
-    <string name="settings_language_english">英语</string>
-    <string name="settings_language_chinese">简体中文</string>
     <string name="settings_language_native_english">English</string>
     <!-- Endonym: identical to the English resource file (a language's own name never changes). -->
     <string name="settings_language_native_chinese">简体中文</string>

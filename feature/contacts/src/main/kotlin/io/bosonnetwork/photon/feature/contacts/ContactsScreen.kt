@@ -103,6 +103,7 @@ import io.bosonnetwork.photon.core.designsystem.component.ErrorState
 import io.bosonnetwork.photon.core.designsystem.component.LoadingState
 import io.bosonnetwork.photon.core.designsystem.component.PhotonAvatar
 import io.bosonnetwork.photon.core.designsystem.component.ResponsiveContent
+import io.bosonnetwork.photon.core.designsystem.theme.brand
 import io.bosonnetwork.photon.core.model.shortId
 import io.bosonnetwork.photon.core.qr.QrScanner
 import io.bosonnetwork.photon.feature.contacts.model.FriendRequestAction
@@ -614,7 +615,7 @@ private fun FriendRequestStatusLabel(request: UiFriendRequest) {
             } else {
                 Icons.AutoMirrored.Filled.CallReceived to MaterialTheme.colorScheme.primary
             }
-        FriendRequestStatus.ACCEPTED -> Icons.Filled.CheckCircle to MaterialTheme.colorScheme.tertiary
+        FriendRequestStatus.ACCEPTED -> Icons.Filled.CheckCircle to MaterialTheme.brand.success
         FriendRequestStatus.EXPIRED -> Icons.Outlined.Schedule to MaterialTheme.colorScheme.outline
     }
     val text = stringResource(

@@ -24,7 +24,6 @@ package io.bosonnetwork.photon.core.network
 
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import io.bosonnetwork.photon.core.model.ThemeMode
@@ -32,14 +31,13 @@ import io.bosonnetwork.photon.core.model.ThemePreferences
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-/** Persists the appearance preferences (theme mode + dynamic color) in DataStore (M6-5). */
+/** Persists the appearance preferences (the theme mode) in DataStore (M6-5). */
 class ThemePreferencesStore(
     private val dataStore: DataStore<Preferences>,
 ) {
     val preferences: Flow<ThemePreferences> = dataStore.data.map { prefs ->
         ThemePreferences(
             mode = prefs[MODE]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() } ?: ThemeMode.SYSTEM,
-            dynamicColor = prefs[DYNAMIC_COLOR] ?: true,
         )
     }
 
@@ -47,12 +45,7 @@ class ThemePreferencesStore(
         dataStore.edit { it[MODE] = mode.name }
     }
 
-    suspend fun setDynamicColor(enabled: Boolean) {
-        dataStore.edit { it[DYNAMIC_COLOR] = enabled }
-    }
-
     private companion object {
         val MODE = stringPreferencesKey("theme_mode")
-        val DYNAMIC_COLOR = booleanPreferencesKey("theme_dynamic_color")
     }
 }

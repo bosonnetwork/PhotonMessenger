@@ -55,6 +55,5 @@ object Routes {
     const val APPROVE_DEVICE = "approveDevice"
     const val SHOW_KEY = "showKey"
     const val SHOW_IDENTITY_KEY = "showIdentityKey"
-    const val LANGUAGE = "language"
     const val FORWARD = "forward"
 }

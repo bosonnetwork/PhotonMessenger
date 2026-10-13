@@ -5,9 +5,9 @@
     <string name="settings_accounts_title">Accounts</string>
     <string name="settings_accounts_subtitle">Switch between or add accounts on this device</string>
     <string name="settings_section_appearance">Appearance</string>
-    <string name="settings_dynamic_color_title">Dynamic color</string>
-    <string name="settings_dynamic_color_subtitle">Use colors from your wallpaper</string>
+    <string name="settings_theme_title">Theme</string>
     <string name="settings_language_title">Language</string>
+    <string name="settings_language_restart">Photon restarts to change its language.</string>
     <string name="settings_section_notifications">Notifications</string>
     <string name="settings_notifications_enabled_title">Message notifications</string>
     <string name="settings_notifications_enabled_subtitle">Notify me about new messages</string>
@@ -28,6 +28,8 @@
     <string name="settings_about_app_name">Photon</string>
     <string name="settings_about_version_line">Version %1$s - Powered by BosonNetwork</string>
     <string name="settings_about_version_unknown">unknown</string>
+    <string name="settings_about_website">bosonnetwork.io</string>
+    <string name="settings_about_website_detail">Learn more about the Boson network</string>
     <string name="settings_sign_out_action">Sign out</string>
     <string name="settings_sign_out_confirm_title">Sign out?</string>
     <string name="settings_sign_out_confirm_body">This ends your session on this device. Your identity, conversations, and settings stay on this device, so you can sign back in anytime. You\'ll need to sign in again to reconnect.</string>
@@ -120,11 +122,8 @@
     <string name="settings_action_cancel">Cancel</string>
     <string name="settings_back_content_description">Back</string>
 
-    <!-- LanguageScreen -->
-    <string name="settings_language_selected_content_description">Selected</string>
+    <!-- SettingsScreen: language choice -->
     <string name="settings_language_system">System default</string>
-    <string name="settings_language_english">English</string>
-    <string name="settings_language_chinese">Chinese (Simplified)</string>
     <string name="settings_language_native_english">English</string>
     <!-- Endonym: deliberately non-ASCII even in the English resource file, so a language's own name
          renders correctly regardless of the current UI locale (per the localization spec). -->

@@ -74,7 +74,6 @@ import io.bosonnetwork.photon.feature.onboarding.KeyBackupScreen
 import io.bosonnetwork.photon.feature.onboarding.OnboardingScreen
 import io.bosonnetwork.photon.feature.settings.ApproveDeviceScreen
 import io.bosonnetwork.photon.feature.settings.DevicesScreen
-import io.bosonnetwork.photon.feature.settings.LanguageScreen
 import io.bosonnetwork.photon.feature.settings.SessionsScreen
 import io.bosonnetwork.photon.feature.settings.SettingsScreen
 import io.bosonnetwork.photon.feature.settings.ShowIdentityKeyScreen
@@ -238,12 +237,18 @@ fun PhotonNavHost(
                 )
             }
             composable(TopLevelDestination.SETTINGS.route) {
+                val context = LocalContext.current
                 SettingsScreen(
-                    currentLanguage = LocaleManager.current(LocalContext.current),
+                    currentLanguage = LocaleManager.current(context),
                     onOpenAccounts = { navController.navigate(Routes.ACCOUNTS) },
                     onOpenSessions = { navController.navigate(Routes.SESSIONS) },
                     onOpenDevices = { navController.navigate(Routes.DEVICES) },
-                    onOpenLanguage = { navController.navigate(Routes.LANGUAGE) },
+                    onLanguageChange = { language ->
+                        // Persist the choice, then relaunch so every context (activity, application,
+                        // notifications, foreground service) re-wraps with the new locale together.
+                        LocaleManager.setLanguage(context, language)
+                        AppRelauncher.relaunch(context)
+                    },
                     onShowIdentityKey = { navController.navigate(Routes.SHOW_IDENTITY_KEY) },
                     onBackUpKey = { navController.navigate(Routes.BACKUP_KEY) },
                     onSignedOut = {
@@ -281,23 +286,6 @@ fun PhotonNavHost(
             }
             composable(Routes.SHOW_IDENTITY_KEY) {
                 ShowIdentityKeyScreen(onBack = { navController.popBackStack() })
-            }
-            composable(Routes.LANGUAGE) {
-                val context = LocalContext.current
-                LanguageScreen(
-                    current = LocaleManager.current(context),
-                    onSelect = { language ->
-                        // Persist the choice, then relaunch so every context (activity, application,
-                        // notifications, foreground service) re-wraps with the new locale together.
-                        if (language != LocaleManager.current(context)) {
-                            LocaleManager.setLanguage(context, language)
-                            AppRelauncher.relaunch(context)
-                        } else {
-                            navController.popBackStack()
-                        }
-                    },
-                    onBack = { navController.popBackStack() },
-                )
             }
             composable(Routes.BACKUP_KEY) {
                 KeyBackupScreen(

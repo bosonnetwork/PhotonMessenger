@@ -125,7 +125,6 @@ class SettingsViewModelsTest {
         override suspend fun removeDevice(deviceId: String, passphrase: String?) =
             removeResult.also { removed = deviceId; removedPassphrase = passphrase }
         override suspend fun setThemeMode(mode: ThemeMode) = actionResult.also { lastThemeMode = mode }
-        override suspend fun setDynamicColor(enabled: Boolean) = actionResult
         override suspend fun setNotificationsEnabled(enabled: Boolean) =
             actionResult.also { notificationsEnabled = enabled }
         override suspend fun setNotificationPreview(showPreview: Boolean) = actionResult

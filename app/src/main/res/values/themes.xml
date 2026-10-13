@@ -1,12 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-      Window/launch theme only. Actual UI colors are driven by the Compose PhotonTheme
-      (design spec 5.1), which also handles light/dark. Compose manages dark mode, so a single
-      framework theme suffices here.
+      Window/launch theme only. Actual UI colors are driven by the Compose PhotonTheme, which also
+      handles light/dark; the window shows the brand plate of the phone's mode until it draws.
     -->
     <style name="Theme.PhotonMessenger" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:windowBackground">@color/window_background</item>
     </style>
 </resources>

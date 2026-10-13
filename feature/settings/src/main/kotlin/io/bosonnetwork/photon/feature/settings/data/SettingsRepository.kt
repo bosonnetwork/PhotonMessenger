@@ -133,7 +133,6 @@ interface SettingsRepository {
     suspend fun removeDevice(deviceId: String, passphrase: String?): Result<Unit>
 
     suspend fun setThemeMode(mode: ThemeMode): Result<Unit>
-    suspend fun setDynamicColor(enabled: Boolean): Result<Unit>
 
     suspend fun setNotificationsEnabled(enabled: Boolean): Result<Unit>
     suspend fun setNotificationPreview(showPreview: Boolean): Result<Unit>
@@ -327,10 +326,6 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override suspend fun setThemeMode(mode: ThemeMode): Result<Unit> = runCatching {
         themeStore.setMode(mode)
-    }
-
-    override suspend fun setDynamicColor(enabled: Boolean): Result<Unit> = runCatching {
-        themeStore.setDynamicColor(enabled)
     }
 
     override suspend fun setNotificationsEnabled(enabled: Boolean): Result<Unit> = runCatching {

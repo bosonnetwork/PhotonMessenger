@@ -72,7 +72,7 @@ class MainActivity : ComponentActivity() {
                 ThemeMode.LIGHT -> false
                 ThemeMode.DARK -> true
             }
-            PhotonTheme(darkTheme = darkTheme, dynamicColor = prefs.dynamicColor) {
+            PhotonTheme(darkTheme = darkTheme) {
                 PhotonNavHost()
             }
         }

@@ -320,10 +320,6 @@ class SettingsViewModel @Inject constructor(
         repository.setThemeMode(mode)
     }
 
-    fun setDynamicColor(enabled: Boolean) = run(R.string.settings_theme_change_error) {
-        repository.setDynamicColor(enabled)
-    }
-
     fun setNotificationsEnabled(enabled: Boolean) = run(R.string.settings_notifications_update_error) {
         repository.setNotificationsEnabled(enabled)
     }

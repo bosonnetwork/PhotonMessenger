@@ -23,6 +23,7 @@
 package io.bosonnetwork.photon.feature.settings
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -38,38 +39,47 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Login
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.Badge
+import androidx.compose.material.icons.outlined.Devices
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Password
+import androidx.compose.material.icons.outlined.Preview
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.SwitchAccount
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -87,14 +97,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -104,12 +115,17 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.bosonnetwork.Id
+import io.bosonnetwork.photon.core.designsystem.component.ActionRow
 import io.bosonnetwork.photon.core.designsystem.component.ConfirmDialog
 import io.bosonnetwork.photon.core.designsystem.component.LoadingState
+import io.bosonnetwork.photon.core.designsystem.component.PageColumn
 import io.bosonnetwork.photon.core.designsystem.component.PhotonAvatar
 import io.bosonnetwork.photon.core.designsystem.component.RecoveryCodesDialog
+import io.bosonnetwork.photon.core.designsystem.component.Section
+import io.bosonnetwork.photon.core.designsystem.component.SectionCard
+import io.bosonnetwork.photon.core.designsystem.component.cardItemColors
 import io.bosonnetwork.photon.core.designsystem.component.passphraseProblem
-import io.bosonnetwork.photon.core.designsystem.component.ResponsiveContent
+import io.bosonnetwork.photon.core.designsystem.theme.brand
 import io.bosonnetwork.photon.core.model.AppLanguage
 import io.bosonnetwork.photon.core.model.NotificationPreferences
 import io.bosonnetwork.photon.core.model.ThemeMode
@@ -119,7 +135,11 @@ import io.bosonnetwork.photon.feature.settings.model.UiProfile
 import io.bosonnetwork.photon.feature.settings.model.UiRecoveryMethods
 import kotlinx.coroutines.launch
 
-/** Settings hub: profile, appearance, devices, account (design spec screen 6, 2.6, M6). */
+/**
+ * Settings hub: profile, account and devices, appearance, notifications, security and about, as card
+ * sections like Boson Identity's (design spec screen 6, 2.6, M6). The theme applies at once;
+ * [onLanguageChange] persists the language and restarts the app.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -127,7 +147,7 @@ fun SettingsScreen(
     onOpenAccounts: () -> Unit,
     onOpenSessions: () -> Unit,
     onOpenDevices: () -> Unit,
-    onOpenLanguage: () -> Unit,
+    onLanguageChange: (AppLanguage) -> Unit,
     onShowIdentityKey: () -> Unit,
     onBackUpKey: () -> Unit,
     onSignedOut: () -> Unit,
@@ -159,6 +179,8 @@ fun SettingsScreen(
     val context = LocalContext.current
     var showIdQr by rememberSaveable { mutableStateOf(false) }
     var confirmSignOut by rememberSaveable { mutableStateOf(false) }
+    var choosingTheme by rememberSaveable { mutableStateOf(false) }
+    var choosingLanguage by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.passphraseUpdated.collect {
@@ -178,17 +200,22 @@ fun SettingsScreen(
     val topBarScroll = TopAppBarDefaults.enterAlwaysScrollBehavior()
     Scaffold(
         modifier = Modifier.nestedScroll(topBarScroll.nestedScrollConnection),
-        topBar = { TopAppBar(title = { Text(stringResource(R.string.settings_title)) }, scrollBehavior = topBarScroll) },
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.settings_title)) },
+                scrollBehavior = topBarScroll,
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+            )
+        },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        ResponsiveContent(modifier = Modifier.padding(padding)) {
-            when {
-                state.loading && state.profile == null -> LoadingState()
-
-                else -> Column(
-                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                ) {
-                    if (backupPending) BackupReminder(onBackUpKey)
+        if (state.loading && state.profile == null) {
+            LoadingState(Modifier.padding(padding))
+        } else {
+            PageColumn(Modifier.padding(padding)) {
+                if (backupPending) BackupReminder(onBackUpKey)
+                SectionCard {
                     ProfileHeader(
                         profile = state.profile,
                         onChangePhoto = { pickAvatar.launch("image/*") },
@@ -202,53 +229,63 @@ fun SettingsScreen(
                         onUpdate = viewModel::publishCard,
                         onRetry = viewModel::checkCard,
                     )
-                    HorizontalDivider()
+                }
 
+                Section(stringResource(R.string.settings_section_account)) {
                     state.profile?.let { profile ->
-                        SectionTitle(stringResource(R.string.settings_section_account))
                         UserIdRow(
                             userId = profile.id,
                             snackbar = snackbar,
                             onShowQr = { showIdQr = true },
                             onRevealIdentityKey = onShowIdentityKey,
                         )
-                        HorizontalDivider()
-                        ListItem(
-                            headlineContent = { Text(stringResource(R.string.settings_accounts_title)) },
-                            supportingContent = { Text(stringResource(R.string.settings_accounts_subtitle)) },
-                            modifier = Modifier.clickable(role = Role.Button, onClick = onOpenAccounts),
-                        )
-                        HorizontalDivider()
                     }
-
-                    SectionTitle(stringResource(R.string.settings_section_appearance))
-                    ThemeModeRow(theme.mode, viewModel::setThemeMode)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        SwitchRow(
-                            title = stringResource(R.string.settings_dynamic_color_title),
-                            subtitle = stringResource(R.string.settings_dynamic_color_subtitle),
-                            checked = theme.dynamicColor,
-                            onCheckedChange = viewModel::setDynamicColor,
-                        )
-                    }
-                    ListItem(
-                        headlineContent = { Text(stringResource(R.string.settings_language_title)) },
-                        supportingContent = { Text(currentLanguage.displayName()) },
-                        modifier = Modifier.clickable(role = Role.Button, onClick = onOpenLanguage),
+                    ActionRow(
+                        Icons.Outlined.SwitchAccount,
+                        stringResource(R.string.settings_accounts_title),
+                        stringResource(R.string.settings_accounts_subtitle),
+                        onClick = onOpenAccounts,
                     )
-                    HorizontalDivider()
+                    ActionRow(
+                        Icons.Outlined.Devices,
+                        stringResource(R.string.settings_devices_title),
+                        stringResource(R.string.settings_devices_subtitle),
+                        onClick = onOpenDevices,
+                    )
+                    ActionRow(
+                        Icons.AutoMirrored.Outlined.Login,
+                        stringResource(R.string.settings_sessions_title),
+                        stringResource(R.string.settings_sessions_subtitle),
+                        onClick = onOpenSessions,
+                    )
+                }
 
-                    SectionTitle(stringResource(R.string.settings_section_notifications))
+                Section(stringResource(R.string.settings_section_appearance)) {
+                    ActionRow(
+                        Icons.Outlined.Palette,
+                        stringResource(R.string.settings_theme_title),
+                        theme.mode.label(),
+                        onClick = { choosingTheme = true },
+                    )
+                    ActionRow(
+                        Icons.Outlined.Language,
+                        stringResource(R.string.settings_language_title),
+                        currentLanguage.label(),
+                        onClick = { choosingLanguage = true },
+                    )
+                }
+
+                Section(stringResource(R.string.settings_section_notifications)) {
                     NotificationSettings(
                         prefs = notifications,
                         onEnabledChange = viewModel::setNotificationsEnabled,
                         onPreviewChange = viewModel::setNotificationPreview,
                     )
-                    HorizontalDivider()
+                }
 
-                    // The account's passphrase is known only once the node answered.
-                    if (state.profile?.synced == true) {
-                        SectionTitle(stringResource(R.string.settings_section_security))
+                // The account's passphrase is known only once the node answered.
+                if (state.profile?.synced == true) {
+                    Section(stringResource(R.string.settings_section_security)) {
                         PassphraseSection(
                             protected = state.profile?.passphraseProtected == true,
                             recovery = state.profile?.recovery,
@@ -257,34 +294,48 @@ fun SettingsScreen(
                             onNewRecoveryCodes = { showNewRecoveryCodes = true },
                             onForgot = { showForgot = true },
                         )
-                        HorizontalDivider()
                     }
-
-                    ListItem(
-                        headlineContent = { Text(stringResource(R.string.settings_sessions_title)) },
-                        supportingContent = { Text(stringResource(R.string.settings_sessions_subtitle)) },
-                        modifier = Modifier.clickable(role = Role.Button, onClick = onOpenSessions),
-                    )
-                    HorizontalDivider()
-
-                    ListItem(
-                        headlineContent = { Text(stringResource(R.string.settings_devices_title)) },
-                        supportingContent = { Text(stringResource(R.string.settings_devices_subtitle)) },
-                        modifier = Modifier.clickable(role = Role.Button, onClick = onOpenDevices),
-                    )
-                    HorizontalDivider()
-
-                    AboutSection()
-                    HorizontalDivider()
-
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = { confirmSignOut = true },
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    ) { Text(stringResource(R.string.settings_sign_out_action), color = MaterialTheme.colorScheme.error) }
                 }
+
+                Section(stringResource(R.string.settings_section_about)) {
+                    AboutSection()
+                }
+
+                OutlinedButton(
+                    onClick = { confirmSignOut = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(stringResource(R.string.settings_sign_out_action), color = MaterialTheme.colorScheme.error) }
             }
         }
+    }
+
+    if (choosingTheme) {
+        ChoiceDialog(
+            title = stringResource(R.string.settings_theme_title),
+            options = ThemeMode.entries,
+            selected = theme.mode,
+            label = { it.label() },
+            onSelect = {
+                choosingTheme = false
+                viewModel.setThemeMode(it)
+            },
+            onDismiss = { choosingTheme = false },
+        )
+    }
+
+    if (choosingLanguage) {
+        ChoiceDialog(
+            title = stringResource(R.string.settings_language_title),
+            options = AppLanguage.selectable,
+            selected = currentLanguage,
+            label = { it.label() },
+            note = stringResource(R.string.settings_language_restart),
+            onSelect = {
+                choosingLanguage = false
+                if (it != currentLanguage) onLanguageChange(it)
+            },
+            onDismiss = { choosingLanguage = false },
+        )
     }
 
     if (editing) {
@@ -405,6 +456,8 @@ private fun UserIdRow(
     var lastTapAt by remember { mutableLongStateOf(0L) }
 
     ListItem(
+        colors = cardItemColors(),
+        leadingContent = { Icon(Icons.Outlined.Badge, contentDescription = null) },
         modifier = Modifier.clickable(role = Role.Button) {
             val now = System.currentTimeMillis()
             tapCount = if (now - lastTapAt > IDENTITY_KEY_TAP_WINDOW_MS) 1 else tapCount + 1
@@ -508,6 +561,7 @@ private fun UserIdQrDialog(userId: String, name: String, onDismiss: () -> Unit) 
     )
 }
 
+/** The app's name and version, and the Boson network's website. */
 @Composable
 private fun AboutSection() {
     val context = LocalContext.current
@@ -516,17 +570,64 @@ private fun AboutSection() {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }.getOrNull()
     }
-    SectionTitle(stringResource(R.string.settings_section_about))
-    ListItem(
-        headlineContent = { Text(stringResource(R.string.settings_about_app_name)) },
-        supportingContent = {
-            Text(
-                stringResource(
-                    R.string.settings_about_version_line,
-                    version ?: stringResource(R.string.settings_about_version_unknown),
-                ),
-            )
+    ActionRow(
+        Icons.Outlined.Info,
+        stringResource(R.string.settings_about_app_name),
+        stringResource(
+            R.string.settings_about_version_line,
+            version ?: stringResource(R.string.settings_about_version_unknown),
+        ),
+    )
+    ActionRow(
+        Icons.AutoMirrored.Outlined.OpenInNew,
+        stringResource(R.string.settings_about_website),
+        stringResource(R.string.settings_about_website_detail),
+        onClick = {
+            try {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(WEBSITE)))
+            } catch (e: ActivityNotFoundException) {
+                // No browser: nothing to open it with.
+            }
         },
+    )
+}
+
+private const val WEBSITE = "https://bosonnetwork.io"
+
+/** One of [options], picked with radio buttons; picking one closes the dialog. */
+@Composable
+private fun <T> ChoiceDialog(
+    title: String,
+    options: List<T>,
+    selected: T,
+    label: @Composable (T) -> String,
+    onSelect: (T) -> Unit,
+    onDismiss: () -> Unit,
+    note: String? = null,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.brand.card,
+        title = { Text(title) },
+        text = {
+            Column(Modifier.selectableGroup()) {
+                options.forEach { option ->
+                    Row(
+                        Modifier.fillMaxWidth().selectable(selected = option == selected, role = Role.RadioButton) { onSelect(option) }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = option == selected, onClick = null)
+                        Text(label(option), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 16.dp))
+                    }
+                }
+                note?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.settings_action_cancel)) } },
     )
 }
 
@@ -545,8 +646,10 @@ private fun PassphraseSection(
     onForgot: () -> Unit,
 ) {
     val icon = if (protected) Icons.Filled.CheckCircle else Icons.Filled.Warning
-    val tint = if (protected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+    val tint = if (protected) MaterialTheme.brand.success else MaterialTheme.colorScheme.error
     ListItem(
+        colors = cardItemColors(),
+        leadingContent = { Icon(Icons.Outlined.Password, contentDescription = null) },
         headlineContent = {
             Text(
                 if (protected) {
@@ -779,6 +882,8 @@ private fun ProfileCardRow(
         else -> Modifier
     }
     ListItem(
+        colors = cardItemColors(),
+        leadingContent = { Icon(Icons.Outlined.Public, contentDescription = null) },
         headlineContent = { Text(stringResource(R.string.settings_card_title)) },
         supportingContent = {
             Text(
@@ -910,6 +1015,7 @@ private fun NotificationSettings(
     ) { refreshKey++ }
 
     SwitchRow(
+        icon = Icons.Outlined.Notifications,
         title = stringResource(R.string.settings_notifications_enabled_title),
         subtitle = stringResource(R.string.settings_notifications_enabled_subtitle),
         checked = prefs.enabled,
@@ -917,6 +1023,7 @@ private fun NotificationSettings(
     )
     if (prefs.enabled) {
         SwitchRow(
+            icon = Icons.Outlined.Preview,
             title = stringResource(R.string.settings_notifications_preview_title),
             subtitle = stringResource(R.string.settings_notifications_preview_subtitle),
             checked = prefs.showPreview,
@@ -949,7 +1056,11 @@ private fun NotificationSettings(
 
 @Composable
 private fun GuidanceCard(title: String, body: String, action: String, onClick: () -> Unit) {
-    Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+    Surface(
+        color = MaterialTheme.brand.warning.copy(alpha = 0.12f),
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
         Column(Modifier.padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(4.dp))
@@ -960,36 +1071,6 @@ private fun GuidanceCard(title: String, body: String, action: String, onClick: (
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ThemeModeRow(current: ThemeMode, onSelect: (ThemeMode) -> Unit) {
-    val modes = ThemeMode.entries
-    // M3 single-choice button group: one connected control for the mutually-exclusive theme options,
-    // with the selected segment marked (check) - clearer as a single selector than separate chips.
-    SingleChoiceSegmentedButtonRow(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-    ) {
-        modes.forEachIndexed { index, mode ->
-            SegmentedButton(
-                selected = current == mode,
-                onClick = { onSelect(mode) },
-                shape = SegmentedButtonDefaults.itemShape(index = index, count = modes.size),
-                label = { Text(mode.label()) },
-            )
-        }
-    }
-}
-
-@Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
-    )
-}
-
 /**
  * A settings toggle whose entire row is the touch target with `Role.Switch` semantics, so TalkBack
  * announces the label plus on/off state and the 48dp+ row (not just the switch thumb) is actionable
@@ -997,17 +1078,20 @@ private fun SectionTitle(text: String) {
  */
 @Composable
 private fun SwitchRow(
+    icon: ImageVector,
     title: String,
     subtitle: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
     ListItem(
+        colors = cardItemColors(),
         modifier = Modifier.toggleable(
             value = checked,
             onValueChange = onCheckedChange,
             role = Role.Switch,
         ),
+        leadingContent = { Icon(icon, contentDescription = null) },
         headlineContent = { Text(title) },
         supportingContent = { Text(subtitle) },
         trailingContent = { Switch(checked = checked, onCheckedChange = null) },
@@ -1075,6 +1159,14 @@ private fun ThemeMode.label(): String = when (this) {
     ThemeMode.DARK -> stringResource(R.string.settings_theme_dark)
 }
 
+// Each language is named in itself, so it is found whatever the app shows now.
+@Composable
+private fun AppLanguage.label(): String = when (this) {
+    AppLanguage.SYSTEM -> stringResource(R.string.settings_language_system)
+    AppLanguage.ENGLISH -> stringResource(R.string.settings_language_native_english)
+    AppLanguage.SIMPLIFIED_CHINESE -> stringResource(R.string.settings_language_native_chinese)
+}
+
 /**
  * Shown while the backup of an identity made on this phone hasn't been checked: without a copy, losing
  * the phone loses the identity.
@@ -1083,7 +1175,7 @@ private fun ThemeMode.label(): String = when (this) {
 private fun BackupReminder(onBackUpKey: () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(16.dp)) {
             Text(
