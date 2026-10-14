@@ -1,12 +1,12 @@
 # Photon
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B-green.svg)](https://developer.android.com/)
+[![Platform](https://img.shields.io/badge/Platform-Android%2013%2B-green.svg)](https://developer.android.com/)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.1-purple.svg)](https://kotlinlang.org/)
 [![Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-blue.svg)](https://developer.android.com/jetpack/compose)
 
 **Photon** is an end-to-end encrypted, federated messenger for Android, built on the
-[Boson Network](https://github.com/bosonnetwork) stack.
+[Boson Network](https://bosonnetwork.io) stack.
 
 ---
 
@@ -20,7 +20,6 @@
 - [Getting Started](#getting-started)
 - [Build from Source](#build-from-source)
 - [Testing](#testing)
-- [Documentation](#documentation)
 - [Related Projects](#related-projects)
 - [Contributing](#contributing)
 - [License](#license)
@@ -30,8 +29,8 @@
 ## Overview
 
 Photon is a messaging app with no company in the middle. There is no Photon account, no phone
-number, and no central address book. Your identity **is** an Ed25519 key pair generated on your
-device; its public key is your globally unique user id, and the private key never leaves the phone.
+number, and no central address book. Your identity **is** an Ed25519 key pair made on your phone;
+its public key is your globally unique user id, and the private key stays with you.
 
 Photon is **federated**, in much the same sense that email is federated. Anyone can run a Boson
 **super node**; you pick one as your home node and connect to it, as you would pick a mail
@@ -43,8 +42,8 @@ the device holds the authoritative copy of your data.
 What a super node does is route ciphertext and hold it briefly for offline delivery. What it does
 **not** do is read it. See [Security](#security).
 
-**Project status:** version 0.5.1, feature-complete for the core messaging experience and in active
-development. APIs, wire formats, and storage schemas may still change between releases. See
+**Project status:** version 0.8.0, pre-1.0 and in active development. Runs on **Android 13 (API 33)
+and later**. APIs, wire formats, and storage schemas may still change between releases. See
 [CHANGELOG.md](CHANGELOG.md) for what each release contains.
 
 ---
@@ -53,18 +52,19 @@ development. APIs, wire formats, and storage schemas may still change between re
 
 Boson Network is a two-layer peer-to-peer platform: a Kademlia DHT (layer 1) carrying identity,
 discovery, and signalling, and application services (layer 2) hosted on super nodes. Photon is a
-**client** of two of those layer-2 services, plus the Director's REST API.
+**client** of the super node's services and of its Director's REST API.
 
 ```
   +---------------------------------------------------------------+
   |                        Photon (Android)                       |
   |      Jetpack Compose UI  .  ViewModels  .  Repositories       |
   +---------------------------------------------------------------+
-        |                    |                          |
-   Director REST      Messaging client              Ion Store
-   (HTTPS/JSON)       (MQTTS, E2E encrypted)        (HTTPS, encrypted blobs)
-        |                    |                          |
-        v                    v                          v
+       |                |                    |              |
+  Director REST   Messaging client       Ion Store      Web Gateway
+  (HTTPS/JSON)    (MQTTS, E2E encrypted) (HTTPS,        (HTTPS, public
+       |                |                encrypted       profile card)
+       |                |                blobs)             |
+       v                v                    v              v
   +---------------------------------------------------------------+
   |                    Boson Super Node (layer 2)                 |
   |  Director  .  Messaging service  .  Ion Store  .  WebGateway  |
@@ -78,18 +78,24 @@ discovery, and signalling, and application services (layer 2) hosted on super no
 ```
 
 - **Director** - the super node's supervisor and REST API (`/api/v1/...`). Photon uses it for
-  account registration, identity binding, service discovery, profile and avatar storage, and the
-  device registry. It issues a CWT (a CBOR-encoded, Ed25519-signed bearer token) for the
+  account registration, device registration and approval, service discovery, the profile and avatar,
+  and the passphrase. It issues a CWT (a CBOR-encoded, Ed25519-signed bearer token) for the
   authenticated routes.
 - **Messaging service** - an MQTTS broker that relays already-encrypted payloads between clients
   and queues them for offline devices.
 - **Ion Store** - a content-addressed object store, used for attachments too large to inline in a
   message.
+- **Web Gateway** - the DHT on the phone's behalf: Photon publishes your public profile card through
+  it, and it keeps announcing the card while your phone is off.
 
 Photon does **not** run an embedded DHT node on the phone - that would be costly on battery and
-awkward behind mobile NAT. It resolves the messaging and Ion Store coordinates from the Director's
-`GET /api/v1/client/node` endpoint and then talks to those services directly. Running a full node
-remains possible for self-hosted deployments; it is simply out of scope for the mobile client.
+awkward behind mobile NAT. It resolves the service coordinates from the Director's
+`GET /api/v1/client/node` endpoint and then talks to those services directly.
+
+**Boson Identity.** [Boson Identity](https://github.com/bosonnetwork/BosonIdentity) is the companion
+app that holds your Boson identity on your phone. With it installed, Photon can join your identity
+in one step: Boson Identity tells Photon your home node and approves the phone as a new device,
+with nothing to scan or type. It is optional; Photon works on its own too.
 
 ---
 
@@ -122,27 +128,40 @@ remains possible for self-hosted deployments; it is simply out of scope for the 
 
 ### Identity and devices
 
-- **Three ways to get an account**, all of which keep the private key on the device:
-  - **Permissionless creation** gated by a proof-of-work challenge - no third party involved.
-  - **OAuth sign-in** (Google, GitHub) where the operator requires it, used for onboarding only
-    and never as the ongoing authenticator.
-  - **Import an existing identity key**, by QR scan from another device or by pasting it.
-- **Multi-device support** - pair a new device by QR, approve it from an existing one, and watch
-  the live session list. Devices can be deregistered and sessions revoked remotely.
-- **Multiple accounts on one phone** - each Boson identity gets its own isolated profile
-  (separate database, separate secrets), switchable from Settings. Signing out ends the session
-  without destroying local data.
-- **Profile and avatar** hosted by the Director, plus an optional passphrase gating sensitive
-  actions such as adding a device or revealing the identity key.
+- **Identity first.** A new identity is made on the phone, and you back up its key (as a file, a
+  QR code or text) and check the backup before the account is created. Creating it on the node
+  passes a proof-of-work check - no third party involved.
+- **Bring in an existing identity** in one of three ways:
+  - with **Boson Identity on the same phone**, which gives Photon your home node and approves the
+    phone, with nothing to scan;
+  - by **approving the phone from another device**: Photon shows a pairing code, which Boson
+    Identity or Photon on another device scans and approves;
+  - by **importing your key backup** (file, QR code or text).
+- **Devices and sessions** - see your devices and live sessions, approve a new device by its
+  pairing code, revoke a session, and remove a device.
+- **Multiple accounts on one phone** - each Boson identity gets its own isolated profile (separate
+  database, separate keys), shown with its avatar and home node and switchable from Settings.
+  Signing out ends the session without destroying local data.
+- **Profile** - name, bio and photo, kept on the phone and synced with your home node, so a change
+  made elsewhere is never silently overwritten.
+- **Public profile card** - optionally publish your name, bio, photo and home node, so that anyone
+  who knows your ID can look them up.
+- **Passphrase** - an optional passphrase guards sensitive account changes, such as adding or
+  removing a device. Recovery codes reset a forgotten one, as can the node's web portal or Boson
+  Identity, with a linked account or a passkey.
 
 ### Application
 
-- Material 3 UI with light, dark, and dynamic color; **English and Simplified Chinese**.
-- Foreground service keeping the messaging connection alive, with local notifications for
-  messages and friend requests (previews can be suppressed).
+- Material 3 UI in the Boson brand colors, with light and dark themes; **English and Simplified
+  Chinese**.
+- A foreground service keeping the messaging connection alive, with local notifications for
+  messages and friend requests (previews can be suppressed), and guidance for exempting Photon from
+  battery optimization.
 - Connection-state banner that distinguishes a recoverable reconnect from a terminal failure -
   an exceeded session quota, say - and offers the right next step.
-- QR codes for your own id, for device pairing, and for the super node address.
+- Scanners that recognize every Boson code: a super node, a contact's ID, a device's pairing code,
+  or a key backup - and that point to Boson Identity for the codes that belong there (a web
+  sign-in, an administrator enrollment, moving to a new phone).
 
 ### Not implemented, by design
 
@@ -188,12 +207,13 @@ receipts, encrypted and content-addressed blobs - but it does not claim to hide 
 
 ### Keys and local storage
 
-- The **user private key never leaves the device.** Registration binds only the *public* key to
-  the account. Even in the multi-device transfer flow the key is end-to-end encrypted to the
-  receiving device before the Director relays it, as opaque bytes.
-- Private keys are held in an encrypted store backed by the **Android Keystore** (hardware-backed
-  where the device provides it), never in cleartext, and an optional passphrase can gate the
-  operations that expose or extend them.
+- The **user private key never reaches a server.** Registration binds only the *public* key to
+  the account. When a new device asks for the key, it is sealed to the pairing code that device
+  shows before the Director relays it, as opaque bytes.
+- The identity's keys are sealed by an AES-256-GCM key in the **Android Keystore** (StrongBox
+  where the phone has one), never stored in cleartext. Photon decrypts messages in the background,
+  so this key opens without asking you each time; for a key that asks on every use, keep your
+  identity in Boson Identity.
 - The local message database and all cached media live in app-private storage.
 - Keys are libsodium-style 64-byte Ed25519 private keys (seed followed by public key) throughout.
 
@@ -201,7 +221,7 @@ receipts, encrypted and content-addressed blobs - but it does not claim to hide 
 
 Transport security is a second layer beneath the end-to-end encryption, not a substitute for it.
 
-- HTTPS to the Director and Ion Store; MQTTS to the messaging service.
+- HTTPS to the Director, Ion Store and Web Gateway; MQTTS to the messaging service.
 - Services are authenticated by **pinning the Boson node identity**, not by trusting a public CA.
   A super node's TLS certificate carries a binding to its Ed25519 node key, and the client checks
   that binding against the node id you configured - so a self-signed operator certificate is
@@ -212,10 +232,9 @@ Transport security is a second layer beneath the end-to-end encryption, not a su
 
 ### Authentication is by Boson identity
 
-Where an operator enables OAuth, it is **onboarding-only KYC** - a Sybil-resistance and
-profile-population step. Once a Boson identity is bound, the session is authenticated solely by
-that identity and no OAuth token is retained. An account created through the proof-of-work path
-never involves a third-party identity provider at all.
+Photon signs in with your Boson keys only: there is no OAuth and no third-party identity provider
+in the app. Sign-in accounts you link on your node's web portal (Google, GitHub) are for the portal,
+and for resetting a forgotten passphrase.
 
 > **Disclaimer.** Photon has not undergone an independent third-party security audit. Please
 > evaluate it accordingly before relying on it for high-risk communication, and report suspected
@@ -233,16 +252,17 @@ injection with Hilt, asynchrony with coroutines bridged onto the Boson libraries
 :app                 Application, MainActivity, navigation, DI wiring, foreground service,
                      notifications, session control, account switching
 :core:model          Pure-Kotlin domain entities, unified AppError model, display-profile policy
-:core:designsystem   Material 3 theme (light/dark/dynamic), tokens, shared components
+:core:designsystem   Boson brand theme (light/dark), tokens, card sections, shared components
 :core:network        Director configuration and app preferences (DataStore)
-:core:security       Android Keystore key management, encrypted secret store, profile isolation
+:core:security       Keystore-sealed identity vault, encrypted secret store, profile isolation
 :core:database       Room storage for cold-start rendering and app-owned state
-:core:boson-wrapper  Director, MessagingClient and IonStore clients, coroutine bridges, CBOR codecs
+:core:boson-wrapper  Director, MessagingClient, IonStore and Web Gateway clients, coroutine
+                     bridges, CBOR codecs, profile cards
 :core:qr             QR encoding and camera scanning (CameraX + ML Kit)
-:feature:onboarding  Super node selection, registration (PoW / OAuth / import), identity binding
+:feature:onboarding  Home node, new identity and key backup, pairing, import, Boson Identity
 :feature:chat        Conversations list, chat thread, forwarding, image viewer, attachments
 :feature:contacts    Contacts, friend requests, channels, invitations, moderation
-:feature:settings    Profile, devices, sessions, pairing, language, appearance
+:feature:settings    Profile and public card, devices, sessions, passphrase, theme, language
 :baselineprofile     Startup baseline profile generation (macrobenchmark)
 ```
 
@@ -258,33 +278,27 @@ wires them together. Repositories own all Boson library access, so the UI layer 
 
 Photon needs a Boson super node to connect to. Either use one that someone already operates, or
 run your own from [Boson.Releases](https://github.com/bosonnetwork/Boson.Releases) - the release
-archives and DEB packages there bundle the Director, the messaging service, and Ion Store. The
-super node's user portal shows the address and node id you will need.
+archives and DEB packages there bundle the Director, the messaging service, Ion Store and the Web
+Gateway. The super node's user portal shows its code (a QR code) and address.
 
-### 2. Connect the app
+### 2. Set up your identity
 
-On first launch Photon asks for the super node address:
+On first launch, choose **Create a new identity** or **I already have an identity**.
 
-- **Super Node URL** - for example `https://node.example.com:9000`.
-- **Server ID** (advanced) - the super node's Boson node id in base58. Required to trust a
-  self-signed certificate; leave it blank if the node is fronted by a public CA certificate.
+- **New identity** - choose your home node by scanning its code or entering its address. Photon
+  makes your key on the phone and has you back it up and check the backup. It then asks for a
+  display name, and creates your account after a one-time proof-of-work check (a few seconds; the
+  time varies).
+- **Existing identity** - if Boson Identity is on the phone, choose **Use Boson Identity on this
+  phone** and approve there. Otherwise choose your identity's home node, then either show a pairing
+  code to approve from another device, or import your key backup.
 
-Scanning the QR code from the node's user portal fills both in automatically.
+To trust a super node with a self-signed certificate, enter its node id under **Advanced options**
+(scanning the node's code fills it in).
 
-### 3. Create or import your identity
+### 3. Start messaging
 
-- **Create a new account** - Photon generates your key pair on the device and solves a one-time
-  proof-of-work challenge (a few seconds; the exact time varies), then asks for a display name and
-  an optional passphrase.
-- **Sign in to an existing account** - import your identity key by scanning the QR code from a
-  device where you are already signed in, or by pasting the key.
-
-Where the operator has enabled OAuth, signing in with Google or GitHub is offered as an
-alternative onboarding route.
-
-### 4. Start messaging
-
-Share your Boson id - Settings shows it as text and as a QR code - add a contact by id or QR, and
+Share your Boson ID - Settings shows it as text and as a QR code - add a contact by ID or QR, and
 send. Create a channel from Contacts to start a group.
 
 ---
@@ -299,16 +313,11 @@ send. Create a channel from Contacts to start a group.
 | Android SDK | Platform `android-36`, build-tools 36.x |
 | Android Studio | Ladybug or later (optional, but the supported IDE) |
 | Gradle | 8.13, through the bundled wrapper - nothing to install |
+| Device or emulator | Android 13 (API 33) or later |
 
-Photon runs on **Android 8.0 (API 26) and later**, compiles against API 36, and enables Java 8+
-API desugaring because it dexes the JVM Boson stack (Vert.x 5, Netty, Jackson). A few capabilities
-need a newer platform and are simply absent below it: voice messages and saving media to the
-gallery need Android 10 (API 29), dynamic color needs Android 12 (API 31), and notifications ask
-for a runtime permission from Android 13 (API 33).
-
-The Boson client libraries - `boson-messaging-client`, `boson-ion-store-client` and
-`boson-director-client`, all at `3.1.2` - are released on Maven Central, so there is nothing to
-clone or install by hand.
+The Boson client libraries - `boson-messaging-client`, `boson-ion-store-client`,
+`boson-director-client` and `boson-higgs` - come from Maven Central with the other dependencies, so
+there is nothing to clone or install by hand.
 
 ### Build the app
 
@@ -343,6 +352,10 @@ testable.
 
 ### Development environment notes
 
+- `build-logic` holds a small Gradle plugin that every module applies. Vert.x 5.1 cannot start on
+  Android without it: the plugin opens a private field that ART refuses to reach.
+- The JVM Boson stack (Vert.x 5, Netty, Jackson) is dexed into the app, so Java 8+ API desugaring
+  is on.
 - The Gradle build uses the configuration cache and parallel execution. If you hit a
   configuration-cache error after changing build logic, re-run with `--no-configuration-cache` to
   see the underlying failure.
@@ -350,7 +363,7 @@ testable.
   through `BosonClientFactory.newVertx()`, which disables it.
 - Boson client wire DTOs consumed by the app must be plain classes, not Java records: Jackson's
   record support fails on Android, and only in release builds.
-- The build still resolves from `mavenLocal()`, so an unreleased Boson snapshot can be tested by
+- The build also resolves from `mavenLocal()`, so an unreleased Boson snapshot can be tested by
   running `./mvnw clean install` in the Boson repository and pointing `boson` in
   `gradle/libs.versions.toml` at that version. **Always include `clean`:** a bare incremental
   `install` can package whatever already sits in `target/classes`, including IDE-compiled classes
@@ -369,27 +382,14 @@ testable.
 Unit tests are hermetic and use `mockk` and `turbine`. The instrumented tests come in two kinds:
 the `:core` ones (Room storage, Compose components) need only a device or emulator, while the
 `:app` `Live*` tests drive the real Boson stack against a running super node - point them at your
-own by editing `TestSuperNode` in `app/src/androidTest`. `docs/d1-run-checklist.md` collects the
-manual on-device checks that cannot be automated.
-
----
-
-## Documentation
-
-| Document | Contents |
-|---|---|
-| [`docs/photon_messenger_design_spec.md`](docs/photon_messenger_design_spec.md) | The implementation blueprint: Boson API analysis, auth and identity flows, screen specs, architecture, roadmap |
-| [`docs/impl-plan.md`](docs/impl-plan.md) | Milestone task tracker |
-| [`docs/d1-run-checklist.md`](docs/d1-run-checklist.md) | Manual device-gated verification checklist |
-| [`docs/security-review.md`](docs/security-review.md) | Security review notes |
-| [`docs/persistence-option-a.md`](docs/persistence-option-a.md) | Local persistence design |
-| [`docs/m0-build-report.md`](docs/m0-build-report.md) | Integration risk notes on running the JVM Boson stack on Android |
-| [`docs/m6-report.md`](docs/m6-report.md) | Release-polish milestone report |
+own by editing `TestSuperNode` in `app/src/androidTest`.
 
 ---
 
 ## Related Projects
 
+- [**Boson Identity**](https://github.com/bosonnetwork/BosonIdentity) - the Android app that holds
+  your Boson identity, approves your devices and web sign-ins, and administers a super node.
 - [**Boson.Core**](https://github.com/bosonnetwork/Boson.Core) - the Kademlia DHT node, Boson
   identity and cryptography, and the shared API every other module builds on.
 - [**Boson.Messaging.Client**](https://github.com/bosonnetwork/Boson.Messaging.Client) - the
@@ -420,10 +420,6 @@ version and device, and clear reproduction steps.
 **Reporting vulnerabilities.** Please do *not* open a public issue for a security problem. Email
 [support@bosonnetwork.io](mailto:support@bosonnetwork.io) with the details and give us a chance to
 ship a fix first.
-
-**House conventions.** ASCII-only punctuation in source, comments, logs, and configuration; new
-source files carry the project MIT header; user-visible strings live in `res/values` with a
-per-module prefix and must be mirrored in `values-zh-rCN`.
 
 Please read the [Code of Conduct](CODE_OF_CONDUCT.md) before contributing.
 
