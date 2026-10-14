@@ -13,7 +13,7 @@ android {
 
     defaultConfig {
         applicationId = "io.bosonnetwork.photon"
-        minSdk = 26
+        minSdk = 33
         targetSdk = 36
         versionCode = 1
         versionName = "0.8.0"

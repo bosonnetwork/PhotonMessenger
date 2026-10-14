@@ -8,15 +8,15 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        minSdk = 26
+        minSdk = 33
         consumerProguardFiles("consumer-rules.pro")
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-        // The Boson stack (Vert.x 5, Netty, Jackson) targets Java 11+; desugaring backfills
-        // java.time / java.util.function / try-with-resources APIs on minSdk 26.
+        // The Boson stack (Vert.x 5, Netty, Jackson) targets Java 11+; desugaring backfills the
+        // Java APIs that Android 13's runtime lacks.
         isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions {
