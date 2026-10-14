@@ -28,7 +28,7 @@ zxing = "3.5.3"
 securityCrypto = "1.1.0-alpha06"
 # Boson stack (Maven Central). Vert.x/Jackson/Netty match boson-dependencies BOM.
 boson = "3.2.0-SNAPSHOT"
-vertx = "5.0.11"
+vertx = "5.1.10"
 # Testing
 junit = "4.13.2"
 junitExt = "1.2.1"
@@ -97,7 +97,6 @@ boson-messaging-client = { group = "io.bosonnetwork", name = "boson-messaging-cl
 boson-ion-store-client = { group = "io.bosonnetwork", name = "boson-ion-store-client", version.ref = "boson" }
 boson-director-client = { group = "io.bosonnetwork", name = "boson-director-client", version.ref = "boson" }
 boson-higgs = { group = "io.bosonnetwork", name = "boson-higgs", version.ref = "boson" }
-vertx-lang-kotlin-coroutines = { group = "io.vertx", name = "vertx-lang-kotlin-coroutines", version.ref = "vertx" }
 slf4j-simple = { group = "org.slf4j", name = "slf4j-simple", version.ref = "slf4j" }
 # Testing
 junit = { group = "junit", name = "junit", version.ref = "junit" }

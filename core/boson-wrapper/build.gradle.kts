@@ -59,7 +59,6 @@ dependencies {
 
     // Async bridges (design spec section 4.5)
     implementation(libs.kotlinx.coroutines.jdk8)          // CompletableFuture.await() for MessagingClient
-    implementation(libs.vertx.lang.kotlin.coroutines)     // Future.coAwait() for IonStore
     implementation(libs.kotlinx.coroutines.android)
 
     coreLibraryDesugaring(libs.desugar.jdk.libs)

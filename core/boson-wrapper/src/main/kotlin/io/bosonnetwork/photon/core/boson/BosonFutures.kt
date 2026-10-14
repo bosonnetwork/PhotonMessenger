@@ -23,9 +23,11 @@
 package io.bosonnetwork.photon.core.boson
 
 import io.vertx.core.Future
-import io.vertx.kotlin.coroutines.coAwait
 import java.util.concurrent.CompletableFuture
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.future.await as cfAwait
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
  * The Boson libraries expose two async types, so the data layer needs two bridges
@@ -35,7 +37,9 @@ import kotlinx.coroutines.future.await as cfAwait
  *    ContextualFuture (which *is* a CompletableFuture, completing on the caller's Vert.x context)
  *    -> both bridge with kotlinx-coroutines-jdk8 await().
  *  - The Vert.x io.vertx.core.Future surfaces (the messaging store SPI this app implements) ->
- *    bridge with the Vert.x coroutine coAwait().
+ *    bridge with the same few lines as Vert.x's own coAwait(). Not vertx-lang-kotlin-coroutines
+ *    itself: it is built with the newest Kotlin (2.3 from Vert.x 5.1), which would pin this app's
+ *    compiler to whatever Vert.x was built with.
  *
  * These thin aliases give call sites a single, consistent suspend point and a place to centralize
  * error mapping later (see [io.bosonnetwork.photon.core.model.AppError]).
@@ -48,4 +52,12 @@ import kotlinx.coroutines.future.await as cfAwait
 suspend fun <T> CompletableFuture<T>.awaitResult(): T = cfAwait()
 
 /** Suspends until this Vert.x future completes, rethrowing its cause on failure. */
-suspend fun <T> Future<T>.awaitResult(): T = coAwait()
+suspend fun <T> Future<T>.awaitResult(): T = when {
+    succeeded() -> result()
+    failed() -> throw cause()
+    else -> suspendCancellableCoroutine { cont ->
+        onComplete { ar ->
+            if (ar.succeeded()) cont.resume(ar.result()) else cont.resumeWithException(ar.cause())
+        }
+    }
+}

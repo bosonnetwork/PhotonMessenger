@@ -10,6 +10,7 @@ plugins {
     alias(libs.plugins.detekt) apply false
     alias(libs.plugins.android.test) apply false
     alias(libs.plugins.androidx.baselineprofile) apply false
+    id("io.bosonnetwork.vertx-android-fix") apply false
 }
 
 // The JVM Boson stack (Vert.x, Netty, Jackson, BouncyCastle) ships overlapping META-INF metadata and
@@ -36,6 +37,9 @@ val jvmMetadataExcludes = setOf(
 )
 
 subprojects {
+    // Vert.x 5.1 cannot start on Android without it; see build-logic/.../VertxAndroidFixPlugin.kt.
+    pluginManager.apply("io.bosonnetwork.vertx-android-fix")
+
     listOf("com.android.application", "com.android.library").forEach { plugin ->
         pluginManager.withPlugin(plugin) {
             extensions.configure<com.android.build.api.dsl.CommonExtension<*, *, *, *, *, *>>("android") {
