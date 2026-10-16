@@ -42,7 +42,7 @@ the device holds the authoritative copy of your data.
 What a super node does is route ciphertext and hold it briefly for offline delivery. What it does
 **not** do is read it. See [Security](#security).
 
-**Project status:** version 0.8.0, pre-1.0 and in active development. Runs on **Android 13 (API 33)
+**Project status:** version 0.8.1, pre-1.0 and in active development. Runs on **Android 13 (API 33)
 and later**. APIs, wire formats, and storage schemas may still change between releases. See
 [CHANGELOG.md](CHANGELOG.md) for what each release contains.
 
