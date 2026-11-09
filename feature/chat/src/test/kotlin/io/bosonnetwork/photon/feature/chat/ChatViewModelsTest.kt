@@ -441,6 +441,41 @@ class ChatViewModelsTest {
     }
 
     @Test
+    fun `retrying a failed text submission preserves its draft and ignores stale retry actions`() = runTest {
+        val repo = FakeChatRepo(convosFlow, msgsFlow, sendResult = Result.failure(IllegalStateException("offline")))
+        val vm = chatVm(repo, "abc")
+        vm.sendFailures.test {
+            vm.send("hello")
+            val failure = awaitItem()
+            repo.sendResult = Result.success(Unit)
+            vm.retrySend(failure)
+            runCurrent()
+            vm.retrySend(failure)
+            assertEquals(listOf("abc" to "hello", "abc" to "hello"), repo.sentTexts)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `delivery receipts cannot trigger message or attachment resubmission`() = runTest {
+        val repo = FakeChatRepo(convosFlow, msgsFlow)
+        val vm = chatVm(repo, "abc")
+        for (status in DeliveryStatus.entries) {
+            val attachment = UiAttachment(AttachmentKind.VOICE, VOICE_MIME, "voice.ogg", 1L,
+                source = AttachmentSource.Local("/not-read.ogg"), durationMs = 1000L)
+            val message = UiMessage("stored", "hello", true, 1L, attachment = attachment,
+                status = MessageStatus.FAILED, deliveryReceipt = UiDeliveryReceipt(status, null, 123L))
+            vm.retryAttachment(message)
+            vm.retryVoice(message)
+            vm.retrySend(SendFailure("", "hello", message.id))
+        }
+        runCurrent()
+        assertTrue(repo.sentTexts.isEmpty())
+        assertTrue(repo.attachmentSendIds.isEmpty())
+        assertTrue(repo.sentVoices.isEmpty())
+    }
+
+    @Test
     fun `dismissing a failed attachment releases its uploaded payload`() = runTest {
         // Abandoning the send has to tell the repository, or a payload it uploaded for the retry that
         // never came would be held until eviction.
@@ -648,6 +683,26 @@ class ChatViewModelsTest {
         assertEquals(2500L, duration)
         // The optimistic bubble is dropped once the (successful) send confirms.
         assertTrue(vm.uiState.value.messages.isEmpty())
+    }
+
+    @Test
+    fun `a failed voice submission remains retryable`() = runTest {
+        val repo = FakeChatRepo(convosFlow, msgsFlow, sendResult = Result.failure(IllegalStateException("offline")))
+        val vm = chatVm(repo, "abc")
+        vm.uiState.test {
+            var state = awaitItem()
+            while (state.loading) state = awaitItem()
+            vm.startRecording()
+            vm.stopAndSendRecording()
+            var failed = awaitItem()
+            while (failed.messages.singleOrNull()?.status != MessageStatus.FAILED) failed = awaitItem()
+            repo.sendResult = Result.success(Unit)
+            vm.retryVoice(failed.messages.single())
+            runCurrent()
+            assertEquals(2, repo.sentVoices.size)
+            assertEquals(repo.sentVoices[0], repo.sentVoices[1])
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     @Test

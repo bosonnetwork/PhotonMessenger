@@ -306,6 +306,7 @@ class ChatViewModel @Inject constructor(
 
     /** Re-sends a failed optimistic bubble in place (M3-4/M3-8). */
     fun retrySend(failure: SendFailure) {
+        if (pending.value.none { it.id == failure.pendingId && it.canRetrySubmission }) return
         pending.update { list ->
             list.map { if (it.id == failure.pendingId) it.copy(status = MessageStatus.SENDING) else it }
         }
@@ -435,6 +436,8 @@ class ChatViewModel @Inject constructor(
 
     /** Re-uploads a failed optimistic attachment bubble in place. */
     fun retryAttachment(message: UiMessage) {
+        if (!message.canRetrySubmission) return
+        if (pending.value.none { it.id == message.id && it.canRetrySubmission }) return
         val source = message.attachment?.source as? AttachmentSource.Local ?: return
         pending.update { list ->
             list.map { if (it.id == message.id) it.copy(status = MessageStatus.SENDING) else it }
@@ -575,6 +578,8 @@ class ChatViewModel @Inject constructor(
 
     /** Re-sends a failed optimistic voice bubble in place. */
     fun retryVoice(message: UiMessage) {
+        if (!message.canRetrySubmission) return
+        if (pending.value.none { it.id == message.id && it.canRetrySubmission }) return
         val attachment = message.attachment ?: return
         val source = attachment.source as? AttachmentSource.Local ?: return
         pending.update { list ->

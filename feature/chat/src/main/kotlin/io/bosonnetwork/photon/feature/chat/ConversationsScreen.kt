@@ -81,6 +81,9 @@ import io.bosonnetwork.photon.core.designsystem.component.ResponsiveContent
 import io.bosonnetwork.photon.core.designsystem.component.formatListTime
 import io.bosonnetwork.photon.feature.chat.R
 import io.bosonnetwork.photon.feature.chat.model.UiConversation
+import io.bosonnetwork.photon.feature.chat.model.MessageStatus
+import io.bosonnetwork.photon.core.designsystem.theme.brand
+import io.bosonnetwork.photonmessaging.DeliveryStatus
 
 /** Conversation list / main dashboard (design spec screen 3). */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -160,7 +163,7 @@ fun ConversationsScreen(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ConversationRow(
+internal fun ConversationRow(
     conversation: UiConversation,
     onClick: () -> Unit,
     onDelete: () -> Unit,
@@ -217,11 +220,30 @@ private fun ConversationRow(
                     horizontalAlignment = Alignment.End,
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Text(
-                        formatListTime(conversation.updatedAt),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Text(
+                            formatListTime(conversation.updatedAt),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (conversation.lastMessageFromMe) {
+                            val status = conversation.deliveryReceipt?.status
+                            DeliveryIndicator(
+                                status = MessageStatus.SENT,
+                                receipt = conversation.deliveryReceipt,
+                                isChannel = conversation.isChannel,
+                                tint = when {
+                                    status == DeliveryStatus.EXPIRED -> MaterialTheme.brand.warning
+                                    status?.failureTextRes() != null -> MaterialTheme.colorScheme.error
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.size(13.dp),
+                            )
+                        }
+                    }
                     CountBadge(conversation.unreadCount)
                 }
             },

@@ -76,7 +76,6 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Audiotrack
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
@@ -91,7 +90,6 @@ import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -164,6 +162,8 @@ import io.bosonnetwork.photon.core.designsystem.component.formatBubbleTime
 import io.bosonnetwork.photon.core.designsystem.component.formatDayHeader
 import io.bosonnetwork.photon.core.designsystem.component.identityColor
 import io.bosonnetwork.photon.core.designsystem.component.sameDay
+import io.bosonnetwork.photon.core.designsystem.theme.brand
+import io.bosonnetwork.photonmessaging.DeliveryStatus
 import io.bosonnetwork.photon.feature.chat.R
 import io.bosonnetwork.photon.feature.chat.data.VoicePlayer
 import io.bosonnetwork.photon.feature.chat.model.AttachmentKind
@@ -557,7 +557,7 @@ private fun DayHeader(epochMillis: Long) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(
+internal fun MessageBubble(
     message: UiMessage,
     isChannel: Boolean,
     showSender: Boolean,
@@ -577,7 +577,7 @@ private fun MessageBubble(
     modifier: Modifier = Modifier,
 ) {
     val alignment = if (message.fromMe) Alignment.End else Alignment.Start
-    val failed = message.status == MessageStatus.FAILED
+    val failed = message.canRetrySubmission
     val baseColor = if (message.fromMe) MaterialTheme.colorScheme.primary
     else MaterialTheme.colorScheme.surfaceContainerHigh
     val color = if (failed) MaterialTheme.colorScheme.errorContainer else baseColor
@@ -611,7 +611,7 @@ private fun MessageBubble(
     // A sending bubble is slightly muted until it is confirmed on the live stream (M3-4).
     val bubbleModifier = Modifier
         .widthIn(max = maxBubbleWidth)
-        .then(if (message.status == MessageStatus.SENDING) Modifier.alpha(0.75f) else Modifier)
+        .then(if (message.isSubmitting) Modifier.alpha(0.75f) else Modifier)
 
     Column(modifier = modifier.fillMaxWidth(), horizontalAlignment = alignment) {
         Box {
@@ -656,7 +656,7 @@ private fun MessageBubble(
                             onJoin = { onJoinInvite(message) },
                             onIgnore = { onIgnoreInvite(message) },
                         )
-                        BubbleMeta(message, onColor, Modifier.align(Alignment.End))
+                        BubbleMeta(message, isChannel, onColor, Modifier.align(Alignment.End))
                     } else if (message.attachment != null) {
                         // Voice playback state for this bubble: the player reports a single active note,
                         // so a note that isn't the active one shows its length and a play affordance.
@@ -671,7 +671,7 @@ private fun MessageBubble(
                         AttachmentContent(
                             attachment = message.attachment,
                             download = download,
-                            sending = message.status == MessageStatus.SENDING,
+                            sending = message.isSubmitting,
                             onColor = onColor,
                             voice = voice,
                             onDownload = onDownload,
@@ -679,10 +679,11 @@ private fun MessageBubble(
                             onToggleVoice = { onToggleVoice(message) },
                             onLongPress = openMenu,
                         )
-                        BubbleMeta(message, onColor, Modifier.align(Alignment.End))
+                        BubbleMeta(message, isChannel, onColor, Modifier.align(Alignment.End))
                     } else {
                         BubbleTextContent(
                             message = message,
+                            isChannel = isChannel,
                             onColor = onColor,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                         )
@@ -716,13 +717,23 @@ private fun MessageBubble(
         }
         if (failed) {
             Text(
-                text = stringResource(R.string.chat_not_delivered_tap_retry),
+                text = stringResource(R.string.chat_send_unconfirmed_tap_retry),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier
                     .clickable { onRetry(message) }
                     .padding(horizontal = 12.dp, vertical = 2.dp),
             )
+        } else if (message.fromMe) {
+            message.deliveryReceipt?.status?.failureTextRes()?.let { text ->
+                Text(
+                    text = stringResource(text),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (message.deliveryReceipt?.status == DeliveryStatus.EXPIRED) MaterialTheme.brand.warning
+                        else MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp).widthIn(max = maxBubbleWidth),
+                )
+            }
         }
     }
 }
@@ -874,10 +885,10 @@ private fun InviteStatus(text: String, color: Color) {
  * full bubble width and only the last line yields space to the timestamp.
  */
 @Composable
-private fun BubbleTextContent(message: UiMessage, onColor: Color, modifier: Modifier = Modifier) {
+private fun BubbleTextContent(message: UiMessage, isChannel: Boolean, onColor: Color, modifier: Modifier = Modifier) {
     val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
     SubcomposeLayout(modifier) { constraints ->
-        val metaPlaceable = subcompose("meta") { BubbleMeta(message, onColor) }
+        val metaPlaceable = subcompose("meta") { BubbleMeta(message, isChannel, onColor) }
             .first().measure(Constraints())
 
         var layout: TextLayoutResult? = null
@@ -914,9 +925,9 @@ private fun BubbleTextContent(message: UiMessage, onColor: Color, modifier: Modi
 
 /** Time + delivery state rendered inside the bubble's trailing corner. */
 @Composable
-private fun BubbleMeta(message: UiMessage, onColor: Color, modifier: Modifier = Modifier) {
+private fun BubbleMeta(message: UiMessage, isChannel: Boolean, onColor: Color, modifier: Modifier = Modifier) {
     Row(
-        modifier = if (message.attachment != null) {
+        modifier = if (message.attachment != null || message.invite != null) {
             modifier.padding(end = 10.dp, bottom = 4.dp, start = 10.dp)
         } else {
             modifier
@@ -930,20 +941,12 @@ private fun BubbleMeta(message: UiMessage, onColor: Color, modifier: Modifier = 
             color = onColor.copy(alpha = 0.75f),
         )
         if (message.fromMe) {
-            val icon = when (message.status) {
-                MessageStatus.SENDING -> Icons.Filled.Schedule
-                MessageStatus.SENT -> Icons.Filled.Check
-                MessageStatus.FAILED -> Icons.Filled.ErrorOutline
-            }
-            Icon(
-                icon,
-                contentDescription = when (message.status) {
-                    MessageStatus.SENDING -> stringResource(R.string.chat_status_sending)
-                    MessageStatus.SENT -> stringResource(R.string.chat_status_sent)
-                    MessageStatus.FAILED -> stringResource(R.string.chat_status_failed)
-                },
-                modifier = Modifier.size(13.dp),
+            DeliveryIndicator(
+                status = message.status,
+                receipt = message.deliveryReceipt,
+                isChannel = isChannel,
                 tint = onColor.copy(alpha = 0.75f),
+                modifier = Modifier.size(13.dp),
             )
         }
     }

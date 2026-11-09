@@ -31,7 +31,7 @@
     <!-- ChatScreen: delete-message dialog -->
     <string name="chat_delete_message_title">Delete message?</string>
     <string name="chat_delete_message_text">This removes the message from this device only.</string>
-    <string name="chat_not_delivered_tap_retry">Not delivered. Tap to retry</string>
+    <string name="chat_send_unconfirmed_tap_retry">Send not confirmed. Tap to retry</string>
 
     <!-- ChatScreen: channel-invite bubble -->
     <string name="chat_invite_label">Channel invitation</string>
@@ -43,8 +43,20 @@
 
     <!-- ChatScreen: message delivery status -->
     <string name="chat_status_sending">Sending</string>
-    <string name="chat_status_sent">Sent</string>
-    <string name="chat_status_failed">Failed</string>
+    <string name="chat_status_sent">Accepted by your service</string>
+    <string name="chat_status_failed">Send not confirmed</string>
+
+    <string name="chat_status_delivered">Accepted by recipient\'s service</string>
+    <string name="chat_status_delivered_channel">Accepted by channel host</string>
+    <string name="chat_delivery_failed">Delivery failed</string>
+    <string name="chat_delivery_recipient_unresolved">Recipient could not be located</string>
+    <string name="chat_delivery_recipient_unknown">Recipient not found</string>
+    <string name="chat_delivery_not_federating">Recipient\'s service does not accept messages from other services</string>
+    <string name="chat_delivery_federation_refused">Delivery between the services was refused</string>
+    <string name="chat_delivery_peer_unresolved">Recipient\'s service could not be located</string>
+    <string name="chat_delivery_peer_unverified">Recipient\'s service could not be verified</string>
+    <string name="chat_delivery_expired">Delivery not confirmed</string>
+    <string name="chat_delivery_internal_error">A service error stopped delivery</string>
 
     <!-- ChatScreen: voice / file attachment bubbles -->
     <string name="chat_a11y_voice_playing">Voice message, %1$s, playing, tap to pause</string>

@@ -114,7 +114,13 @@ data class UiMessage(
     /** Store-assigned numeric id used to remove this message locally; null for optimistic bubbles
      *  (M3-4) that are not yet persisted. */
     val rid: Long? = null,
-)
+) {
+    val isSubmitting: Boolean
+        get() = fromMe && status == MessageStatus.SENDING && deliveryReceipt == null
+
+    val canRetrySubmission: Boolean
+        get() = fromMe && status == MessageStatus.FAILED && deliveryReceipt == null
+}
 
 fun Conversation.toUi(myUserId: Id?, avatarUrl: String? = null): UiConversation {
     val channel = isChannel()

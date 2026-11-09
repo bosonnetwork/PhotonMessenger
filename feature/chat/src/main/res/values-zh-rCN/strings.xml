@@ -31,7 +31,7 @@
     <!-- ChatScreen: delete-message dialog -->
     <string name="chat_delete_message_title">删除消息?</string>
     <string name="chat_delete_message_text">此操作仅从本设备删除该消息。</string>
-    <string name="chat_not_delivered_tap_retry">未送达,点击重试</string>
+    <string name="chat_send_unconfirmed_tap_retry">发送未确认。点击重试</string>
 
     <!-- ChatScreen: channel-invite bubble -->
     <string name="chat_invite_label">频道邀请</string>
@@ -43,8 +43,20 @@
 
     <!-- ChatScreen: message delivery status -->
     <string name="chat_status_sending">发送中</string>
-    <string name="chat_status_sent">已发送</string>
-    <string name="chat_status_failed">发送失败</string>
+    <string name="chat_status_sent">本节点服务已接收</string>
+    <string name="chat_status_failed">发送未确认</string>
+
+    <string name="chat_status_delivered">收件人所在节点服务已接收</string>
+    <string name="chat_status_delivered_channel">频道托管节点已接收</string>
+    <string name="chat_delivery_failed">投递失败</string>
+    <string name="chat_delivery_recipient_unresolved">无法找到收件人</string>
+    <string name="chat_delivery_recipient_unknown">收件人不存在</string>
+    <string name="chat_delivery_not_federating">收件人所在服务不接收来自其他服务的消息</string>
+    <string name="chat_delivery_federation_refused">服务之间的消息投递被拒绝</string>
+    <string name="chat_delivery_peer_unresolved">无法找到收件人所在服务</string>
+    <string name="chat_delivery_peer_unverified">无法验证收件人所在服务</string>
+    <string name="chat_delivery_expired">未确认送达</string>
+    <string name="chat_delivery_internal_error">服务错误导致投递停止</string>
 
     <!-- ChatScreen: voice / file attachment bubbles -->
     <string name="chat_a11y_voice_playing">语音消息,%1$s,正在播放,点击暂停</string>
