@@ -38,6 +38,8 @@ import io.bosonnetwork.photon.feature.chat.data.ChatRepository
 import io.bosonnetwork.photon.feature.chat.data.ForwardPayload
 import io.bosonnetwork.photon.feature.chat.data.ForwardPayloadStore
 import io.bosonnetwork.photon.feature.chat.data.MediaSaver
+import io.bosonnetwork.photon.feature.chat.data.MessageTimeline
+import io.bosonnetwork.photon.feature.chat.data.MessageUpdate
 import io.bosonnetwork.photon.feature.chat.data.VoicePlayer
 import io.bosonnetwork.photon.feature.chat.data.VoiceRecorder
 import io.bosonnetwork.photon.feature.chat.model.AttachmentKind
@@ -57,6 +59,7 @@ import java.io.InputStream
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -67,8 +70,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -158,8 +164,19 @@ class ChatViewModel @Inject constructor(
             initialValue = ChatHeader(title = shortId(conversationId)),
         )
 
-    /** Older pages loaded via pagination, merged with the live stream (M3-5). */
-    private val olderMessages = MutableStateFlow<List<UiMessage>>(emptyList())
+    /** Page results join live callbacks before any message state is mutated. */
+    private val olderUpdates = Channel<MessageUpdate.Older>(Channel.UNLIMITED)
+
+    private val storedState = flow {
+        val timeline = MessageTimeline()
+        merge(repository.messages(conversationId), olderUpdates.receiveAsFlow()).collect { update ->
+            emit(ChatUiState(loading = false, messages = timeline.apply(update)))
+        }
+    }
+        .catch { emit(ChatUiState(loading = false, error = it.message)) }
+        // Keep observing receipts for loaded pages while this ViewModel is alive, even if the
+        // screen temporarily stops collecting its UI state (e.g. an attachment viewer is open).
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ChatUiState())
     private val _loadingOlder = MutableStateFlow(false)
     val loadingOlder: StateFlow<Boolean> = _loadingOlder.asStateFlow()
 
@@ -212,18 +229,19 @@ class ChatViewModel @Inject constructor(
         recordingTicker?.cancel()
         voiceRecorder.cancel()
         voicePlayer.stop()
+        olderUpdates.close()
         super.onCleared()
     }
 
     val uiState: StateFlow<ChatUiState> =
-        combine(repository.messages(conversationId), olderMessages, pending, removedIds) { live, older, sending, removed ->
+        combine(storedState, pending, removedIds) { stored, sending, removed ->
             // De-duplicate the pagination boundary by id, then order oldest -> newest. Pending
             // bubbles carry temp ids so they never collide with confirmed messages. Locally deleted
             // ids are filtered out (a local remove fires no callback to drop them from the stream).
-            val merged = (older + live + sending).associateBy { it.id }.values
+            val merged = (stored.messages + sending).associateBy { it.id }.values
                 .filterNot { it.id in removed }
                 .sortedBy { it.createdAt }
-            ChatUiState(loading = false, messages = merged)
+            stored.copy(messages = merged)
         }
             .catch { emit(ChatUiState(loading = false, error = it.message)) }
             .stateIn(
@@ -257,7 +275,7 @@ class ChatViewModel @Inject constructor(
                     // getMessagesBefore is inclusive of the boundary, so a page that adds nothing new
                     // (only the already-known oldest) means we've reached the start.
                     if (page.size < ChatRepository.PAGE_SIZE) reachedStart = true
-                    olderMessages.update { it + page }
+                    olderUpdates.send(MessageUpdate.Older(page))
                 }
                 .onFailure { e ->
                     val reason = e.message ?: context.getString(R.string.chat_error_unknown)

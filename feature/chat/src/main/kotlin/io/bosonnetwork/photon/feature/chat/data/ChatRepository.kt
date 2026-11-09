@@ -62,13 +62,13 @@ import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.channels.Channel as EventChannel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
@@ -83,8 +83,8 @@ interface ChatRepository {
     /** Resolves the chat header (title + channel member count) for a conversation (M4-3). */
     suspend fun header(conversationId: String): Result<ChatHeader>
 
-    /** Live message stream for a conversation: an initial page plus appended live messages. */
-    fun messages(conversationId: String): Flow<List<UiMessage>>
+    /** Initial history and live message/receipt events, serialized before UI projection. */
+    fun messages(conversationId: String): Flow<MessageUpdate>
 
     suspend fun sendText(recipientId: String, text: String): Result<Unit>
 
@@ -292,31 +292,42 @@ class ChatRepositoryImpl @Inject constructor(
             if (client == null) flowOf(emptyList()) else conversationsOf(client)
         }
 
-    private fun conversationsOf(client: MessagingClient): Flow<List<UiConversation>> = callbackFlow {
-        suspend fun refresh() {
-            // Avatar (and any DM name upgrade) is enriched in the ViewModel via the shared
-            // ProfileResolver; the repository emits the library-provided title only.
-            val list = client.getConversations().awaitResult()
-                .map { convo -> convo.toUi() }
-                .sortedByDescending { it.updatedAt }
-            trySend(list)
-        }
-        refresh()
-
-        val listener = object : MessageListener {
-            override fun onMessage(message: Message) {
-                launch { refresh() }
-            }
-
-            override fun onSent(message: Message) {
-                launch { refresh() }
-            }
-
-            override fun onDeliveryReceipt(receipt: MessageDeliveryReceipt) = Unit
-        }
-        client.addMessageListener(listener)
-        awaitClose { client.removeMessageListener(listener) }
+    private sealed interface MessagingEvent {
+        data class Received(val message: Message) : MessagingEvent
+        data class Receipt(val receipt: MessageDeliveryReceipt) : MessagingEvent
     }
+
+    private fun messageListener(events: EventChannel<MessagingEvent>) = object : MessageListener {
+        override fun onMessage(message: Message) { events.trySend(MessagingEvent.Received(message)) }
+        override fun onSent(message: Message) { events.trySend(MessagingEvent.Received(message)) }
+        override fun onDeliveryReceipt(receipt: MessageDeliveryReceipt) {
+            events.trySend(MessagingEvent.Receipt(receipt))
+        }
+    }
+
+    private fun conversationsOf(client: MessagingClient): Flow<List<UiConversation>> = flow {
+        val events = EventChannel<MessagingEvent>(EventChannel.UNLIMITED)
+        val listener = messageListener(events)
+        client.addMessageListener(listener)
+        try {
+            val timeline = ConversationTimeline()
+            suspend fun refresh(): List<UiConversation> = timeline.refresh(
+                client.getConversations().awaitResult()
+                    .map { it.toUi(client.userId) }
+                    .sortedByDescending { it.updatedAt },
+            )
+            emit(refresh())
+            for (event in events) {
+                emit(when (event) {
+                    is MessagingEvent.Received -> refresh()
+                    is MessagingEvent.Receipt -> timeline.apply(event.receipt)
+                })
+            }
+        } finally {
+            client.removeMessageListener(listener)
+            events.close()
+        }
+    }.distinctUntilChanged()
 
     override suspend fun header(conversationId: String): Result<ChatHeader> = runCatching {
         val client = client()
@@ -344,42 +355,38 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    override fun messages(conversationId: String): Flow<List<UiMessage>> =
+    override fun messages(conversationId: String): Flow<MessageUpdate> =
         session.client.flatMapLatest { client ->
-            if (client == null) flowOf(emptyList()) else messagesOf(client, conversationId)
+            if (client == null) flowOf(MessageUpdate.Initial(emptyList())) else messagesOf(client, conversationId)
         }
 
-    private fun messagesOf(client: MessagingClient, conversationId: String): Flow<List<UiMessage>> = callbackFlow {
+    private fun messagesOf(client: MessagingClient, conversationId: String): Flow<MessageUpdate> = flow {
         val convo = parseId(conversationId)
-        val me = myId()
-
-        // Sender attribution for channel bubbles (M4): resolve member ids to display names once
-        // per stream; unknown senders fall back to a short id.
-        val resolveSender = channelSenderResolver(client, convo)
-
-        // ordered oldest -> newest, de-duplicated by message id
-        val byId = LinkedHashMap<String, UiMessage>()
-
-        fun emit() = trySend(byId.values.sortedBy { it.createdAt })
-
-        client.getMessagesBefore(convo, Long.MAX_VALUE, ChatRepository.PAGE_SIZE, 0).awaitResult()
-            .forEach { val ui = it.toUi(me, resolveSender); byId[ui.id] = ui }
-        emit()
-
-        val listener = object : MessageListener {
-            private fun accept(message: Message) {
-                if (message.conversationId.orElse(null) != convo) return
-                val ui = message.toUi(me, resolveSender)
-                byId[ui.id] = ui
-                emit()
-            }
-
-            override fun onMessage(message: Message) = accept(message)
-            override fun onSent(message: Message) = accept(message)
-            override fun onDeliveryReceipt(receipt: MessageDeliveryReceipt) = Unit
-        }
+        val events = EventChannel<MessagingEvent>(EventChannel.UNLIMITED)
+        val listener = messageListener(events)
+        // Register before either asynchronous read. Callbacks only enqueue; this coroutine projects
+        // the initial snapshot first, then replays every event that arrived while it was loading.
         client.addMessageListener(listener)
-        awaitClose { client.removeMessageListener(listener) }
+        try {
+            val me = client.userId
+            val resolveSender = channelSenderResolver(client, convo)
+            val initial = client.getMessagesBefore(convo, Long.MAX_VALUE, ChatRepository.PAGE_SIZE, 0).awaitResult()
+            emit(MessageUpdate.Initial(initial.map { it.toUi(me, resolveSender) }))
+            for (event in events) {
+                when (event) {
+                    is MessagingEvent.Received -> {
+                        val message = event.message
+                        if (message.conversationId.orElse(null) == convo) {
+                            emit(MessageUpdate.Received(message.toUi(me, resolveSender)))
+                        }
+                    }
+                    is MessagingEvent.Receipt -> emit(MessageUpdate.Receipt(event.receipt))
+                }
+            }
+        } finally {
+            client.removeMessageListener(listener)
+            events.close()
+        }
     }
 
     override suspend fun sendText(recipientId: String, text: String): Result<Unit> = runCatching {
@@ -680,7 +687,7 @@ class ChatRepositoryImpl @Inject constructor(
 
         // Existing conversations first (most-recent first); the library-provided title is enriched in
         // the ViewModel just like the chat list.
-        val recent = conversations.map { it.toUi() }.map { c ->
+        val recent = conversations.map { it.toUi(client.userId) }.map { c ->
             UiForwardTarget(
                 id = c.id,
                 title = c.title,

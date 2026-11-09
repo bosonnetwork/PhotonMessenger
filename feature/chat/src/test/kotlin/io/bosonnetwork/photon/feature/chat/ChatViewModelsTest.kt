@@ -32,6 +32,7 @@ import io.bosonnetwork.photon.core.model.InviteAction
 import io.bosonnetwork.photon.core.model.ProfileResolver
 import io.bosonnetwork.photon.core.model.ResolvedProfile
 import io.bosonnetwork.photon.feature.chat.data.ChatRepository
+import io.bosonnetwork.photon.feature.chat.data.MessageUpdate
 import io.bosonnetwork.photon.feature.chat.data.ForwardPayload
 import io.bosonnetwork.photon.feature.chat.data.ForwardPayloadStore
 import io.bosonnetwork.photon.feature.chat.data.MediaSaver
@@ -47,6 +48,10 @@ import io.bosonnetwork.photon.feature.chat.model.MessageStatus
 import io.bosonnetwork.photon.feature.chat.model.UiAttachment
 import io.bosonnetwork.photon.feature.chat.model.UiConversation
 import io.bosonnetwork.photon.feature.chat.model.UiMessage
+import io.bosonnetwork.photon.feature.chat.model.UiDeliveryReceipt
+import io.bosonnetwork.Id
+import io.bosonnetwork.photonmessaging.DeliveryStatus
+import io.bosonnetwork.photonmessaging.MessageDeliveryReceipt
 import io.bosonnetwork.photon.feature.chat.model.VOICE_MIME
 import io.bosonnetwork.photon.feature.chat.model.chooseCarrier
 import io.bosonnetwork.photon.feature.chat.model.remoteAttachmentFromMap
@@ -55,14 +60,21 @@ import io.bosonnetwork.photonmessaging.exceptions.NotConnectedException
 import io.bosonnetwork.photonmessaging.exceptions.rpc.ChannelMemberLimitExceededException
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -73,6 +85,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModelsTest {
 
     private val convosFlow = MutableStateFlow<List<UiConversation>>(emptyList())
@@ -94,9 +107,13 @@ class ChatViewModelsTest {
 
         override fun conversations() = convos
         override suspend fun header(conversationId: String) = headerResult
-        override fun messages(conversationId: String) = msgs
+        var updates: Flow<MessageUpdate> = msgs.map { MessageUpdate.Initial(it) }
+        var sendGate: CompletableDeferred<Unit>? = null
+        var olderGate: CompletableDeferred<Unit>? = null
+        override fun messages(conversationId: String) = updates
         override suspend fun sendText(recipientId: String, text: String): Result<Unit> {
             sentTexts += recipientId to text
+            sendGate?.await()
             return sendResult
         }
         /** Records every invite ticket (CBOR bytes) a Join tried to consume. */
@@ -133,7 +150,10 @@ class ChatViewModelsTest {
             Result.failure<java.io.File>(UnsupportedOperationException("not used"))
         override suspend fun localFile(attachment: UiAttachment) =
             Result.failure<java.io.File>(UnsupportedOperationException("not used"))
-        override suspend fun loadOlder(conversationId: String, before: Long, limit: Int) = olderResult
+        override suspend fun loadOlder(conversationId: String, before: Long, limit: Int): Result<List<UiMessage>> {
+            olderGate?.await()
+            return olderResult
+        }
         override suspend fun removeConversation(conversationId: String) = Result.success(Unit)
         override suspend fun removeMessage(rid: Long) = Result.success(Unit)
         override suspend fun forwardAttachment(recipientId: String, attachment: UiAttachment): Result<Unit> {
@@ -280,6 +300,26 @@ class ChatViewModelsTest {
             assertEquals(listOf("Alice"), state.conversations.map { it.title })
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `conversation receipts remain observed while another screen is open`() = runTest {
+        val original = UiConversation("peer", "Alice", "hello", false, 10L,
+            lastMessageId = "message", lastMessageFromMe = true)
+        val changes = MutableSharedFlow<List<UiConversation>>(extraBufferCapacity = 1)
+        val repo = FakeChatRepo(changes.onStart { emit(listOf(original)) }, msgsFlow)
+        val vm = conversationsVm(repo)
+        vm.uiState.test {
+            var state = awaitItem()
+            while (state.loading) state = awaitItem()
+            assertNull(state.conversations.single().deliveryReceipt)
+            cancelAndIgnoreRemainingEvents()
+        }
+        advanceTimeBy(5_001L)
+        val failed = original.copy(deliveryReceipt = UiDeliveryReceipt(DeliveryStatus.EXPIRED, null, 123L))
+        changes.emit(listOf(failed))
+        runCurrent()
+        assertEquals(failed, vm.uiState.value.conversations.single())
     }
 
     @Test
@@ -486,6 +526,70 @@ class ChatViewModelsTest {
             vm.loadOlder()
             val paged = awaitItem()
             assertEquals(listOf("m0", "m1"), paged.messages.map { it.id })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `older page and later echo preserve a receipt received while the page was loading`() = runTest {
+        val id = Id.random()
+        val old = UiMessage(id.toString(), "earlier", fromMe = true, createdAt = 1L)
+        val events = MutableSharedFlow<MessageUpdate>(extraBufferCapacity = 8)
+        val gate = CompletableDeferred<Unit>()
+        val repo = FakeChatRepo(convosFlow, msgsFlow,
+            olderResult = Result.success(listOf(old))).apply {
+            updates = events.onStart { emit(MessageUpdate.Initial(listOf(UiMessage("new", "hi", false, 5L)))) }
+            olderGate = gate
+        }
+        val vm = chatVm(repo, "abc")
+        vm.uiState.test {
+            var state = awaitItem()
+            while (state.loading) state = awaitItem()
+            vm.loadOlder()
+            val receipt = MessageDeliveryReceipt(id, DeliveryStatus.EXPIRED, "expired", 123L)
+            events.emit(MessageUpdate.Receipt(receipt))
+            runCurrent()
+            expectNoEvents()
+            gate.complete(Unit)
+            val paged = awaitItem()
+            val delivered = paged.messages.first()
+            assertEquals(UiDeliveryReceipt(DeliveryStatus.EXPIRED, "expired", 123L), delivered.deliveryReceipt)
+            assertEquals(MessageStatus.SENT, delivered.status)
+            events.emit(MessageUpdate.Received(old))
+            events.emit(MessageUpdate.Receipt(receipt))
+            runCurrent()
+            expectNoEvents()
+            assertTrue(repo.sentTexts.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `receipt before publish completion survives the send result without another send`() = runTest {
+        val id = Id.random()
+        val gate = CompletableDeferred<Unit>()
+        val events = MutableSharedFlow<MessageUpdate>(extraBufferCapacity = 8)
+        val repo = FakeChatRepo(convosFlow, msgsFlow).apply {
+            updates = events.onStart { emit(MessageUpdate.Initial(emptyList())) }
+            sendGate = gate
+        }
+        val vm = chatVm(repo, "abc")
+        vm.uiState.test {
+            var state = awaitItem()
+            while (state.loading) state = awaitItem()
+            vm.send("hello")
+            assertEquals(MessageStatus.SENDING, awaitItem().messages.single().status)
+            events.emit(MessageUpdate.Receipt(MessageDeliveryReceipt(id, DeliveryStatus.RECIPIENT_UNKNOWN, null, 123L)))
+            events.emit(MessageUpdate.Received(UiMessage(id.toString(), "hello", true, 1L)))
+            val echoed = awaitItem()
+            assertEquals(DeliveryStatus.RECIPIENT_UNKNOWN,
+                echoed.messages.first { it.id == id.toString() }.deliveryReceipt?.status)
+            gate.complete(Unit)
+            val completed = awaitItem().messages.single()
+            assertEquals(id.toString(), completed.id)
+            assertEquals(DeliveryStatus.RECIPIENT_UNKNOWN, completed.deliveryReceipt?.status)
+            assertEquals(MessageStatus.SENT, completed.status)
+            assertEquals(listOf("abc" to "hello"), repo.sentTexts)
             cancelAndIgnoreRemainingEvents()
         }
     }

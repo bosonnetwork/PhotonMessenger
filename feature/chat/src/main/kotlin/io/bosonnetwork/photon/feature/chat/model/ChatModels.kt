@@ -29,6 +29,7 @@ import io.bosonnetwork.Id
 import io.bosonnetwork.photonmessaging.ContentDisposition
 import io.bosonnetwork.photonmessaging.ContentType
 import io.bosonnetwork.photonmessaging.Conversation
+import io.bosonnetwork.photonmessaging.DeliveryStatus
 import io.bosonnetwork.photonmessaging.Message
 
 /** UI projection of a conversation row. */
@@ -38,6 +39,10 @@ data class UiConversation(
     val preview: String,
     val isChannel: Boolean,
     val updatedAt: Long,
+    /** Receipt correlation is limited to this latest message, never an older outgoing message. */
+    val lastMessageId: String? = null,
+    val lastMessageFromMe: Boolean = false,
+    val deliveryReceipt: UiDeliveryReceipt? = null,
     /** Fetchable avatar URL for the peer (DMs), null for channels or when unresolvable. */
     val avatarUrl: String? = null,
     /** DM peer's library profile name (null for channels / when unknown); lets the ViewModel decide
@@ -79,8 +84,15 @@ data class ChatHeader(
     val avatarUrl: String? = null,
 )
 
-/** Delivery state of an outgoing bubble. Incoming and confirmed messages are always [SENT]. */
+/** Local submission state. SENT means acceptance by the home service, independently of a receipt. */
 enum class MessageStatus { SENDING, SENT, FAILED }
+
+/** Service routing outcome; a null receipt on a message means no outcome has been recorded. */
+data class UiDeliveryReceipt(
+    val status: DeliveryStatus,
+    val reason: String?,
+    val timestamp: Long,
+)
 
 /** UI projection of a single message bubble. */
 data class UiMessage(
@@ -92,6 +104,7 @@ data class UiMessage(
     /** Present when this message is a channel invitation, rendered as an actionable invite card. */
     val invite: ChannelInvite? = null,
     val status: MessageStatus = MessageStatus.SENT,
+    val deliveryReceipt: UiDeliveryReceipt? = null,
     /** Sender's user id (base58), when known. */
     val senderId: String? = null,
     /** Sender display name; shown above incoming bubbles in channels (M4). */
@@ -103,7 +116,7 @@ data class UiMessage(
     val rid: Long? = null,
 )
 
-fun Conversation.toUi(avatarUrl: String? = null): UiConversation {
+fun Conversation.toUi(myUserId: Id?, avatarUrl: String? = null): UiConversation {
     val channel = isChannel()
     val contact = getContact()
     // The library no longer derives a display title/name (that policy moved to the app). Build the
@@ -111,12 +124,17 @@ fun Conversation.toUi(avatarUrl: String? = null): UiConversation {
     // name - falling back to a short id. DMs are then upgraded to a resolved name in the ViewModel.
     val remark = contact.getRemark().orElse(null)?.takeIf { it.isNotBlank() }
     val name = contact.getName().orElse(null)?.takeIf { it.isNotBlank() }
+    val lastMessage = getLastMessage().orElse(null)
+    val fromMe = myUserId != null && lastMessage?.getFrom()?.orElse(null) == myUserId
     return UiConversation(
         id = getId().toString(),
         title = remark ?: name ?: shortId(getId().toString()),
         preview = getPreview().orElse(""),
         isChannel = channel,
         updatedAt = getUpdatedAt(),
+        lastMessageId = lastMessage?.getId()?.toString(),
+        lastMessageFromMe = fromMe,
+        deliveryReceipt = if (fromMe) lastMessage?.toUiDeliveryReceipt() else null,
         avatarUrl = avatarUrl,
         peerName = if (channel) null else name,
         remark = if (channel) null else remark,
@@ -139,12 +157,17 @@ fun Message.toUi(myUserId: Id?, resolveSender: ((Id) -> DisplayProfile?)? = null
         createdAt = getCreatedAt(),
         attachment = attachment,
         invite = invite,
+        deliveryReceipt = if (fromMe) toUiDeliveryReceipt() else null,
         senderId = from?.toString(),
         senderName = display?.displayName,
         senderAvatarUrl = display?.avatarUrl,
         rid = getRid().takeIf { it > 0 },
     )
 }
+
+private fun Message.toUiDeliveryReceipt(): UiDeliveryReceipt? =
+    if (getDeliveryAt() == 0L) null
+    else UiDeliveryReceipt(getDeliveryStatus(), getDeliveryReason(), getDeliveryAt())
 
 /**
  * Reads a channel-invite payload out of a message, discriminating on its dedicated content type (see

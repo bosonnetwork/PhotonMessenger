@@ -128,7 +128,9 @@ class ConversationsViewModel @Inject constructor(
             .catch { emit(ConversationsUiState(loading = false, error = it.message)) }
             .stateIn(
                 scope = viewModelScope,
-                started = SharingStarted.WhileSubscribed(5_000),
+                // Retain observed receipt outcomes while this ViewModel is on the back stack,
+                // including callbacks whose persistence failed while another screen was open.
+                started = SharingStarted.Eagerly,
                 initialValue = ConversationsUiState(loading = true),
             )
 }
