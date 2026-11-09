@@ -28,6 +28,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.bosonnetwork.Id
 import io.bosonnetwork.photonmessaging.Channel
 import io.bosonnetwork.photonmessaging.Contact
+import io.bosonnetwork.photonmessaging.DeliveryStatus
+import io.bosonnetwork.photonmessaging.MessageDeliveryReceipt
 import io.bosonnetwork.photonmessaging.MessagingStore
 import io.bosonnetwork.photonmessaging.MessagingStore.StoredChannel
 import io.bosonnetwork.photonmessaging.MessagingStore.StoredChannelMember
@@ -70,7 +72,11 @@ class RoomMessagingStoreTest {
     @Before
     fun setUp() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-        vertx = Vertx.vertx()
+        // Room tests need no classpath file resolution; Android's default JVM tmpdir may point
+        // at the instrumentation package rather than the target application's writable cache.
+        vertx = Vertx.vertx(io.vertx.core.VertxOptions().setFileSystemOptions(
+            io.vertx.core.file.FileSystemOptions().setClassPathResolvingEnabled(false),
+        ))
         db = Room.inMemoryDatabaseBuilder(context, PhotonDatabase::class.java).build()
         store = RoomMessagingStore(vertx, db)
         store.open().await()
@@ -78,8 +84,8 @@ class RoomMessagingStoreTest {
 
     @After
     fun tearDown() {
-        db.close()
-        vertx.close()
+        if (::db.isInitialized) db.close()
+        if (::vertx.isInitialized) vertx.close().await()
     }
 
     private fun friend(id: Id, name: String, revision: Int = 1) = StoredContact(
@@ -87,9 +93,17 @@ class RoomMessagingStoreTest {
         1_000L, 2_000L, null,
     )
 
-    private fun message(conversationId: Id, createdAt: Long, text: String) = StoredMessage(
-        0, Id.random(), conversationId, 1, conversationId, 1, null, createdAt,
-        "text/plain", null, text.toByteArray(), 0, createdAt,
+    private fun message(
+        conversationId: Id,
+        createdAt: Long,
+        text: String,
+        status: DeliveryStatus = DeliveryStatus.UNDELIVERED,
+        reason: String? = null,
+        deliveryAt: Long = 0,
+        recipient: Id = conversationId,
+    ) = StoredMessage(
+        0, Id.random(), conversationId, 1, recipient, 1, null, createdAt,
+        "text/plain", null, text.toByteArray(), 0, createdAt, status, reason, deliveryAt,
     )
 
     @Test
@@ -110,6 +124,84 @@ class RoomMessagingStoreTest {
         // [begin, end) excludes 300
         assertEquals(2, range.size)
         assertEquals(rid1, range[0].rid())
+    }
+
+    @Test
+    fun deliveryOutcomesRoundTripThroughAllMessageReads() {
+        val conversation = Id.random()
+        store.putContactLocally(friend(conversation, "Bob")).await()
+        DeliveryStatus.values().forEach { status ->
+            val createdAt = 100L + status.value()
+            val reason = if (status.value() > 1) "delivery reason" else null
+            val deliveryAt = if (status == DeliveryStatus.UNDELIVERED) 0L else 456L
+            val original = message(conversation, createdAt, "hello", status, reason, deliveryAt)
+            assertFalse(store.existsMessage(original.id()).await())
+            store.putMessage(original).await()
+            assertTrue(store.existsMessage(original.id()).await())
+
+            val reads = listOf(
+                store.getMessage(original.id()).await()!!,
+                store.getMessagesBefore(conversation, Long.MAX_VALUE, 1, 0).await().single(),
+                store.getMessagesInRange(conversation, createdAt, createdAt + 1).await().single(),
+                store.getConversation(conversation).await()!!.lastMessage()!!,
+                store.getAllConversations().await().single().lastMessage()!!,
+            )
+            reads.forEach { saved ->
+                assertEquals(original.id(), saved.id())
+                assertEquals(status, saved.deliveryStatus())
+                assertEquals(reason, saved.deliveryReason())
+                assertEquals(deliveryAt, saved.deliveryAt())
+            }
+        }
+    }
+
+    @Test
+    fun deliveryUpdateReturnsConversationAndPreservesReceiptOnSentTimeUpdate() {
+        val conversation = Id.random()
+        val original = message(conversation, 123L, "hello", recipient = Id.random())
+        assertNull(store.updateMessageDeliveryStatus(original.id(), DeliveryStatus.EXPIRED, "expired", 456L).await())
+        val rid = store.putMessage(original).await()
+        repeat(2) {
+            assertEquals(conversation,
+                store.updateMessageDeliveryStatus(original.id(), DeliveryStatus.EXPIRED, "expired", 456L).await())
+        }
+        store.updateMessageSentTime(original.id(), 789L).await()
+        val saved = store.getMessage(original.id()).await()!!
+        assertEquals(789L, saved.sentAt())
+        assertEquals(DeliveryStatus.EXPIRED, saved.deliveryStatus())
+        assertEquals("expired", saved.deliveryReason())
+        assertEquals(456L, saved.deliveryAt())
+
+        assertTrue(store.removeMessage(rid).await())
+        assertFalse(store.existsMessage(original.id()).await())
+        assertNull(store.getMessage(original.id()).await())
+        assertNull(store.updateMessageDeliveryStatus(original.id(), DeliveryStatus.DELIVERED, null, 900L).await())
+    }
+
+    @Test
+    fun receiptSurvivesDatabaseReopen() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val name = "room-receipt-reopen-test.db"
+        context.deleteDatabase(name)
+        val original = message(Id.random(), 123L, "preserved")
+        val first = PhotonDatabase.create(context, name)
+        try {
+            val firstStore = RoomMessagingStore(vertx, first)
+            firstStore.putMessage(original).await()
+            firstStore.updateMessageDeliveryStatus(original.id(), DeliveryStatus.DELIVERED, null, 456L).await()
+        } finally {
+            first.close()
+        }
+        val reopened = PhotonDatabase.create(context, name)
+        try {
+            val restored = RoomMessagingStore(vertx, reopened).getMessage(original.id()).await()!!
+            assertEquals(DeliveryStatus.DELIVERED, restored.deliveryStatus())
+            assertNull(restored.deliveryReason())
+            assertEquals(456L, restored.deliveryAt())
+        } finally {
+            reopened.close()
+            context.deleteDatabase(name)
+        }
     }
 
     @Test
@@ -190,10 +282,40 @@ class RoomMessagingStoreTest {
     @Test
     fun removingConversationDeletesMessages() {
         val convo = Id.random()
-        store.putMessage(message(convo, 100, "x")).await()
+        val original = message(convo, 100, "x", DeliveryStatus.RECIPIENT_UNKNOWN, "unknown", 456L)
+        store.putMessage(original).await()
         assertTrue(store.removeMessagesByConversation(convo).await())
         assertTrue(store.getMessagesBefore(convo, Long.MAX_VALUE, 10, 0).await().isEmpty())
         assertNull(store.getConversation(convo).await())
+        assertFalse(store.existsMessage(original.id()).await())
         assertFalse(store.removeMessagesByConversation(convo).await())
+    }
+
+    @Test
+    fun clearingMessagesRemovesTheirReceipts() {
+        val first = message(Id.random(), 100L, "first", DeliveryStatus.DELIVERED, null, 200L)
+        val second = message(Id.random(), 101L, "second", DeliveryStatus.EXPIRED, "expired", 300L)
+        store.putMessage(first).await()
+        store.putMessage(second).await()
+        store.clearMessages().await()
+        assertFalse(store.existsMessage(first.id()).await())
+        assertFalse(store.existsMessage(second.id()).await())
+        assertNull(store.updateMessageDeliveryStatus(first.id(), DeliveryStatus.DELIVERED, null, 400L).await())
+    }
+
+    @Test
+    fun deliveryReceiptNotificationUsesPlainAndroidWireClass() {
+        val messageId = Id.random()
+        val bytes = io.bosonnetwork.json.Json.toBytes(mapOf(
+            "id" to Id.random(), "s" to Id.random(), "t" to 123L, "e" to "dr",
+            "b" to mapOf("id" to messageId, "s" to DeliveryStatus.EXPIRED.value(), "r" to "expired", "t" to 456L),
+        ))
+        val notification = io.bosonnetwork.photonmessaging.impl.Notification.parse(bytes)
+        val body: MessageDeliveryReceipt = notification.getBody()
+        assertEquals(messageId, body.messageId)
+        assertEquals(DeliveryStatus.EXPIRED, body.status)
+        assertEquals("expired", body.reason)
+        assertEquals(456L, body.timestamp)
+        assertEquals("java.lang.Object", body.javaClass.superclass!!.name)
     }
 }

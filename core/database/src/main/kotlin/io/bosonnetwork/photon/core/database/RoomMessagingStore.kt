@@ -30,6 +30,7 @@ import io.bosonnetwork.photon.core.database.entity.MessageEntity
 import io.bosonnetwork.Id
 import io.bosonnetwork.photonmessaging.Channel
 import io.bosonnetwork.photonmessaging.Contact
+import io.bosonnetwork.photonmessaging.DeliveryStatus
 import io.bosonnetwork.photonmessaging.MessagingStore
 import io.bosonnetwork.photonmessaging.MessagingStore.StoredChannel
 import io.bosonnetwork.photonmessaging.MessagingStore.StoredChannelMember
@@ -71,6 +72,18 @@ class RoomMessagingStore(
 
     override fun updateMessageSentTime(messageId: Id, sentAt: Long): Future<Void> =
         blocking { dao.updateMessageSentTime(messageId.bytesUnsafe(), sentAt) }.mapEmpty()
+
+    override fun updateMessageDeliveryStatus(messageId: Id, status: DeliveryStatus, deliveryReason: String?, deliveryAt: Long): Future<Id?> =
+        blocking {
+            dao.updateMessageDeliveryStatus(messageId.bytesUnsafe(), status.value(), deliveryReason, deliveryAt)
+                ?.let { Id.of(it) }
+        }
+
+    override fun getMessage(messageId: Id): Future<StoredMessage?> =
+        blocking { dao.getMessage(messageId.bytesUnsafe())?.let(::toStored) }
+
+    override fun existsMessage(messageId: Id): Future<Boolean> =
+        blocking { dao.existsMessage(messageId.bytesUnsafe()) }
 
     override fun getMessagesInRange(conversationId: Id, begin: Long, end: Long): Future<List<StoredMessage>> =
         blocking { dao.getMessagesInRange(conversationId.bytesUnsafe(), begin, end).map(::toStored) }
@@ -128,7 +141,7 @@ class RoomMessagingStore(
         blocking { dao.deleteMessagesByConversation(conversationId.bytesUnsafe()) > 0 }
 
     override fun removeConversations(conversationIds: Collection<Id>): Future<Boolean> =
-        blocking { conversationIds.fold(false) { acc, id -> (dao.deleteMessagesByConversation(id.bytesUnsafe()) > 0) || acc } }
+        blocking { conversationIds.fold(false) { acc, id -> dao.deleteMessagesByConversation(id.bytesUnsafe()) > 0 || acc } }
 
     // --- Contacts ---
 
@@ -211,6 +224,9 @@ class RoomMessagingStore(
         payload = m.payload(),
         sentAt = m.sentAt(),
         receivedAt = m.receivedAt(),
+        deliveryStatus = m.deliveryStatus().value(),
+        deliveryReason = m.deliveryReason(),
+        deliveryAt = m.deliveryAt(),
     )
 
     private fun toEntity(c: StoredContact) = ContactEntity(
@@ -270,6 +286,9 @@ class RoomMessagingStore(
         e.payload,
         e.sentAt,
         e.receivedAt,
+        DeliveryStatus.valueOf(e.deliveryStatus),
+        e.deliveryReason,
+        e.deliveryAt,
     )
 
     private fun toStoredContact(e: ContactEntity): StoredContact {

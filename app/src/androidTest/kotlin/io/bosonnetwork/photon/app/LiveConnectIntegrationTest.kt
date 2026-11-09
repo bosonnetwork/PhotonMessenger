@@ -29,6 +29,7 @@ import io.bosonnetwork.photon.core.boson.BosonClientFactory
 import io.bosonnetwork.Id
 import io.bosonnetwork.photonmessaging.FriendRequestListener
 import io.bosonnetwork.photonmessaging.Message
+import io.bosonnetwork.photonmessaging.MessageDeliveryReceipt
 import io.bosonnetwork.photonmessaging.MessageListener
 import io.bosonnetwork.photonmessaging.MessagingClient
 import java.util.concurrent.CountDownLatch
@@ -126,6 +127,7 @@ class LiveConnectIntegrationTest {
                     }
                 }
                 override fun onSent(message: Message) {}
+                override fun onDeliveryReceipt(receipt: MessageDeliveryReceipt) = Unit
             })
 
             alice.client.message(bob.userId).contentText("hello bob").send().get(timeout, TimeUnit.SECONDS)

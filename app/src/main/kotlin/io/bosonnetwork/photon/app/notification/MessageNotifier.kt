@@ -31,6 +31,7 @@ import io.bosonnetwork.photon.core.model.cachedDisplay
 import io.bosonnetwork.photon.core.model.displayProfile
 import io.bosonnetwork.Id
 import io.bosonnetwork.photonmessaging.Message
+import io.bosonnetwork.photonmessaging.MessageDeliveryReceipt
 import io.bosonnetwork.photonmessaging.MessageListener
 import io.bosonnetwork.photonmessaging.MessagingClient
 import android.content.Context
@@ -66,6 +67,7 @@ class MessageNotifier @Inject constructor(
     private val listener = object : MessageListener {
         override fun onMessage(message: Message) = notify(message)
         override fun onSent(message: Message) = Unit
+        override fun onDeliveryReceipt(receipt: MessageDeliveryReceipt) = Unit
     }
 
     /** Starts notifying for [client]'s inbound messages. Replaces any previous attachment. */

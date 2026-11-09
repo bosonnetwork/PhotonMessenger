@@ -47,6 +47,24 @@ interface MessagingDao {
     @Query("UPDATE messages SET sentAt = :sentAt WHERE id = :messageId")
     fun updateMessageSentTime(messageId: ByteArray, sentAt: Long): Int
 
+    @Query("UPDATE messages SET deliveryStatus = :status, deliveryReason = :reason, deliveryAt = :deliveryAt WHERE id = :messageId")
+    fun updateMessageDeliveryFields(messageId: ByteArray, status: Int, reason: String?, deliveryAt: Long): Int
+
+    @Query("SELECT conversationId FROM messages WHERE id = :messageId")
+    fun getMessageConversationId(messageId: ByteArray): ByteArray?
+
+    @Transaction
+    fun updateMessageDeliveryStatus(messageId: ByteArray, status: Int, reason: String?, deliveryAt: Long): ByteArray? {
+        if (updateMessageDeliveryFields(messageId, status, reason, deliveryAt) == 0) return null
+        return getMessageConversationId(messageId)
+    }
+
+    @Query("SELECT * FROM messages WHERE id = :messageId")
+    fun getMessage(messageId: ByteArray): MessageEntity?
+
+    @Query("SELECT EXISTS(SELECT 1 FROM messages WHERE id = :messageId)")
+    fun existsMessage(messageId: ByteArray): Boolean
+
     @Query("SELECT * FROM messages WHERE conversationId = :cid AND createdAt >= :begin AND createdAt < :end ORDER BY rid ASC")
     fun getMessagesInRange(cid: ByteArray, begin: Long, end: Long): List<MessageEntity>
 

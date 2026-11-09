@@ -53,6 +53,7 @@ import io.bosonnetwork.photonmessaging.Channel
 import io.bosonnetwork.photonmessaging.ContentDisposition
 import io.bosonnetwork.photonmessaging.InviteTicket
 import io.bosonnetwork.photonmessaging.Message
+import io.bosonnetwork.photonmessaging.MessageDeliveryReceipt
 import io.bosonnetwork.photonmessaging.MessageListener
 import io.bosonnetwork.photonmessaging.MessagingClient
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -310,6 +311,8 @@ class ChatRepositoryImpl @Inject constructor(
             override fun onSent(message: Message) {
                 launch { refresh() }
             }
+
+            override fun onDeliveryReceipt(receipt: MessageDeliveryReceipt) = Unit
         }
         client.addMessageListener(listener)
         awaitClose { client.removeMessageListener(listener) }
@@ -373,6 +376,7 @@ class ChatRepositoryImpl @Inject constructor(
 
             override fun onMessage(message: Message) = accept(message)
             override fun onSent(message: Message) = accept(message)
+            override fun onDeliveryReceipt(receipt: MessageDeliveryReceipt) = Unit
         }
         client.addMessageListener(listener)
         awaitClose { client.removeMessageListener(listener) }

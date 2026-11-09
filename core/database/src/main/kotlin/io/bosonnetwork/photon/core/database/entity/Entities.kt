@@ -22,6 +22,7 @@
 
 package io.bosonnetwork.photon.core.database.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -142,6 +143,9 @@ data class MessageEntity(
     val payload: ByteArray?,
     val sentAt: Long,
     val receivedAt: Long,
+    @ColumnInfo(defaultValue = "0") val deliveryStatus: Int = 0,
+    val deliveryReason: String? = null,
+    @ColumnInfo(defaultValue = "0") val deliveryAt: Long = 0,
 ) {
     override fun equals(other: Any?) = this === other || (other is MessageEntity && rid == other.rid)
     override fun hashCode() = rid.hashCode()

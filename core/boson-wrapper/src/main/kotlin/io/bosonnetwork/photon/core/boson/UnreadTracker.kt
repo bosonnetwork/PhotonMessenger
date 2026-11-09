@@ -23,6 +23,7 @@
 package io.bosonnetwork.photon.core.boson
 
 import io.bosonnetwork.photonmessaging.Message
+import io.bosonnetwork.photonmessaging.MessageDeliveryReceipt
 import io.bosonnetwork.photonmessaging.MessageListener
 import io.bosonnetwork.photonmessaging.MessagingClient
 import kotlinx.coroutines.CoroutineScope
@@ -98,6 +99,7 @@ class DefaultUnreadTracker(
 
         // Outgoing messages are never unread.
         override fun onSent(message: Message) = Unit
+        override fun onDeliveryReceipt(receipt: MessageDeliveryReceipt) = Unit
     }
 
     init {

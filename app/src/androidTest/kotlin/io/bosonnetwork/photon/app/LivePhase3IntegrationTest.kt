@@ -43,6 +43,7 @@ import io.bosonnetwork.photonmessaging.ChannelListener
 import io.bosonnetwork.photonmessaging.FriendRequestListener
 import io.bosonnetwork.photonmessaging.InviteTicket
 import io.bosonnetwork.photonmessaging.Message
+import io.bosonnetwork.photonmessaging.MessageDeliveryReceipt
 import io.bosonnetwork.photonmessaging.MessageListener
 import io.bosonnetwork.photonmessaging.MessagingClient
 import io.vertx.core.Vertx
@@ -263,6 +264,7 @@ class LivePhase3IntegrationTest {
                 }
 
                 override fun onSent(message: Message) {}
+                override fun onDeliveryReceipt(receipt: MessageDeliveryReceipt) = Unit
             })
             runBlocking {
                 aClient.message(bob.userId)
@@ -389,6 +391,7 @@ class LivePhase3IntegrationTest {
                     if (message.from.orElse(null) == alice.userId) bobGotMessage.countDown()
                 }
                 override fun onSent(message: Message) {}
+                override fun onDeliveryReceipt(receipt: MessageDeliveryReceipt) = Unit
             })
             aliceClient.message(bob.userId).contentText("persist me").send().get(TIMEOUT, TimeUnit.SECONDS)
             assertTrue("bob must receive the message", bobGotMessage.await(TIMEOUT, TimeUnit.SECONDS))
