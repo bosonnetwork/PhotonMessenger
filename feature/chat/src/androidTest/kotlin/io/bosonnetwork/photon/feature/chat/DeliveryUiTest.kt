@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
@@ -48,6 +49,7 @@ import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
@@ -119,6 +121,7 @@ class DeliveryUiTest {
             download = null, playback = VoicePlayer.Playback(), inviteAction = null,
             onDownload = {}, onJoinInvite = {}, onIgnoreInvite = {}, onRetry = onRetry,
             onForward = {}, onDelete = {}, onSaveAs = {}, onOpen = {}, onImageClick = {}, onToggleVoice = {},
+            modifier = Modifier.testTag("message-bubble"),
         )
     }
 
@@ -135,6 +138,22 @@ class DeliveryUiTest {
         compose.runOnIdle { value = message.copy(deliveryReceipt = receipt(DeliveryStatus.DELIVERED)) }
         compose.onNodeWithContentDescription(english(R.string.chat_status_delivered), useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText(english(R.string.chat_send_unconfirmed_tap_retry)).assertDoesNotExist()
+    }
+
+    @Test
+    fun receiptOnlyUpdatesKeepTheTextBubbleSizeStable() {
+        var value by mutableStateOf(message)
+        content { Column { Bubble(value) } }
+        val before = compose.onNodeWithTag("message-bubble").fetchSemanticsNode().boundsInRoot
+        repeat(3) { index ->
+            compose.runOnIdle {
+                value = message.copy(deliveryReceipt = receipt(DeliveryStatus.DELIVERED).copy(timestamp = index + 1L))
+            }
+            compose.onNodeWithContentDescription(english(R.string.chat_status_delivered), useUnmergedTree = true).assertIsDisplayed()
+            val after = compose.onNodeWithTag("message-bubble").fetchSemanticsNode().boundsInRoot
+            assertEquals("Receipt-only update changed bubble height", before.height, after.height, 0.5f)
+            assertEquals("Receipt-only update changed bubble width", before.width, after.width, 0.5f)
+        }
     }
 
     @Test

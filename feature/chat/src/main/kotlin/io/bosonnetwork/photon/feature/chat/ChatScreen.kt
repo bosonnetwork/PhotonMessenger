@@ -436,7 +436,8 @@ fun ChatScreen(
                         val download = msg.attachment?.let { att ->
                             (att.source as? AttachmentSource.Remote)?.let { downloads[it.contentId] }
                         }
-                        Column(modifier = Modifier.animateItem()) {
+                        // Keep message updates opaque; confirmation replaces the temporary item key.
+                        Column(modifier = Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)) {
                             if (prev == null || !sameDay(prev.createdAt, msg.createdAt)) {
                                 DayHeader(msg.createdAt)
                             }
